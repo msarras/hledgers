@@ -11,6 +11,7 @@ description = "A Rust port of the hledger plain text accounting command-line too
 publish = false
 
 [dependencies]
+dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 rayon = "1.12"
