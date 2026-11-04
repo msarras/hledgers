@@ -12,10 +12,13 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 0 of 10: the workspace, the test harness and the benchmark are in
-place. `hledgers --version` prints `hledger 1.99.6 (hledgers 0.1.0)` and
-`hledgers` with no command prints the quick reference card; every command
-still exits with a "not implemented yet" error.
+Milestone 1 of 10: the workspace, the test harness and the benchmark are in
+place, and so is the library's numeric core: decimal numbers, dates,
+amounts and their rendering, text widths and regular expressions, with
+hledger's unit tests for them ported. `hledgers --version` prints
+`hledger 1.99.6 (hledgers 0.1.0)` and `hledgers` with no command prints the
+quick reference card; every command still exits with a "not implemented
+yet" error.
 
 ## Build
 
