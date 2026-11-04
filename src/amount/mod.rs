@@ -4,6 +4,7 @@
 //! [`MixedAmount`] is a sum of amounts in several commodities.
 
 pub mod currency;
+pub mod render;
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
