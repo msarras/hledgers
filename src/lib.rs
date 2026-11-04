@@ -4,5 +4,6 @@ pub mod amount;
 pub mod cli;
 pub mod dates;
 pub mod decimal;
+pub mod parse;
 pub mod regex;
 pub mod text;
