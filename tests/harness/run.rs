@@ -109,7 +109,13 @@ pub fn main() -> ExitCode {
         .expect("symlink to the binary under test");
     let base_env = base_env(bin.path());
 
-    let results: Vec<Vec<Outcome>> = files.par_iter().map(|f| run_file(f, &base_env)).collect();
+    // At most 8 files at once: each case is a process, and memory is finite.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .expect("thread pool");
+    let results: Vec<Vec<Outcome>> =
+        pool.install(|| files.par_iter().map(|f| run_file(f, &base_env)).collect());
 
     // Report.
     let mut out = String::new();

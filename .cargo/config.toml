@@ -1,0 +1,8 @@
+# Memory guards: this machine has 16 GB and no swap, and a 16-way build plus the
+# test harness once took the whole session down. Six parallel rustc jobs and
+# line-table-only debug info keep builds well under that.
+[build]
+jobs = 6
+
+[profile.dev]
+debug = "line-tables-only"
