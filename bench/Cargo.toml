@@ -1,0 +1,13 @@
+[package]
+name = "hledgers-bench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "GPL-3.0-or-later"
+description = "Benchmarks hledgers against the hledger 1.52.4 release binary"
+publish = false
+
+[dependencies]
+flate2 = "1.1"
+tar = "0.4"
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }

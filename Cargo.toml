@@ -1,3 +1,6 @@
+[workspace]
+members = ["bench"]
+
 [package]
 name = "hledgers"
 version = "0.1.0"
