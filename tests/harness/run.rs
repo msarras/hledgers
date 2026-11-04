@@ -3,7 +3,8 @@
 //! Every `.test` file under hledger/hledger/test (except `_*` files and the
 //! ledger-compat reference suites, which upstream also skips) and tests/rules is
 //! parsed, and each case classified by the shape of its command line. Supported
-//! cases run against the hledgers binary, reached as `hledger` through PATH, in the
+//! cases run against the hledgers binary (or HLEDGERS_TEST_BIN), reached as `hledger`
+//! through PATH, in the
 //! test file's directory, with HOME a fresh directory per file and XDG_* unset.
 //! Files run in parallel; cases within a file in order.
 //!
@@ -11,7 +12,7 @@
 //! fails, an unsupported case is missing from tests/shelltest-unsupported.txt, or
 //! that list or the gate list has an entry that matches nothing.
 //! HLEDGERS_TEST_FILTER=GLOB selects files; HLEDGERS_TEST_VERBOSE=1 shows every
-//! failure's details, not just gated ones.
+//! failure's details, not just gated ones; HLEDGERS_TEST_BIN=PATH runs another binary.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -99,8 +100,13 @@ pub fn main() -> ExitCode {
         .collect();
 
     let bin = tempfile::tempdir().expect("temporary directory");
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_hledgers"), bin.path().join("hledger"))
-        .expect("symlink to hledgers");
+    // HLEDGERS_TEST_BIN points the corpus at another binary, such as a Haskell
+    // hledger built from the submodule's commit, to check the harness itself.
+    let target = std::env::var_os("HLEDGERS_TEST_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_hledgers")));
+    std::os::unix::fs::symlink(&target, bin.path().join("hledger"))
+        .expect("symlink to the binary under test");
     let base_env = base_env(bin.path());
 
     let results: Vec<Vec<Outcome>> = files.par_iter().map(|f| run_file(f, &base_env)).collect();
