@@ -4,3 +4,4 @@ pub mod cli;
 pub mod dates;
 pub mod decimal;
 pub mod regex;
+pub mod text;
