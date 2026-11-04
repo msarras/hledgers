@@ -16,6 +16,7 @@ regex = "1.13"
 unicode-width = { version = "0.2.3", default-features = false }
 
 [dev-dependencies]
+num-bigint = "0.5.1"
 rayon = "1.12"
 similar = "2.7"
 tempfile = "3.27"
