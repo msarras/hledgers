@@ -1,0 +1,3 @@
+# Test files whose cases must all pass. Globs are relative to hledger/hledger/test/
+# (or rules/*.test for this repo's tests/rules/); FILE:N-M,K selects case numbers.
+cli/cli.test:1-5

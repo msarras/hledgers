@@ -8,3 +8,13 @@ description = "A Rust port of the hledger plain text accounting command-line too
 publish = false
 
 [dependencies]
+
+[dev-dependencies]
+rayon = "1.12"
+regex = "1.13"
+similar = "2.7"
+tempfile = "3.27"
+
+[[test]]
+name = "shelltest"
+harness = false

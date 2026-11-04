@@ -1,0 +1,8 @@
+# Corpus cases the harness does not run, as FILE:CASE followed by the reason
+# (and, once there is one, the hand-ported test in tests/ported/ that covers it).
+cli/cli.test:48  milestone 0: shape not yet supported: `for`
+cli/cli.test:54  milestone 0: shape not yet supported: command `ls`
+import/import.test:3  milestone 0: shape not yet supported: command `ls`
+import/import.test:4  milestone 0: shape not yet supported: command `ls`
+import/import.test:5  milestone 0: shape not yet supported: command `ls`
+import/import.test:6  milestone 0: shape not yet supported: command `ls`
