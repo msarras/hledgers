@@ -53,14 +53,21 @@ a separate process.
     cargo build --release
     cargo run --release -p hledgers-bench -- --run [--runs N]
 
-`--setup` downloads the hledger 1.52.4 release binary for x86_64 Linux and
-generates 10k- and 100k-transaction journals (a port of hledger's
-`tools/generatejournal.hs`, also available as `--generate`) into
-`target/bench-cache/`. `--run` times both programs on those journals and on
+`--setup` finds the Haskell hledger to compare against (`HLEDGERS_BENCH_BASELINE`,
+else `target/bench-cache/hledger`, else `hledger` on `PATH`) and generates the
+10k- and 100k-transaction benchmark journals into `target/bench-cache/`.
+`--run` times both programs on those journals and on
 `hledger/hledger/bench/10000x1000x10.journal`, reporting the median wall time,
 peak memory and whether their output is identical, in `bench/results.md`.
-The download uses rustls, whose ring backend compiles some C and assembly, so
-the bench crate (not hledgers) needs a C compiler.
+
+The best baseline is hledger built from the same commit as the submodule, so
+the two programs are compared feature for feature. With GHC and cabal
+installed (for example through ghcup), from a clone of the submodule's commit
+with a `cabal.project` that lists only `hledger-lib` and `hledger`:
+
+    cabal install exe:hledger --installdir=$HOME/.local/bin --install-method=copy
+
+Linking needs `libgmp-dev`. The bench crate has no dependencies.
 
 ## `let` and `split` in CSV rules
 

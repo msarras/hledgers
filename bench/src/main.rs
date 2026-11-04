@@ -1,11 +1,13 @@
-//! A/B benchmark of hledgers against the hledger 1.52.4 release binary.
+//! A/B benchmark of hledgers against a Haskell hledger binary.
 //!
-//! cargo run -p hledgers-bench -- --setup         download the baseline, generate journals
+//! cargo run -p hledgers-bench -- --setup         find the baseline, generate journals
 //! cargo run -p hledgers-bench -- --run [--runs N]  time both binaries, write bench/results.md
 //! cargo run -p hledgers-bench -- --generate NUMTXNS NUMACCTS ACCTDEPTH [OPTIONS]
 //!                                               print a journal, as tools/generatejournal.hs does
 //!
-//! Everything lives in target/bench-cache/. `--run` times target/release/hledgers,
+//! The baseline is HLEDGERS_BENCH_BASELINE if set, else target/bench-cache/hledger,
+//! else `hledger` on PATH (the README explains building the submodule's commit).
+//! Journals live in target/bench-cache/. `--run` times target/release/hledgers,
 //! so build that first with `cargo build --release`.
 
 mod generate;
@@ -16,10 +18,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-
-const BASELINE_URL: &str =
-    "https://github.com/simonmichael/hledger/releases/download/1.52.4/hledger-linux-x64.tar.gz";
-const BASELINE_VERSION: &str = "hledger 1.52.4";
 
 /// The generated journals: file stem and generatejournal.hs arguments.
 const JOURNALS: &[(&str, &str)] = &[
@@ -77,33 +75,56 @@ fn cache() -> PathBuf {
     workspace().join("target/bench-cache")
 }
 
-fn baseline() -> PathBuf {
-    cache().join("hledger-1.52.4")
+/// The Haskell hledger to compare against: HLEDGERS_BENCH_BASELINE, else
+/// target/bench-cache/hledger, else `hledger` on PATH.
+fn baseline() -> Result<PathBuf, String> {
+    if let Some(p) = std::env::var_os("HLEDGERS_BENCH_BASELINE") {
+        let p = PathBuf::from(p);
+        return if p.is_file() {
+            Ok(p)
+        } else {
+            Err(format!(
+                "HLEDGERS_BENCH_BASELINE={}: not a file",
+                p.display()
+            ))
+        };
+    }
+    let cached = cache().join("hledger");
+    if cached.is_file() {
+        return Ok(cached);
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(found) = std::env::split_paths(&path)
+        .map(|dir| dir.join("hledger"))
+        .find(|p| p.is_file())
+    {
+        return Ok(found);
+    }
+    Err(
+        "no hledger binary found: put one on PATH (the README explains building the \
+         submodule's commit with cabal), copy it to target/bench-cache/hledger, or set \
+         HLEDGERS_BENCH_BASELINE=/path/to/hledger"
+            .into(),
+    )
+}
+
+fn baseline_version(bin: &Path) -> Result<String, String> {
+    let out = Command::new(bin)
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("{}: {e}", bin.display()))?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 fn setup() -> Result<(), String> {
-    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        return Err("the baseline binary is only published for x86_64 Linux".into());
-    }
     let cache = cache();
     fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
-    let baseline = baseline();
-    if !baseline.exists() {
-        let tarball = cache.join("hledger-linux-x64.tar.gz");
-        if !tarball.exists() {
-            download(BASELINE_URL, &tarball)?;
-        }
-        extract_hledger(&tarball, &baseline)?;
-    }
-    let version = Command::new(&baseline)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("{}: {e}", baseline.display()))?;
-    let version = String::from_utf8_lossy(&version.stdout).trim().to_string();
-    println!("baseline: {} ({version})", baseline.display());
-    if !version.starts_with(BASELINE_VERSION) {
-        return Err(format!("expected {BASELINE_VERSION}, got {version:?}"));
-    }
+    let baseline = baseline()?;
+    println!(
+        "baseline: {} ({})",
+        baseline.display(),
+        baseline_version(&baseline)?
+    );
     for (stem, args) in JOURNALS {
         let args: Vec<String> = args.split_whitespace().map(String::from).collect();
         let path = cache.join(format!("{stem}.journal"));
@@ -122,58 +143,14 @@ fn setup() -> Result<(), String> {
     Ok(())
 }
 
-/// Download to a temporary name, renamed when complete.
-fn download(url: &str, to: &Path) -> Result<(), String> {
-    println!("downloading {url}");
-    let response = ureq::get(url).call().map_err(|e| format!("{url}: {e}"))?;
-    let expected: Option<u64> = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok());
-    let partial = to.with_extension("part");
-    let mut file = File::create(&partial).map_err(|e| format!("{}: {e}", partial.display()))?;
-    let size = std::io::copy(&mut response.into_body().into_reader(), &mut file)
-        .map_err(|e| format!("{url}: {e}"))?;
-    if expected.is_some_and(|n| n != size) {
-        return Err(format!(
-            "{url}: got {size} bytes, expected {}",
-            expected.unwrap()
-        ));
-    }
-    fs::rename(&partial, to).map_err(|e| format!("{}: {e}", to.display()))?;
-    println!("downloaded {size} bytes to {}", to.display());
-    Ok(())
-}
-
-fn extract_hledger(tarball: &Path, to: &Path) -> Result<(), String> {
-    let err = |e: std::io::Error| format!("{}: {e}", tarball.display());
-    let gz = flate2::read::GzDecoder::new(File::open(tarball).map_err(err)?);
-    let mut archive = tar::Archive::new(gz);
-    for entry in archive.entries().map_err(err)? {
-        let mut entry = entry.map_err(err)?;
-        if entry.path().map_err(err)?.as_os_str() == "hledger" {
-            let partial = to.with_extension("part");
-            entry.unpack(&partial).map_err(err)?;
-            return fs::rename(&partial, to).map_err(|e| format!("{}: {e}", to.display()));
-        }
-    }
-    Err(format!(
-        "{}: no hledger executable in the archive",
-        tarball.display()
-    ))
-}
-
 struct Measurement {
     median: Duration,
     peak_kb: u64,
 }
 
 fn run(runs: usize) -> Result<(), String> {
-    let baseline = baseline();
-    if !baseline.exists() {
-        return Err("run --setup first".into());
-    }
+    let baseline = baseline()?;
+    let version = baseline_version(&baseline)?;
     let hledgers = workspace().join("target/release/hledgers");
     if !hledgers.exists() {
         println!(
@@ -194,11 +171,12 @@ fn run(runs: usize) -> Result<(), String> {
     fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
 
     let mut table = format!(
-        "# hledgers vs hledger 1.52.4\n\n\
-         Median wall time of {runs} runs, peak RSS (VmHWM, polled every 2 ms), and whether \
-         stdout is identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
-         | journal | command | 1.52.4 | hledgers | speedup | RSS 1.52.4 | RSS hledgers | same stdout |\n\
-         |---|---|---:|---:|---:|---:|---:|---|\n"
+        "# hledgers vs {version}\n\n\
+         Baseline: `{}`. Median wall time of {runs} runs, peak RSS (VmHWM, polled every \
+         2 ms), and whether stdout is identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
+         | journal | command | baseline | hledgers | speedup | RSS baseline | RSS hledgers | same stdout |\n\
+         |---|---|---:|---:|---:|---:|---:|---|\n",
+        baseline.display()
     );
     for (name, journal) in &journals {
         for &(command, compare) in COMMANDS {
