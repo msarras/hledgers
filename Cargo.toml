@@ -12,10 +12,10 @@ publish = false
 
 [dependencies]
 dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
+regex = "1.13"
 
 [dev-dependencies]
 rayon = "1.12"
-regex = "1.13"
 similar = "2.7"
 tempfile = "3.27"
 
