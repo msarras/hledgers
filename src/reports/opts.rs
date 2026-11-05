@@ -3,7 +3,7 @@
 //! query they make.
 
 use crate::account::DepthSpec;
-use crate::amount::Sym;
+use crate::amount::{MixedAmount, Sym};
 use crate::cli::args::RawOpts;
 use crate::dates::{
     DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
@@ -14,7 +14,7 @@ use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
 use crate::text::strip_quotes;
 use crate::valuation::{
     ConversionOp, PriceOracle, ValuationType, journal_to_cost, mixed_amount_apply_gain,
-    mixed_amount_apply_valuation,
+    mixed_amount_apply_valuation, mixed_amount_gain_at_date, mixed_amount_value_at_date,
 };
 
 /// What to calculate in each balance report cell (BalanceCalculation).
@@ -313,6 +313,50 @@ impl ReportOpts {
     pub fn effective_title<'a>(&'a self, default: &'a str) -> &'a str {
         self.title.as_deref().unwrap_or(default)
     }
+
+    /// Whether the report needs the postings before its start: it shows
+    /// historical balances, or calculates value changes or gains
+    /// (requiresHistorical).
+    pub fn requires_historical(&self) -> bool {
+        self.balance_accum == BalanceAccumulation::Historical
+            || matches!(
+                self.balance_calc,
+                BalanceCalculation::ValueChange | BalanceCalculation::Gain
+            )
+    }
+
+    /// For an end value report that needs the postings before its start,
+    /// the commodity to value sums in after summing, None meaning each
+    /// one's default valuation commodity; otherwise None, valuation
+    /// happening to postings before summing (valuationAfterSum).
+    pub fn valuation_after_sum(&self) -> Option<Option<&Sym>> {
+        match &self.value {
+            Some(ValuationType::AtEnd(c)) if self.requires_historical() => Some(c.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+/// How sums are valued on a date in a report that values after summing:
+/// their value, or with --gain their gain, in the commodity
+/// [`valuation_after_sum`](ReportOpts::valuation_after_sum) gives; None if
+/// the report does not value after summing
+/// (mixedAmountApplyValuationAfterSumFromOptsWith, which is then `id`).
+pub fn mixed_amount_apply_valuation_after_sum<'a>(
+    ropts: &'a ReportOpts,
+    j: &Journal,
+    oracle: &'a PriceOracle,
+) -> Option<impl Fn(Day, &MixedAmount) -> Result<MixedAmount, String> + 'a> {
+    let to = ropts.valuation_after_sum()?;
+    let styles = j.commodity_styles();
+    let gain = ropts.balance_calc == BalanceCalculation::Gain;
+    Some(move |d: Day, m: &MixedAmount| {
+        if gain {
+            mixed_amount_gain_at_date(oracle, &styles, to, d, m)
+        } else {
+            mixed_amount_value_at_date(oracle, &styles, to, d, m)
+        }
+    })
 }
 
 /// Report options with today's date, their query, and the query's options
