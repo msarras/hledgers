@@ -126,6 +126,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "rewrite" => commands::rewrite::rewrite,
         "stats" => commands::stats::stats,
         "tags" => commands::tags::tags,
+        "transactions" => commands::transactions::transactions,
         name => return Err(format!("the {name} command is not implemented yet")),
     };
     let j = with_journal(&opts)?;

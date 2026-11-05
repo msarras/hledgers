@@ -14,6 +14,7 @@ pub mod quickref;
 pub mod rewrite;
 pub mod stats;
 pub mod tags;
+pub mod transactions;
 
 use super::args::Mode;
 
@@ -55,7 +56,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("setup", &[]),
     &stats::MODE,
     &tags::MODE,
-    &command("transactions", &["tx"]),
+    &transactions::MODE,
 ];
 
 const fn command(name: &'static str, aliases: &'static [&'static str]) -> Mode {
