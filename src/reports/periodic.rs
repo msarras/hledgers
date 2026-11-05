@@ -19,7 +19,7 @@ use crate::dates::{
     DateSpan, Day, DayPartition, empty_date_span, maybe_day_partition_to_date_spans, null_date,
 };
 use crate::decimal::Decimal;
-use crate::model::{Journal, Posting, PostingRef, Transaction};
+use crate::model::{Journal, Posting, PostingRef};
 use crate::query::Query;
 use crate::reports::opts::{
     AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts,
@@ -421,7 +421,7 @@ pub fn get_postings(
     let full_query = Query::And(vec![dateless, full_span_query]);
     let after_sum = ropts.valuation_after_sum().is_some();
     let spec = ReportSpec {
-        query: full_query.clone(),
+        query: full_query,
         opts: ReportOpts {
             period: full_span.as_period(),
             value: if after_sum { None } else { ropts.value.clone() },
@@ -429,29 +429,7 @@ pub fn get_postings(
         },
         ..spec.clone()
     };
-    let mut filtered = j.clone();
-    let types = |a: &str| j.account_type(a);
-    for t in &mut filtered.txns {
-        if ropts.related {
-            filter_transaction_related_postings(&full_query, t);
-        } else {
-            let keep: Vec<bool> = (t.postings.iter())
-                .map(|p| full_query.matches_posting_extra(&types, PostingRef::new(t, p)))
-                .collect();
-            let mut keep = keep.into_iter();
-            t.postings.retain(|_| keep.next().unwrap_or(false));
-        }
-    }
-    let amtq = full_query.filter(Query::is_amt_or_cur);
-    if !amtq.is_null() {
-        for t in &mut filtered.txns {
-            t.postings.retain_mut(|p| {
-                p.amount = std::mem::take(&mut p.amount).filter(|a| amtq.matches_amount(a));
-                !p.amount.amounts_raw().is_empty()
-            });
-        }
-    }
-    let mut valued = spec.journal_apply_valuation_with(filtered, oracle)?;
+    let mut valued = spec.journal_value_and_filter_postings_with(j, oracle)?;
     let count = is_count(ropts.balance_calc);
     for t in &mut valued.txns {
         t.postings.retain(|p| p.has_amount());
@@ -462,29 +440,6 @@ pub fn get_postings(
         }
     }
     Ok(valued)
-}
-
-/// The transaction with just the postings that the query does not match,
-/// if it matches any, otherwise none (filterTransactionRelatedPostings,
-/// whose list difference removes one equal posting per match).
-fn filter_transaction_related_postings(q: &Query, t: &mut Transaction) {
-    let matched: Vec<usize> = (0..t.postings.len())
-        .filter(|&i| q.matches_posting(PostingRef::new(t, &t.postings[i])))
-        .collect();
-    if matched.is_empty() {
-        t.postings.clear();
-        return;
-    }
-    let mut removed = vec![false; t.postings.len()];
-    for m in matched {
-        if let Some(i) =
-            (0..t.postings.len()).find(|&i| !removed[i] && t.postings[i] == t.postings[m])
-        {
-            removed[i] = true;
-        }
-    }
-    let mut removed = removed.into_iter();
-    t.postings.retain(|_| !removed.next().unwrap_or(false));
 }
 
 /// The account tree of a multi-period balance report, from its postings:
