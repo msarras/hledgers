@@ -674,21 +674,42 @@ impl Journal {
             .flat_map(|t| t.postings.iter().map(move |p| PostingRef::new(t, p)))
     }
 
-    /// The display style of each commodity: declared, inferred, or given on
-    /// the command line, the later overriding the earlier
-    /// (journalCommodityStyles).
+    /// The display style of each commodity: given on the command line, or
+    /// else declared by a commodity or D directive, or else (for a
+    /// commodity alias) its commodity's with its own symbol placement, or
+    /// else inferred (journalCommodityStyles).
     pub fn commodity_styles(&self) -> CommodityStyles {
-        let mut styles = self.inferred_commodity_styles.clone();
+        let mut explicit = self.global_commodity_styles.clone();
         for (sym, c) in &self.declared_commodities {
             if let Some(s) = &c.format {
-                styles.insert(sym.clone(), Arc::new(s.clone()));
+                explicit
+                    .entry(sym.clone())
+                    .or_insert_with(|| Arc::new(s.clone()));
             }
         }
-        styles.extend(
-            self.global_commodity_styles
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone())),
-        );
+        if let Some((sym, s)) = &self.default_commodity {
+            explicit.entry(sym.clone()).or_insert_with(|| s.clone());
+        }
+        let inferred = &self.inferred_commodity_styles;
+        let mut styles = explicit.clone();
+        for c in self.declared_commodities.values() {
+            let Some(cst) = explicit.get(&c.symbol).or_else(|| inferred.get(&c.symbol)) else {
+                continue;
+            };
+            for (a, _) in &c.aliases {
+                let pst = inferred.get(&a.commodity).unwrap_or(cst);
+                styles.entry(a.commodity.clone()).or_insert_with(|| {
+                    Arc::new(AmountStyle {
+                        side: pst.side,
+                        spaced: pst.spaced,
+                        ..(**cst).clone()
+                    })
+                });
+            }
+        }
+        for (k, v) in inferred {
+            styles.entry(k.clone()).or_insert_with(|| v.clone());
+        }
         styles
     }
 

@@ -512,17 +512,14 @@ impl<'a> JournalParser<'a, '_> {
             })
         });
         if let Some(f @ ("csv" | "tsv" | "ssv" | "timeclock" | "timedot" | "rules")) = format {
-            let msg = format!("reading {f} files is not supported yet: {file}");
+            let msg =
+                format!("reading {f} files is not supported yet (hledgers milestone 7): {file}");
             return Err(Failure::Here(ParseError::fail_at(self.c.src, off, msg)));
         }
-        let text = std::fs::read_to_string(file).map_err(|e| {
-            let msg = format!(
-                "failed to read a file:\n{file}: openFile: {}",
-                io_error_text(&e)
-            );
+        let text = super::read_file_portably(file).map_err(|e| {
+            let msg = format!("failed to read a file:\n{file}: openFile: {e}");
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
-        let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_string();
         self.j.files.push((file.to_string(), text.clone()));
         let mut st = self.st.clone();
         self.stack.push((file.to_string(), canonical_path(file)));
@@ -1442,16 +1439,6 @@ pub fn canonical_path(p: &str) -> PathBuf {
             canonical_path(&dir.to_string_lossy()).join(name)
         }
         _ => path.to_path_buf(),
-    }
-}
-
-/// An I/O error as GHC shows it, after the file name and operation.
-fn io_error_text(e: &std::io::Error) -> String {
-    use std::io::ErrorKind::*;
-    match e.kind() {
-        NotFound => "does not exist (No such file or directory)".to_string(),
-        PermissionDenied => "permission denied (Permission denied)".to_string(),
-        _ => e.to_string(),
     }
 }
 

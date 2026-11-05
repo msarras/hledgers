@@ -3,10 +3,12 @@
 
 pub mod amount;
 pub mod common;
+pub mod finalise;
 pub mod journal;
 
 use crate::amount::CommodityStyles;
 use crate::dates::{DateSpan, Day};
+use crate::model::Journal;
 
 /// How transactions are balanced (BalancingOpts). The last five fields are
 /// set from the journal when it is finalised.
@@ -127,5 +129,146 @@ impl Default for InputOpts {
             old_timeclock: false,
             journal_dir: None,
         }
+    }
+}
+
+/// Read, finalise and combine journal files, each perhaps with a reader
+/// prefix (`journal:`, `csv:`...) or `-` for standard input
+/// (readJournalFiles).
+pub fn read_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal, String> {
+    let iopts = InputOpts {
+        defer: true,
+        ..iopts.clone()
+    };
+    let mut journals = Vec::new();
+    for f in files {
+        journals.push(read_journal_file(&iopts, f)?);
+    }
+    let declared: Vec<_> = journals
+        .iter()
+        .map(|j| {
+            (
+                j.declared_commodities.clone(),
+                j.declared_commodity_tags.clone(),
+            )
+        })
+        .collect();
+    let mut j = journals
+        .into_iter()
+        .reduce(finalise::journal_concat)
+        .unwrap_or_default();
+    // a commodity declared in several files: the last file's declaration is preferred
+    // (combineCommodityDeclarations)
+    if declared.len() > 1 {
+        j.declared_commodities.clear();
+        j.declared_commodity_tags.clear();
+        for (commodities, tags) in declared.into_iter().rev() {
+            for (c, d) in commodities {
+                let combined = match j.declared_commodities.remove(&c) {
+                    Some(d0) => finalise::commodity_combine(d0, d),
+                    None => d,
+                };
+                j.declared_commodities.insert(c, combined);
+            }
+            for (c, ts) in tags {
+                let existing = j.declared_commodity_tags.entry(c).or_default();
+                for t in ts {
+                    if !existing.contains(&t) {
+                        existing.push(t);
+                    }
+                }
+            }
+        }
+    }
+    finalise::journal_number_and_tie_transactions(&mut j);
+    if iopts.strict {
+        journal_strict_checks(&j)?;
+    }
+    Ok(j)
+}
+
+/// The strict checks: accounts, commodities, balanced transactions
+/// (journalStrictChecks).
+// M2c: the check family; nothing is checked until then.
+fn journal_strict_checks(_j: &Journal) -> Result<(), String> {
+    Ok(())
+}
+
+/// Read and finalise one journal file (readJournalFile). Its format comes
+/// from a reader prefix, or the input options, or its file extension, and
+/// is otherwise journal.
+pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, String> {
+    let (prefix, f) = journal::split_reader_prefix(prefixed);
+    if f != "-" && !std::path::Path::new(f).is_file() {
+        return Err(format!(
+            "data file \"{f}\" was not found.\n\
+             Please create it first, eg with \"hledger add\" or a text editor.\n\
+             Or, specify an existing data file with -f or $LEDGER_FILE.\n"
+        ));
+    }
+    let format = prefix
+        .or(iopts.format.as_deref())
+        .unwrap_or_else(|| format_from_extension(f));
+    if format != "journal" {
+        return Err(format!(
+            "reading {format} files is not supported yet (hledgers milestone 7): {f}"
+        ));
+    }
+    let text = if f == "-" {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes)
+            .map_err(|e| format!("<stdin>: hGetContents: {e}"))?;
+        decode_portably(bytes).map_err(|e| format!("<stdin>: hGetContents: {e}"))?
+    } else {
+        read_file_portably(f).map_err(|e| format!("{f}: openFile: {e}"))?
+    };
+    let (j, st) = journal::parse_journal(iopts, f, &text)?;
+    finalise::journal_finalise(iopts, f, &text, j, st)
+}
+
+/// The format a file extension suggests, journal by default (findReader).
+fn format_from_extension(f: &str) -> &'static str {
+    let ext = std::path::Path::new(f)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "timeclock" => "timeclock",
+        "timedot" => "timedot",
+        "csv" => "csv",
+        "ssv" => "ssv",
+        "tsv" => "tsv",
+        "rules" => "rules",
+        _ => "journal",
+    }
+}
+
+/// A file's text, decoded as UTF-8, without a byte order mark, with CRLF
+/// line endings made LF (readFilePortably).
+pub fn read_file_portably(f: &str) -> Result<String, String> {
+    let bytes = std::fs::read(f).map_err(|e| io_error_text(&e))?;
+    decode_portably(bytes)
+}
+
+fn decode_portably(bytes: Vec<u8>) -> Result<String, String> {
+    let text = String::from_utf8(bytes)
+        .map_err(|_| "invalid argument (cannot decode byte sequence)".to_string())?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    Ok(if text.contains("\r\n") {
+        text.replace("\r\n", "\n")
+    } else {
+        text.to_string()
+    })
+}
+
+/// An I/O error as GHC shows it, after the file name and operation.
+pub fn io_error_text(e: &std::io::Error) -> String {
+    use std::io::ErrorKind::*;
+    match e.kind() {
+        NotFound => "does not exist (No such file or directory)".to_string(),
+        PermissionDenied => "permission denied (Permission denied)".to_string(),
+        IsADirectory => "inappropriate type (is a directory)".to_string(),
+        _ => e.to_string(),
     }
 }
