@@ -12,17 +12,18 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 6 of 10: the journal reader and writer, valuation, cost
+Milestone 7a of 10: the journal reader and writer, valuation, cost
 conversion, lot tracking, the listing commands, the balance reports, the
-register reports and holdings, with all their output formats, are
-complete. `hledgers` reads journal files with every directive, include
-globs, amount expressions, costs, balance assertions and assignments, auto
-postings and periodic transactions; it balances and checks entries as
-hledger 1.99 does and prints the same error messages; it converts amounts
-to cost and values them with declared, inferred and commodity alias prices
-(`-B`, `-V`, `-X`, `--value`, `--infer-market-prices`), and pivots account
-names (`--pivot`). It tracks investment lots: cost bases written as `{...}`
-annotations or lot subaccounts, or inferred from costs; acquisitions,
+register reports and holdings, with all their output formats, and the CSV
+reader are complete. `hledgers` reads journal files with every directive,
+include globs, amount expressions, costs, balance assertions and
+assignments, auto postings and periodic transactions; it balances and
+checks entries as hledger 1.99 does and prints the same error messages; it
+converts amounts to cost and values them with declared, inferred and
+commodity alias prices (`-B`, `-V`, `-X`, `--value`,
+`--infer-market-prices`), and pivots account names (`--pivot`). It tracks
+investment lots: cost bases written as `{...}` annotations or lot
+subaccounts, or inferred from costs; acquisitions,
 disposals (FIFO, LIFO, HIFO, average cost, specific lots, and their
 all-accounts variants, set by `lots:` tags), transfers with their fees,
 short positions, and lots carried through closing balances; it adds lot
@@ -58,11 +59,21 @@ csv, tsv, json, html and fods (`-O`, or `-o FILE` by its extension), html
 and fods with links to hledger-web's register (`--base-url`); `balance`,
 the compound commands, `register`, `aregister`, `activity` and `holdings`
 draw charts (`--chart[=KIND,SCALE]`, `-O svg`) as text, svg, html, or
-their data as csv, tsv and json. Of hledger's 2420 functional test cases
-1980 pass byte-identically, all of them gated. Translations, CSV,
-timeclock and timedot, beancount and ledger output, and the remaining
-commands are the later milestones. Register widths come from `--width` or
-are 80 columns: the terminal's width is not yet queried.
+their data as csv, tsv and json. It reads CSV, SSV and TSV files (by
+extension, `csv:`/`ssv:`/`tsv:` prefix, or from standard input with
+`--rules-file`) converted by their rules files, with every rule: fields
+lists, field assignments with templates, `%{...}` expressions and their
+functions, if blocks and ifs tables with field and record matchers, skip,
+end and merge rules, date formats and time zones, decimal marks,
+currencies, amounts and amount expressions, balance assertions, postings 1
+to 99, separators, encodings, and included rules files; rules files read
+as data through their source rule (a file pattern, a data cleaning or
+generating command); and CSV and rules files included by journals. Of
+hledger's 2420 functional test cases 2136 pass byte-identically, all of
+them gated. Translations, timeclock and timedot, the import command,
+beancount and ledger output, and the remaining commands are the later
+milestones. Register widths come from `--width` or are 80 columns: the
+terminal's width is not yet queried, and local time is UTC for now.
 
 ## Build
 
@@ -121,7 +132,7 @@ Linking needs `libgmp-dev`. The bench crate has no dependencies.
 CSV rules files will be able to derive several postings from one amount, with
 named formulas (`let NAME EXPR`, read back as `%{NAME}`) and an exact
 allocation function (`%{split(VALUE, WEIGHTS, I)}`). This lands with
-milestone 7, together with its documentation here.
+milestone 7b, together with its documentation here.
 
 ## Licence
 
