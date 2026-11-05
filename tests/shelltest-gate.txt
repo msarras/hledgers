@@ -54,3 +54,7 @@ check-uniqueleafnames.test
 query-type.test:5-6
 accounts.test
 accounts-sorting.test
+payees.test
+codes.test
+notes.test
+descriptions.test

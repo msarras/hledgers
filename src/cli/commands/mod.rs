@@ -2,7 +2,11 @@
 
 pub mod accounts;
 pub mod check;
+pub mod codes;
+pub mod descriptions;
 pub mod files;
+pub mod notes;
+pub mod payees;
 pub mod prices;
 pub mod print;
 pub mod quickref;
@@ -26,9 +30,9 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("cashflow", &["cf"]),
     &check::MODE,
     &command("close", &["equity"]),
-    &command("codes", &[]),
+    &codes::MODE,
     &command("commodities", &["comm"]),
-    &command("descriptions", &["desc"]),
+    &descriptions::MODE,
     &command("diff", &[]),
     &files::MODE,
     &command("get", &[]),
@@ -36,8 +40,8 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("holdings", &[]),
     &command("import", &[]),
     &command("incomestatement", &["is"]),
-    &command("notes", &[]),
-    &command("payees", &[]),
+    &notes::MODE,
+    &payees::MODE,
     &prices::MODE,
     &print::MODE,
     &command("register", &["reg"]),
