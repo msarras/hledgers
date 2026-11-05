@@ -4,11 +4,13 @@
 //! amounts calculated in amount expressions.
 
 use std::cell::OnceCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::BalancingOpts;
-use crate::account::{AccountName, Realness};
-use crate::amount::render::{AmountFormat, show_mixed_amount_b};
+use crate::account::{AccountName, Realness, is_account_name_prefix_of, lot_base_account};
+use crate::amount::render::{
+    AmountFormat, show_amount_b, show_amounts_distinctly, show_mixed_amount_b,
+};
 use crate::amount::{
     Amount, AmountCost, CommodityStyles, MixedAmount, Precision, Rounding, Sym,
     styles_with_rounding,
@@ -18,6 +20,9 @@ use crate::model::{
     COST_POSTING_TAG, GENERATED_POSTING_TAG, IMBALANCE_POSTING_TAG, Journal, Posting, Transaction,
     source_pos_pair_pretty,
 };
+use crate::regex::regex_escape;
+use crate::text::quote_for_command_line;
+use crate::write::journal::{PostingLayout, show_transaction};
 
 /// The internal tag of postings whose amount was calculated with `*` or `/`
 /// and changed by rounding; the balancer removes it (roundedPostingTagName).
@@ -641,17 +646,25 @@ fn cost_inferrer_for(
     })
 }
 
-/// Balance all the transactions, inferring missing amounts and costs
-/// (journalBalanceTransactions), and with `defer`, return the first balance
-/// assertion failure separately instead of failing
+/// Balance all the transactions, inferring missing amounts and costs and
+/// doing balance assignments, and check the balance assertions
+/// (journalBalanceTransactions); with `defer`, the first assertion failure
+/// is returned beside the journal instead of failing
 /// (journalBalanceTransactionsAndDeferAssertions). Transactions are
 /// numbered first. The journal's commodity styles, with hard rounding, are
 /// the display precisions used for checking and for styling inferred
 /// amounts.
+///
+/// First the transactions without balance assignments are balanced on
+/// their own. Then, if there are assignments, or assertions to check, the
+/// postings of those and the transactions with assignments are processed
+/// in date order (same-day items in journal order) with running account
+/// balances: assignments set their posting's amount, and the transactions
+/// with them are then balanced.
 pub fn journal_balance_transactions(
     bopts: &BalancingOpts,
     mut j: Journal,
-    _defer: bool,
+    defer: bool,
 ) -> Result<(Journal, Option<String>), String> {
     for (i, t) in j.txns.iter_mut().enumerate() {
         t.index = i as u32 + 1;
@@ -660,20 +673,388 @@ pub fn journal_balance_transactions(
         commodity_styles: Some(styles_with_rounding(Rounding::Hard, &j.commodity_styles())),
         ..bopts.clone()
     };
-    let txns = std::mem::take(&mut j.txns);
-    let mut balanced = Vec::with_capacity(txns.len());
-    for t in txns {
-        // M2c: balance assignments and assertions; transactions with assignments are left unbalanced until then.
-        if t.postings.iter().any(Posting::has_balance_assignment) {
-            balanced.push(t);
+    let mut items = Vec::new();
+    for i in 0..j.txns.len() {
+        if j.txns[i]
+            .postings
+            .iter()
+            .any(Posting::has_balance_assignment)
+        {
+            items.push(Item::Txn(i));
             continue;
         }
+        let t = std::mem::take(&mut j.txns[i]);
         let (t, _) = balance_transaction_maybe_splitting_lot_fees(&bopts, t)?;
         let (t, _) = transaction_maybe_add_imbalance_postings(&bopts, t);
-        balanced.push(t);
+        items.extend((0..t.postings.len()).map(|k| Item::Posting(i, k)));
+        j.txns[i] = t;
     }
-    j.txns = balanced;
-    Ok((j, None))
+    let mode = if bopts.ignore_assertions {
+        Assertions::DontCheck
+    } else if defer {
+        Assertions::Defer
+    } else {
+        Assertions::Check
+    };
+    let has_assignments = items.iter().any(|it| matches!(it, Item::Txn(_)));
+    let has_assertions = items
+        .iter()
+        .any(|it| matches!(it, Item::Posting(i, k) if j.txns[*i].postings[*k].assertion.is_some()));
+    if !(has_assignments || (mode != Assertions::DontCheck && has_assertions)) {
+        return Ok((j, None));
+    }
+    let date = |it: &Item| match *it {
+        Item::Posting(i, k) => j.txns[i].postings[k].date_in(Some(&j.txns[i])),
+        Item::Txn(i) => j.txns[i].date,
+    };
+    items.sort_by_key(date);
+    let mut state = Balancer {
+        unassignable: j
+            .txn_modifiers
+            .iter()
+            .flat_map(|tm| tm.rules.iter().map(|r| r.posting.account.clone()))
+            .collect(),
+        bopts,
+        mode,
+        balances: BTreeMap::new(),
+        deferred: None,
+    };
+    for it in items {
+        match it {
+            Item::Posting(i, k) => {
+                let t = &j.txns[i];
+                let p = &t.postings[k];
+                if p.has_amount() {
+                    let mut p = p.clone();
+                    p.amount = std::mem::take(&mut p.amount).strip_costs();
+                    let new = state.add(&p.account, &p.amount);
+                    state.check_or_defer(t, &p, new)?;
+                }
+            }
+            Item::Txn(i) => {
+                let t = std::mem::take(&mut j.txns[i]);
+                j.txns[i] = state.balance_with_assignments(t)?;
+            }
+        }
+    }
+    Ok((j, state.deferred))
+}
+
+/// Check that a transaction's balance assertions hold when it is added to
+/// the journal (transactionCheckAssertions, used when adding transactions).
+pub fn transaction_check_assertions(
+    bopts: &BalancingOpts,
+    j: &Journal,
+    t: &Transaction,
+) -> Result<(), String> {
+    if bopts.ignore_assertions {
+        return Ok(());
+    }
+    let mut j = j.clone();
+    super::finalise::journal_style_amounts(&mut j)?;
+    j.txns.push(t.clone());
+    j.txns.sort_by_key(|t| t.date);
+    journal_balance_transactions(bopts, j, false).map(|_| ())
+}
+
+/// A posting of a transaction balanced on its own, or a transaction with
+/// balance assignments, by position in the journal's transactions.
+enum Item {
+    Posting(usize, usize),
+    Txn(usize),
+}
+
+/// Whether balance assertions are checked, failing at the first, or checked
+/// with the first failure kept for later (AssertionsMode).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Assertions {
+    DontCheck,
+    Check,
+    Defer,
+}
+
+/// The state of the date-ordered pass (BalancingState).
+struct Balancer {
+    bopts: BalancingOpts,
+    /// Accounts where balance assignments may not be used, because auto
+    /// posting rules post to them.
+    unassignable: BTreeSet<AccountName>,
+    mode: Assertions,
+    /// Each account's running balance, excluding subaccounts.
+    balances: BTreeMap<AccountName, MixedAmount>,
+    /// The first assertion failure, when deferring.
+    deferred: Option<String>,
+}
+
+impl Balancer {
+    /// An account's running balance (getRunningBalanceB).
+    fn balance(&self, a: &str) -> MixedAmount {
+        self.balances.get(a).cloned().unwrap_or_default()
+    }
+
+    /// An account's running balance including its subaccounts'
+    /// (getInclusiveRunningBalanceB).
+    fn inclusive_balance(&self, a: &str) -> MixedAmount {
+        self.balances
+            .iter()
+            .filter(|(b, _)| &***b == a || is_account_name_prefix_of(a, b))
+            .map(|(_, m)| m)
+            .sum()
+    }
+
+    /// Add an amount to an account's running balance, returning the new
+    /// balance (addToRunningBalanceB).
+    fn add(&mut self, a: &AccountName, amount: &MixedAmount) -> MixedAmount {
+        let new = &self.balance(a) + amount;
+        self.balances.insert(a.clone(), new.clone());
+        new
+    }
+
+    /// Set an account's running balance, returning the change
+    /// (setRunningBalanceB).
+    fn set(&mut self, a: &AccountName, amount: MixedAmount) -> MixedAmount {
+        let old = self
+            .balances
+            .insert(a.clone(), amount.clone())
+            .unwrap_or_default();
+        &amount - &old
+    }
+
+    /// Set an account's running balance so that, with its subaccounts', it
+    /// is this amount, returning the change (setInclusiveRunningBalanceB).
+    fn set_inclusive(&mut self, a: &AccountName, amount: MixedAmount) -> MixedAmount {
+        let old = self.balance(a);
+        let subs: MixedAmount = self
+            .balances
+            .iter()
+            .filter(|(b, _)| is_account_name_prefix_of(a, b))
+            .map(|(_, m)| m)
+            .sum();
+        let new = &amount - &subs;
+        self.balances.insert(a.clone(), new.clone());
+        &new - &old
+    }
+
+    /// Do a transaction's balance assignments and check its assertions,
+    /// posting by posting in date order, then balance it, adding any amount
+    /// inferred to its account's running balance
+    /// (balanceTransactionAndCheckAssertionsB).
+    fn balance_with_assignments(&mut self, t: Transaction) -> Result<Transaction, String> {
+        for p in &t.postings {
+            self.check_illegal_balance_assignment(&t, p)?;
+        }
+        let mut order: Vec<usize> = (0..t.postings.len()).collect();
+        order.sort_by_key(|&k| t.postings[k].date_in(Some(&t)));
+        let mut postings = t.postings.clone();
+        for k in order {
+            postings[k] = self.add_or_assign(&t, postings[k].clone())?;
+        }
+        let t = Transaction { postings, ..t };
+        let (t, inferred) = balance_transaction_maybe_splitting_lot_fees(&self.bopts, t)?;
+        let (t, imbalance) = transaction_maybe_add_imbalance_postings(&self.bopts, t);
+        for (a, amount) in inferred
+            .into_iter()
+            .chain(imbalance.into_iter().map(|p| (p.account, p.amount)))
+        {
+            self.add(&a, &amount);
+        }
+        Ok(t)
+    }
+
+    /// For a posting with an amount, add it to its account's running
+    /// balance; for one with a balance assignment, set the balance and infer
+    /// the amount from the change; then check its assertion
+    /// (addOrAssignAmountAndCheckAssertionB).
+    fn add_or_assign(&mut self, t: &Transaction, mut p: Posting) -> Result<Posting, String> {
+        if p.has_amount() {
+            let new = self.add(&p.account, &p.amount);
+            self.check_or_defer(t, &p, new)?;
+        } else if let Some(ba) = p.assertion.clone() {
+            let current = if ba.inclusive {
+                self.inclusive_balance(&p.account)
+            } else {
+                self.balance(&p.account)
+            };
+            let new = if ba.total {
+                MixedAmount::from_amount(ba.amount.clone())
+            } else {
+                let mut others = current.filter(|a| a.commodity != ba.amount.commodity);
+                others.add_amount(ba.amount.clone());
+                others
+            };
+            let diff = if ba.inclusive {
+                self.set_inclusive(&p.account, new.clone())
+            } else {
+                self.set(&p.account, new.clone())
+            };
+            p.original = Some(Box::new(p.original().clone()));
+            p.amount = diff.filter(|a| !a.is_zero());
+            self.check_or_defer(t, &p, new)?;
+        }
+        Ok(p)
+    }
+
+    /// Check a posting's balance assertion, if any, against the account's
+    /// new balance, as the mode says (checkOrDeferBalanceAssertionB).
+    fn check_or_defer(
+        &mut self,
+        t: &Transaction,
+        p: &Posting,
+        new: MixedAmount,
+    ) -> Result<(), String> {
+        match self.mode {
+            Assertions::DontCheck => Ok(()),
+            Assertions::Check => self.check_balance_assertion(t, p, &new),
+            Assertions::Defer => {
+                if let Err(e) = self.check_balance_assertion(t, p, &new) {
+                    self.deferred.get_or_insert(e);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Check a posting's balance assertion: the asserted commodity's
+    /// balance, and for a total assertion, zero in every other commodity of
+    /// the balance (checkBalanceAssertionB).
+    fn check_balance_assertion(
+        &self,
+        t: &Transaction,
+        p: &Posting,
+        actual: &MixedAmount,
+    ) -> Result<(), String> {
+        let Some(ba) = &p.assertion else {
+            return Ok(());
+        };
+        let others: Vec<Amount> = if ba.total {
+            actual
+                .amounts_raw()
+                .iter()
+                .filter(|a| a.commodity != ba.amount.commodity)
+                .map(|a| Amount {
+                    quantity: Decimal::ZERO,
+                    ..a.clone()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for asserted in std::iter::once(&ba.amount).chain(&others) {
+            self.check_balance_assertion_one_commodity(t, p, asserted, actual)?;
+        }
+        Ok(())
+    }
+
+    /// Check that a commodity's balance in an account, ignoring costs, is
+    /// exactly the asserted amount, including subaccounts if the assertion
+    /// is inclusive (checkBalanceAssertionOneCommodityB).
+    fn check_balance_assertion_one_commodity(
+        &self,
+        t: &Transaction,
+        p: &Posting,
+        asserted: &Amount,
+        actual: &MixedAmount,
+    ) -> Result<(), String> {
+        let ba = p.assertion.as_deref().expect("a balance assertion");
+        let actual = if ba.inclusive {
+            self.inclusive_balance(&p.account)
+        } else {
+            actual.clone()
+        };
+        let commodity = &asserted.commodity;
+        let asserted = asserted.clone().strip_cost();
+        let actual = actual
+            .filter_by_commodity(commodity)
+            .amounts_raw()
+            .iter()
+            .fold(Amount::null(), |sum, a| &sum + a);
+        if asserted.quantity == actual.quantity {
+            return Ok(());
+        }
+        let (_, _, ex) = super::errors::balance_assertion_error_excerpt(t, p);
+        let fmt = AmountFormat {
+            zero_commodity: true,
+            ..AmountFormat::ONE_LINE
+        };
+        let (asserted_s, actual_s) = show_amounts_distinctly(&fmt, &asserted, &actual);
+        let width = asserted_s.chars().count().max(actual_s.chars().count());
+        let pad = |s: &str| format!("{}{s}", " ".repeat(width - s.chars().count()));
+        let difference = show_amount_b(&fmt, &(&asserted - &actual)).s;
+        let account = &*p.account;
+        let which = if ba.total {
+            "Across all commodities".to_string()
+        } else if commodity.is_empty() {
+            "In commodity \"\"".to_string()
+        } else {
+            format!("In commodity {commodity}")
+        };
+        let lot_hint = if lot_base_account(account) != account {
+            format!(
+                "\n\nNote '{account}' is a lot subaccount.\n\
+                 Balance assertions aren't supported here unless all postings\n\
+                 to this lot mention the lot subaccount name explicitly.\n\
+                 So it's probably best to avoid using balance assertions on this account.\n\
+                 If needed, you could assert the parent account's balance instead."
+            )
+        } else {
+            String::new()
+        };
+        let msg = format!(
+            "{}:\n{}\n\n\
+             Balance assertion failed in {account}\n\
+             {which} at this point, {}, ignoring costs,\n\
+             the asserted balance is:        {}\n\
+             but the calculated balance is:  {}\n\
+             (difference: {difference})\n\
+             To troubleshoot, check this account's running balance with assertions disabled, eg:\n\
+             hledger reg -E --ignore-assertions '{}'{}{}{} -e {lot_hint}\n",
+            ba.pos,
+            crate::text::chomp(&ex),
+            if ba.inclusive {
+                "including subaccounts"
+            } else {
+                "excluding subaccounts"
+            },
+            pad(&asserted_s),
+            pad(&actual_s),
+            p.date_in(Some(t)).add_days(1),
+            regex_escape(account),
+            if ba.inclusive { "" } else { "$" },
+            if ba.total {
+                String::new()
+            } else {
+                format!(" cur:{}", quote_for_command_line(&regex_escape(commodity)))
+            },
+        );
+        Err(crate::text::chomp(&msg).to_string())
+    }
+
+    /// Fail if a posting's balance assignment has a posting date, or is to
+    /// an account auto posting rules post to (checkIllegalBalanceAssignmentB).
+    fn check_illegal_balance_assignment(&self, t: &Transaction, p: &Posting) -> Result<(), String> {
+        if !p.has_balance_assignment() {
+            return Ok(());
+        }
+        let txn = show_transaction(t, PostingLayout::default(), false);
+        let txn = txn.strip_suffix('\n').unwrap_or(&txn);
+        if p.date.is_some() {
+            return Err(format!(
+                "Balance assignments and custom posting dates may not be combined.\n\n{txn}\n\
+                 Balance assignments may not be used on postings with a custom posting date\n\
+                 (it makes balancing the journal impossible).\n\
+                 Please write the posting amount explicitly (or remove the posting date)."
+            ));
+        }
+        if self.unassignable.contains(&p.account) {
+            return Err(format!(
+                "Balance assignments and auto postings may not be combined.\n\n{txn}\n\
+                 Balance assignments may not be used on accounts affected by auto posting rules\n\
+                 (it makes balancing the journal impossible).\n\
+                 Please write the posting amount explicitly (or remove the auto posting rule(s))."
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -832,6 +1213,267 @@ mod tests {
             let styles = commodity_styles_from_amounts(&amounts);
             assert_eq!(*styles[""], expected);
         }
+    }
+
+    fn day(y: i64, m: u32, d: u32) -> Day {
+        Day::from_ymd(y, m, d).unwrap()
+    }
+
+    fn on(date: Day, postings: Vec<Posting>) -> Transaction {
+        Transaction {
+            date,
+            postings,
+            ..Transaction::default()
+        }
+    }
+
+    /// A posting, virtual or not, with an amount (or none) and maybe a
+    /// balance assertion: partial or total, exclusive or inclusive (post',
+    /// vpost', balassert, balassertParInc, balassertTotInc).
+    fn posting(
+        account: &str,
+        virtual_: bool,
+        amount: Option<Amount>,
+        assertion: Option<(Amount, bool, bool)>,
+    ) -> Posting {
+        Posting {
+            account: account.into(),
+            realness: if virtual_ {
+                Realness::Virtual
+            } else {
+                Realness::Real
+            },
+            amount: amount.map_or_else(MixedAmount::missing, MixedAmount::from_amount),
+            assertion: assertion.map(|(amount, total, inclusive)| {
+                Box::new(crate::model::BalanceAssertion {
+                    amount,
+                    total,
+                    inclusive,
+                    pos: crate::model::SourcePos::null(),
+                })
+            }),
+            ..Posting::default()
+        }
+    }
+
+    fn journal(txns: Vec<Transaction>) -> Journal {
+        Journal {
+            txns,
+            ..Journal::default()
+        }
+    }
+
+    fn balance_journal(txns: Vec<Transaction>) -> Result<Journal, String> {
+        journal_balance_transactions(&BalancingOpts::default(), journal(txns), false)
+            .map(|(j, _)| j)
+    }
+
+    /// samplejournalMaybeExplicit.
+    fn sample_journal(explicit: bool) -> Vec<Transaction> {
+        let amt = |q: &str, implicit: bool| (explicit || !implicit).then(|| usd(d(q)));
+        let p = |a: &str, q: &str, implicit: bool| posting(a, false, amt(q, implicit), None);
+        vec![
+            on(
+                day(2008, 1, 1),
+                vec![
+                    p("assets:bank:checking", "1", false),
+                    p("income:salary", "-1", true),
+                ],
+            ),
+            on(
+                day(2008, 6, 1),
+                vec![
+                    p("assets:bank:checking", "1", false),
+                    p("income:gifts", "-1", true),
+                ],
+            ),
+            on(
+                day(2008, 6, 2),
+                vec![
+                    p("assets:bank:saving", "1", false),
+                    p("assets:bank:checking", "-1", true),
+                ],
+            ),
+            on(
+                day(2008, 6, 3),
+                vec![
+                    p("expenses:food", "1", false),
+                    p("expenses:supplies", "1", false),
+                    p("assets:cash", "-2", true),
+                ],
+            ),
+            on(
+                day(2008, 10, 1),
+                vec![
+                    p("assets:bank:checking", "1", false),
+                    p("liabilities:debts", "-1", false),
+                ],
+            ),
+            on(
+                day(2008, 12, 31),
+                vec![
+                    p("liabilities:debts", "1", false),
+                    p("assets:bank:checking", "-1", true),
+                ],
+            ),
+        ]
+    }
+
+    // tests_Balancing "journalBalanceTransactions".
+    #[test]
+    fn balancing_journals() {
+        let postings = |ts: &[Transaction]| -> Vec<Posting> {
+            ts.iter().flat_map(|t| t.postings.clone()).collect()
+        };
+        let j = balance_journal(sample_journal(false)).unwrap();
+        assert_eq!(postings(&j.txns), postings(&sample_journal(true)));
+        // balance-assignment
+        let n = |q: &str| num(d(q));
+        let j = balance_journal(vec![on(
+            day(2019, 1, 1),
+            vec![posting("a", true, None, Some((n("1"), false, false)))],
+        )])
+        .unwrap();
+        assert_eq!(j.txns[0].postings[0].amount.amounts_raw(), [n("1")]);
+        // same-day-1
+        assert!(
+            balance_journal(vec![
+                on(
+                    day(2019, 1, 1),
+                    vec![posting("a", true, None, Some((n("1"), false, false)))]
+                ),
+                on(
+                    day(2019, 1, 1),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(n("1")),
+                        Some((n("2"), false, false))
+                    )]
+                ),
+            ])
+            .is_ok()
+        );
+        // same-day-2
+        assert!(
+            balance_journal(vec![
+                on(
+                    day(2019, 1, 1),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(n("2")),
+                        Some((n("2"), false, false))
+                    )]
+                ),
+                on(
+                    day(2019, 1, 1),
+                    vec![
+                        posting("b", false, Some(n("1")), None),
+                        posting("a", false, None, None)
+                    ]
+                ),
+                on(
+                    day(2019, 1, 1),
+                    vec![posting(
+                        "a",
+                        false,
+                        Some(n("0")),
+                        Some((n("1"), false, false))
+                    )]
+                ),
+            ])
+            .is_ok()
+        );
+        // out-of-order
+        assert!(
+            balance_journal(vec![
+                on(
+                    day(2019, 1, 2),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(n("1")),
+                        Some((n("2"), false, false))
+                    )]
+                ),
+                on(
+                    day(2019, 1, 1),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(n("1")),
+                        Some((n("1"), false, false))
+                    )]
+                ),
+            ])
+            .is_ok()
+        );
+    }
+
+    // tests_Balancing "transactionCheckAssertions".
+    #[test]
+    fn checking_a_transaction_s_assertions() {
+        let bopts = BalancingOpts::default();
+        let v = |a: &str, x: Amount| posting(a, true, Some(x), None);
+        let check = |ts: Vec<Transaction>, t: Transaction| {
+            transaction_check_assertions(&bopts, &journal(ts), &t)
+        };
+        assert!(
+            check(
+                vec![on(day(2025, 1, 1), vec![v("a", usd(d("1")))])],
+                on(
+                    day(2025, 1, 1),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(usd(d("1"))),
+                        Some((usd(d("2")), false, false))
+                    )]
+                )
+            )
+            .is_ok()
+        );
+        assert!(
+            check(
+                vec![
+                    on(day(2025, 1, 1), vec![v("a:a", usd(d("1")))]),
+                    on(day(2025, 1, 2), vec![v("a:b", usd(d("2")))]),
+                    on(day(2025, 1, 2), vec![v("a:c", usd(d("5")))]),
+                    on(day(2025, 1, 3), vec![v("a:d", eur(d("10")))]),
+                ],
+                on(
+                    day(2025, 1, 4),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(usd(d("2"))),
+                        Some((usd(d("10")), false, true))
+                    )]
+                )
+            )
+            .is_ok()
+        );
+        assert!(
+            check(
+                vec![
+                    on(day(2025, 1, 1), vec![v("a", usd(d("1")))]),
+                    on(day(2025, 1, 2), vec![v("a:b", eur(d("2")))]),
+                    on(day(2025, 1, 2), vec![v("a:c", usd(d("5")))]),
+                    on(day(2025, 1, 3), vec![v("a:b", eur(d("-2")))]),
+                ],
+                on(
+                    day(2025, 1, 3),
+                    vec![posting(
+                        "a",
+                        true,
+                        Some(usd(d("2"))),
+                        Some((usd(d("8")), true, true))
+                    )]
+                )
+            )
+            .is_ok()
+        );
     }
 
     #[test]

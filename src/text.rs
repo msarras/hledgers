@@ -175,6 +175,22 @@ pub fn chomp(s: &str) -> &str {
     s.trim_end_matches(['\r', '\n'])
 }
 
+/// A string quoted for a POSIX shell command line if it needs that: in
+/// single quotes (an apostrophe written `'\''`) if it has quotes, white
+/// space or shell characters, `''` if it is empty (quoteForCommandLine).
+pub fn quote_for_command_line(s: &str) -> String {
+    if s.is_empty() {
+        "''".to_string()
+    } else if s
+        .chars()
+        .any(|c| "'\" \t\n\r<>(){}[]$&?#!~`*+\\".contains(c))
+    {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    } else {
+        s.to_string()
+    }
+}
+
 /// The text in double quotes, with its double quotes backslash-escaped, if it
 /// contains a quote or white space (textQuoteIfNeeded).
 pub fn quote_if_needed(s: &str) -> String {

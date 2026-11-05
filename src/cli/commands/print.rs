@@ -337,7 +337,7 @@ pub fn transaction_with_mostly_original_postings(
     for p in &mut t.postings {
         let orig = p.original().clone();
         let with_inferred_basis = |ma: crate::amount::MixedAmount| {
-            if !show_inferred_basis || lot_subaccount_name(&p.account).is_some() {
+            if !show_inferred_basis || crate::account::split_lot_subaccount(&p.account).is_some() {
                 return ma;
             }
             match (ma.amounts_raw(), p.amount.amounts_raw()) {
@@ -382,17 +382,6 @@ pub fn transaction_with_mostly_original_postings(
         };
     }
     t
-}
-
-/// The lot name of a lot subaccount (`ACCOUNT:{...}`), if it is one
-/// (lotSubaccountName, from Hledger.Data.Lots).
-fn lot_subaccount_name(a: &str) -> Option<&str> {
-    if !a.ends_with('}') {
-        return None;
-    }
-    let i = a.rfind(':')?;
-    let leaf = &a[i + 1..];
-    leaf.starts_with('{').then_some(leaf)
 }
 
 /// The transaction whose description is most like this one, nearer dates

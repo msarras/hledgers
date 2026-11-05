@@ -287,6 +287,22 @@ pub fn is_account_name_prefix_of(prefix: &str, a: &str) -> bool {
     a.len() > prefix.len() && a.starts_with(prefix) && a.as_bytes()[prefix.len()] == b':'
 }
 
+/// A lot subaccount name (`ACCOUNT:{...}`) split into its base account and
+/// its lot name, if it is one (splitLotSubaccount, from Hledger.Data.Lots).
+pub fn split_lot_subaccount(a: &str) -> Option<(&str, &str)> {
+    if !a.ends_with('}') {
+        return None;
+    }
+    let i = a.rfind(':')?;
+    let leaf = &a[i + 1..];
+    leaf.starts_with('{').then_some((&a[..i], leaf))
+}
+
+/// An account name without any lot subaccount at its end (lotBaseAccount).
+pub fn lot_base_account(a: &str) -> &str {
+    split_lot_subaccount(a).map_or(a, |(base, _)| base)
+}
+
 /// Whether the first is a direct subaccount of the second
 /// (isSubAccountNameOf).
 pub fn is_sub_account_name_of(s: &str, p: &str) -> bool {

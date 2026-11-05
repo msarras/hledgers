@@ -134,7 +134,7 @@ pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
 
 /// Infer the commodity styles, and apply them to the posting amounts
 /// without changing their precisions (journalStyleAmounts).
-fn journal_style_amounts(j: &mut Journal) -> Result<(), String> {
+pub fn journal_style_amounts(j: &mut Journal) -> Result<(), String> {
     journal_infer_commodity_styles(j);
     let styles = styles_with_rounding(Rounding::No, &j.commodity_styles());
     for t in &mut j.txns {
