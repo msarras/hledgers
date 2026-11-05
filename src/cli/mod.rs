@@ -142,6 +142,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "check" => |o, j| commands::check::check(o, &j),
         "close" => |o, j| commands::close::close(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
+        "holdings" => |o, j| commands::holdings::holdings(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,
         "roi" => |o, j| commands::roi::roi(o, &j),

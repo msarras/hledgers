@@ -927,7 +927,7 @@ impl Roi<'_> {
 
 /// The rate solving the net present value equation, by Ridders' method in
 /// (1e-12, 10000), or why there is none (solveIRR).
-fn solve_irr(npv: impl Fn(f64) -> f64) -> Result<f64, String> {
+pub fn solve_irr(npv: impl Fn(f64) -> f64) -> Result<f64, String> {
     match ridders(100, 0.00001, (0.000000000001, 10000.0), npv) {
         RootSearch::Root(s) => Ok(s),
         RootSearch::NotBracketed => Err(

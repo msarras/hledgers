@@ -132,7 +132,7 @@ fn integer(n: &IBig) -> Value {
 /// exponent notation if its magnitude exceeds 10^19; in full if it is a
 /// whole number; otherwise in decimal notation from 0.1 to 10^7 and
 /// exponent notation outside that range.
-fn double(x: f64) -> Value {
+pub fn double(x: f64) -> Value {
     if x == 0.0 {
         return number("0");
     }
