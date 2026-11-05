@@ -18,7 +18,7 @@ pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
     let mut text = format!("{progname}: {prefix}{msg}");
     if use_color_on_stderr(color_option) {
         let first_end = text.find('\n').unwrap_or(text.len());
-        text.insert_str(first_end, "\x1b[0m");
+        text.insert_str(first_end, "\x1b[39m\x1b[49m\x1b[22m");
         text.insert_str(0, "\x1b[91m\x1b[1m");
     }
     eprintln!("{text}");
@@ -31,7 +31,7 @@ pub fn warn(args: &[String], msg: &str) {
     let mut text = format!("Warning: {msg}");
     if use_color_on_stderr(color_option(args)) {
         let first_end = text.find('\n').unwrap_or(text.len());
-        text.insert_str(first_end, "\x1b[0m");
+        text.insert_str(first_end, "\x1b[39m\x1b[49m\x1b[22m");
         text.insert_str(0, "\x1b[93m\x1b[1m");
     }
     eprintln!("{text}");
