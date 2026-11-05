@@ -4,7 +4,7 @@
 
 use dashu_int::IBig;
 
-use crate::account::account_name_with_posting_type;
+use crate::account::Realness;
 use crate::amount::render::{
     AmountFormat, quote_commodity_symbol_if_needed, show_amount_b, show_amount_quantity,
     show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
@@ -448,10 +448,14 @@ fn show_balance_assertion(ba: &BalanceAssertion) -> String {
     )
 }
 
-/// A posting's account name, in brackets or parentheses if it is virtual
-/// (showAccountName).
+/// A posting's account name, in brackets or parentheses if it is virtual,
+/// even if it is already (showAccountName).
 pub fn show_account_name(p: &Posting) -> String {
-    account_name_with_posting_type(p.realness, &p.account)
+    match p.realness {
+        Realness::Real => p.account.to_string(),
+        Realness::Virtual => format!("({})", p.account),
+        Realness::BalancedVirtual => format!("[{}]", p.account),
+    }
 }
 
 /// A posting's status mark and a space, if it has one, and its account
@@ -739,6 +743,21 @@ mod tests {
         assert_eq!(
             show(&t),
             "2010-01-01 x\n    a                                              1 @ $2\n    b\n\n"
+        );
+    }
+
+    #[test]
+    fn account_names_are_bracketed_as_they_are() {
+        let with = |account: &str, realness| Posting {
+            account: account.into(),
+            realness,
+            ..Posting::default()
+        };
+        assert_eq!(show_account_name(&with("(a)", Realness::Real)), "(a)");
+        assert_eq!(show_account_name(&with("(a)", Realness::Virtual)), "((a))");
+        assert_eq!(
+            show_account_name(&with("a", Realness::BalancedVirtual)),
+            "[a]"
         );
     }
 }
