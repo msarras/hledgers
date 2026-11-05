@@ -89,10 +89,7 @@ impl fmt::Display for Status {
     }
 }
 
-/// The date used where there is none: 0000-01-01 (nulldate).
-pub fn null_date() -> Day {
-    Day::from_ymd(0, 1, 1).expect("a valid date")
-}
+pub use crate::dates::null_date;
 
 /// A tag's name and (possibly empty) value. Names beginning with `_` are
 /// hidden tags, which hledger adds itself.
