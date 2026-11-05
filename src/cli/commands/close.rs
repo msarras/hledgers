@@ -3,8 +3,14 @@
 //! the start of the next, retain earnings, or assert or assign balances,
 //! printed as journal entries.
 
-use crate::account::{AccountType, account_name_to_account_only_regex, lot_base_account};
-use crate::amount::{Amount, MixedAmount, styles_with_rounding};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::account::{
+    AccountName, AccountType, account_name_to_account_only_regex, lot_base_account,
+};
+use crate::amount::{
+    Amount, CommodityStyles, CostBasis, MixedAmount, Rounding, Sym, styles_with_rounding,
+};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::commands::print::{
     LAYOUT_FLAG, ROUND_FLAG, layout_from_raw_opts, round_from_raw_opts,
@@ -12,6 +18,7 @@ use crate::cli::commands::print::{
 use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::decimal::Decimal;
+use crate::lots::{lot_subaccount_name, parse_lot_name, show_lot_name};
 use crate::model::{BalanceAssertion, Journal, Posting, SourcePos, Transaction};
 use crate::query::Query;
 use crate::reports::opts::{AccountListMode, BalanceAccumulation, ReportOpts, ReportSpec};
@@ -228,12 +235,13 @@ pub fn close(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let report = balance_report(&spec3, j)?;
     // costs stripped unless --show-costs, and accounts thereby emptied
     // dropped unless -E; lot subaccounts' costs are always stripped, as
-    // their names hold them (M6b: lot subaccounts of averaged lots get the
-    // pool's average cost in their names)
+    // their names hold them
     let show_costs = spec3.opts.show_costs;
+    let avg_costs = crate::lots::journal_average_pool_costs(j, Some(open_date));
+    let lot_styles = styles_with_rounding(Rounding::No, &j.commodity_styles());
     let balances: Vec<(String, MixedAmount)> = (report.items.into_iter())
         .filter_map(|(name, b)| {
-            let a = name.full.to_string();
+            let a = with_average_cost(&avg_costs, &lot_styles, &name.full, &b);
             let keep_costs = show_costs && !is_lot_subaccount(&a);
             let b = if keep_costs { b } else { b.strip_costs() };
             (keep_costs || spec3.opts.empty || !b.looks_zero()).then_some((a, b))
@@ -363,6 +371,31 @@ fn equity_amount(explicit: bool, total: &MixedAmount) -> MixedAmount {
     } else {
         MixedAmount::missing()
     }
+}
+
+/// An averaged lot's subaccount name (without a cost, which changes as
+/// the pool is re-averaged) with the pool's average cost as of the opening
+/// date, which all its lots share, so the entries say what the lots cost
+/// (withAverageCost). Other names are unchanged.
+fn with_average_cost(
+    avg_costs: &BTreeMap<(AccountName, Sym), Amount>,
+    styles: &CommodityStyles,
+    a: &str,
+    b: &MixedAmount,
+) -> String {
+    let averaged = || {
+        let cb = parse_lot_name(|_| None, lot_subaccount_name(a)?).ok()?;
+        let commodities: BTreeSet<Sym> = b.amounts().into_iter().map(|x| x.commodity).collect();
+        let [c] = Vec::from_iter(commodities).try_into().ok()?;
+        let base = lot_base_account(a);
+        let avg = avg_costs.get(&(AccountName::from(base), c))?;
+        let cb = CostBasis {
+            cost: Some(Box::new(avg.clone().styled(styles))),
+            ..cb
+        };
+        Some(format!("{base}:{}", show_lot_name(&cb)))
+    };
+    averaged().unwrap_or_else(|| a.to_string())
 }
 
 /// Whether the account is a lot subaccount (isLotSubaccount).

@@ -99,6 +99,9 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         .map(|(_, a)| a.clone())
         .collect();
     let mut raw = args::process(mode, &rest)?;
+    if mode.name == "check" {
+        commands::check::validate_check_args(&raw)?;
+    }
     if cmd.is_some() {
         raw.0
             .insert(0, ("command".to_string(), mode.name.to_string()));
@@ -139,6 +142,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "check" => |o, j| commands::check::check(o, &j),
         "close" => |o, j| commands::close::close(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
+        "holdings" => |o, j| commands::holdings::holdings(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,
         "roi" => |o, j| commands::roi::roi(o, &j),
@@ -174,13 +178,32 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     if let Some(name) = opts.raw.string("pivot") {
         j.pivot(name);
     }
-    // -B converts to cost basis now, before lot detail is collapsed
-    // (journalPrepareLotDetail; collapsing arrives with milestone 6)
-    if opts.spec.opts.conversion_op == Some(ConversionOp::ToCost) {
-        journal_to_cost(ConversionOp::ToCost, &mut j);
-    }
+    prepare_lot_detail(opts, &mut j);
     maybe_warn_unknown_valuation_commodity(opts, &j);
     Ok(j)
+}
+
+/// Prepare the journal's lot detail for the report (journalPrepareLotDetail):
+/// with -B, convert to cost basis, and with --gain, make lot postings' cost
+/// basis their transacted cost, both before lot detail is collapsed (which
+/// merges a disposal's per-lot fragments, losing their bases); then
+/// collapse lot detail, unless --lots or --ignore-lots keeps it, or the
+/// command (holdings) aggregates lots itself.
+fn prepare_lot_detail(opts: &CliOpts, j: &mut Journal) {
+    if opts.spec.opts.conversion_op == Some(ConversionOp::ToCost) {
+        journal_to_cost(ConversionOp::ToCost, j);
+    }
+    if opts.spec.opts.balance_calc == crate::reports::opts::BalanceCalculation::Gain {
+        for p in j.txns.iter_mut().flat_map(|t| &mut t.postings) {
+            p.amount = p.amount.map(|a| a.clone().set_cost_to_basis());
+        }
+    }
+    let keep_lots = opts.raw.bool("lots")
+        || opts.raw.bool("ignore-lots")
+        || opts.raw.string("command") == Some("holdings");
+    if !keep_lots {
+        crate::lots::journal_collapse_lot_detail(j);
+    }
 }
 
 /// Warn if -X or --value asks for a commodity which valuation can not

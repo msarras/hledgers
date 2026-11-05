@@ -41,6 +41,19 @@ fn parse_check(s: &str) -> Option<usize> {
     CHECKS.iter().position(|c| c.starts_with(&capitalised))
 }
 
+/// Reject an unknown check name while the arguments are parsed, before
+/// the journal is read and can hide it with its own errors (checkmode's
+/// checkArg, reported the way cmdargs reports an argument's error).
+pub fn validate_check_args(raw: &crate::cli::args::RawOpts) -> Result<(), String> {
+    for a in raw.args() {
+        let name = words_quoted(a).and_then(|ws| ws.into_iter().next());
+        if name.as_deref().and_then(parse_check).is_none() {
+            return Err(format!("Unhandled argument, unknown check name: {a}"));
+        }
+    }
+    Ok(())
+}
+
 /// Run the check command (check): the named checks, in their order. The
 /// basic checks, and balanced (which forbids inferring costs), were done
 /// when the journal was read.
@@ -68,7 +81,7 @@ pub fn check(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             "Recentassertions" => checks::journal_check_recent_assertions(j)?,
             "Tags" => checks::journal_check_tags(j)?,
             "Uniqueleafnames" => checks::journal_check_uniqueleafnames(j)?,
-            // checked when reading; M6: lots (journalCheckLots is a no-op there too)
+            // checked when reading (journalCheckLots is a no-op)
             _ => {}
         }
     }

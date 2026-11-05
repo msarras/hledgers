@@ -3,8 +3,8 @@
 //! order that infers missing information, checks it, and adds derived data.
 //!
 //! The parser keeps every list in file order, so upstream's journalReverse
-//! has nothing to do here. The lot stages of milestone 6 are present,
-//! returning the journal unchanged until then.
+//! has nothing to do here. The lot stages run only for journals that use
+//! lots, and the lot checks only when lots are not ignored.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -18,6 +18,7 @@ use crate::amount::{
 };
 use crate::dates::DateSpan;
 use crate::decimal::Decimal;
+use crate::lots::{calculate, classify};
 use crate::model::{Commodity, CommodityAliases, Journal, Posting, Tag, Transaction};
 
 /// Finalise a journal parsed from this file and text (journalFinalise).
@@ -28,6 +29,10 @@ pub fn journal_finalise(
     mut j: Journal,
     st: ParseState,
 ) -> Result<Journal, String> {
+    // does the journal use lots, and are lot errors wanted?
+    let has_lots = crate::lots::journal_has_lot_features(&j);
+    let lenient = lenient_lots(iopts);
+    let check_lots = has_lots && !lenient;
     j.global_commodity_styles = iopts.balancing.commodity_styles.clone().unwrap_or_default();
     j.default_commodity = st.default_commodity;
     warn_if_many_forecast_transactions(iopts, &j);
@@ -44,19 +49,29 @@ pub fn journal_finalise(
     // pre-balancing cost and equity tagging
     j = journal_tag_costs_and_equity_and_maybe_infer_costs(iopts, false, j)?;
     // lot cost basis and transacted cost inference, gain posting tagging
-    j = journal_infer_basis_from_account_names(j)?;
-    j = journal_infer_postings_transacted_cost(j);
-    j = journal_check_acquire_basis(j)?;
-    j = journal_tag_gain_postings(j)?;
+    if has_lots {
+        j = classify::journal_infer_basis_from_account_names(lenient, j)?;
+        j = classify::journal_infer_postings_transacted_cost(j);
+    }
+    if check_lots {
+        j = classify::journal_check_acquire_basis(j)?;
+    }
+    if has_lots {
+        j = classify::journal_tag_gain_postings(lenient, iopts.verbose_tags, j);
+    }
     // auto postings
     if iopts.auto && !j.txn_modifiers.is_empty() {
         j = journal_add_auto_postings(iopts, j)?;
     }
     // transaction balancing
     j = journal_check_ordereddates(iopts, j)?;
-    let (mut j, assertion_error) = journal_balance_transactions_and_defer_assertions(iopts, j)?;
+    let (j, assertion_error) = journal_balance_transactions_and_defer_assertions(iopts, j)?;
     // lot classification
-    j = journal_classify_lot_postings(j);
+    let (mut j, tied) = if check_lots {
+        classify::journal_classify_lot_postings(iopts.verbose_tags, j)
+    } else {
+        (j, Vec::new())
+    };
     // post-balancing enrichment
     journal_infer_commodity_styles(&mut j);
     journal_postings_add_commodity_tags(&mut j);
@@ -68,7 +83,15 @@ pub fn journal_finalise(
     j = journal_infer_market_prices_from_transactions(j);
     journal_renumber_account_declarations(&mut j);
     // lots and capital gains
-    j = journal_calculate_and_check_lots(j)?;
+    if check_lots {
+        calculate::journal_check_lots_tag_values(&j)?;
+        calculate::journal_check_lots_method_coherence(&j)?;
+        j = calculate::journal_calculate_lots(iopts.verbose_tags, j, tied)?;
+        j = calculate::journal_add_or_check_gain_postings(iopts.verbose_tags, j)?;
+    }
+    if has_lots {
+        calculate::journal_strip_balancer_copied_bases(&mut j);
+    }
     // equity inference
     if iopts.infer_equity {
         j = journal_infer_equity_from_costs(iopts, j);
@@ -528,33 +551,6 @@ fn journal_tag_costs_and_equity_and_maybe_infer_costs(
     )
 }
 
-/// Infer cost bases from lot subaccount names
-/// (journalInferBasisFromAccountNames).
-// M6: lots; the journal is unchanged until then.
-fn journal_infer_basis_from_account_names(j: Journal) -> Result<Journal, String> {
-    Ok(j)
-}
-
-/// Infer a transacted cost from the cost basis in acquire-shaped postings
-/// (journalInferPostingsTransactedCost).
-// M6: lots; the journal is unchanged until then.
-fn journal_infer_postings_transacted_cost(j: Journal) -> Journal {
-    j
-}
-
-/// Check that acquire-shaped postings' cost bases and costs agree
-/// (journalCheckAcquireBasis).
-// M6: lots; the journal is unchanged until then.
-fn journal_check_acquire_basis(j: Journal) -> Result<Journal, String> {
-    Ok(j)
-}
-
-/// Tag user-written gain postings in disposals (journalTagGainPostings).
-// M6: lots; the journal is unchanged until then.
-fn journal_tag_gain_postings(j: Journal) -> Result<Journal, String> {
-    Ok(j)
-}
-
 /// Balance the transactions without checking assertions, then add auto
 /// postings (journalAddAutoPostings).
 fn journal_add_auto_postings(iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
@@ -614,12 +610,6 @@ fn lenient_lots(iopts: &InputOpts) -> bool {
     iopts.ignore_lots && !iopts.strict && !iopts.checking("lots")
 }
 
-/// Detect and classify lot postings (journalClassifyLotPostings).
-// M6: lots; the journal is unchanged until then.
-fn journal_classify_lot_postings(j: Journal) -> Journal {
-    j
-}
-
 /// Add to each posting the tags of its amounts' commodities, where it does
 /// not have them already (journalPostingsAddCommodityTags).
 fn journal_postings_add_commodity_tags(j: &mut Journal) {
@@ -653,15 +643,6 @@ pub fn journal_renumber_account_declarations(j: &mut Journal) {
     for (i, (_, info)) in j.declared_accounts.iter_mut().enumerate() {
         info.order = i + 1;
     }
-}
-
-/// Check lot tags and methods, calculate lots and add or check gain
-/// postings, and remove the balancer's copied bases (journalCheckLotsTagValues,
-/// journalCheckLotsMethodCoherence, journalCalculateLots,
-/// journalAddOrCheckGainPostings, journalStripBalancerCopiedBases).
-// M6: lots; the journal is unchanged until then.
-fn journal_calculate_and_check_lots(j: Journal) -> Result<Journal, String> {
-    Ok(j)
 }
 
 /// Infer equity postings from costs (journalInferEquityFromCosts).
