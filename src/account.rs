@@ -1,9 +1,12 @@
 //! Account names and account types (Hledger.Data.AccountName,
-//! Hledger.Data.AccountType, and their types in Hledger.Data.Types).
+//! Hledger.Data.AccountType, and their types in Hledger.Data.Types); account
+//! trees are in [`tree`].
 //!
 //! An account name is a string like `assets:cash:petty`, its components
 //! separated by colons. A posting's account name may be wrapped in
 //! parentheses or brackets to mark the posting virtual or balanced virtual.
+
+pub mod tree;
 
 use std::fmt;
 use std::sync::{Arc, LazyLock};
