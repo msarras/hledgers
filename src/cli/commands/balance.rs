@@ -2,12 +2,13 @@
 //! Hledger.Cli.Commands.Balance.Internal): accounts with their balance
 //! changes or balances, in one column (a Ledger-style list or tree, lines
 //! laid out by a --format line format), or with a report interval, in a
-//! table with a column per period. Text output; the other output formats
-//! and charts come with hledgers milestone 5c, budgets with 5b.
+//! table with a column per period; or a budget report. Text, csv and tsv
+//! output; the other output formats and charts come later in hledgers
+//! milestone 5c.
 
 use std::collections::BTreeSet;
 
-use crate::account::{UNBUDGETED_ACCOUNT_NAME, account_name_drop};
+use crate::account::{UNBUDGETED_ACCOUNT_NAME, account_name_drop, account_name_level};
 use crate::amount::render::{
     AmountFormat, show_mixed_amount_b, show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
 };
@@ -19,7 +20,7 @@ use crate::cli::io::{warn_if_large_multi_period_report, with_title};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
-use crate::dates::{DateSpan, Interval, prevday};
+use crate::dates::{DateSpan, Day, Interval, prevday};
 use crate::decimal::Decimal;
 use crate::model::Journal;
 use crate::reports::budget::{BudgetCell, BudgetReport, budget_report};
@@ -32,6 +33,12 @@ use crate::reports::periodic::{
 };
 use crate::text::{Wide, format_text};
 use crate::valuation::{ConversionOp, ValuationType};
+use crate::write::csv::{print_csv, print_tsv};
+use crate::write::spreadsheet::{
+    self as spr, Border, CellType, Emphasis, Lines, Style, add_header_borders, add_row_span_header,
+    cell_from_amount, cell_from_mixed_amount, cells_from_mixed_amount, horizontal_span,
+    raw_table_content,
+};
 use crate::write::string_format::{Component, Field, StringFormat};
 use crate::write::table::{
     Align, Cell, Header, Line, Table, TableOpts, concat_tables, render_columns, render_row,
@@ -123,24 +130,41 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         ropts.interval != Interval::NoInterval || (layout == Layout::Tidy && delimited);
     let styles = balance_report_styles(&ropts, j);
     let other_format = |fmt: &str| match fmt {
-        "csv" | "tsv" | "html" | "json" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
+        "html" | "json" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
         _ => unsupported_output_format_error(fmt),
+    };
+    let delimited_text = |records: Vec<Vec<String>>| {
+        if fmt == "csv" {
+            print_csv(&records)
+        } else {
+            print_tsv(&records)
+        }
     };
     if budget {
         warn_if_large_multi_period_report(opts, j);
-        if fmt != "txt" {
+        if !matches!(fmt.as_str(), "txt" | "csv" | "tsv") {
             return Err(other_format(&fmt));
         }
         let (span, _) = opts.spec.report_span(j);
         let mut report = budget_report(&opts.spec, &opts.input.balancing, span, j)?;
         report.style_amounts(&styles);
-        budget_report_as_text(&ropts, layout, &report)
+        match fmt.as_str() {
+            "txt" => budget_report_as_text(&ropts, layout, &report),
+            _ => {
+                let fmt = AmountFormat::MACHINE;
+                let (_, rows) = budget_report_as_spreadsheet(&fmt, &ropts, layout, &report)?;
+                Ok(delimited_text(raw_table_content(rows)))
+            }
+        }
     } else if multiperiod {
         warn_if_large_multi_period_report(opts, j);
         let mut report = multi_balance_report(&opts.spec, j)?;
         report.style_amounts(&styles);
         match fmt.as_str() {
             "txt" => Ok(multi_balance_report_as_text(&ropts, layout, &report)),
+            "csv" | "tsv" => Ok(delimited_text(multi_balance_report_as_csv(
+                &ropts, layout, &report,
+            ))),
             f => Err(other_format(f)),
         }
     } else {
@@ -151,6 +175,11 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
                 opts,
                 balance_report_as_text(&ropts, layout, &report)?,
             )),
+            "csv" | "tsv" => {
+                let rows =
+                    balance_report_as_spreadsheet(&AmountFormat::MACHINE, &ropts, layout, &report);
+                Ok(delimited_text(raw_table_content(rows)))
+            }
             f => Err(other_format(f)),
         }
     }
@@ -672,10 +701,7 @@ pub fn multi_balance_report_as_part_table(
 }
 
 /// A multi-period report row's cells as lines of text, laid out as the
-/// layout says: the amounts on one line each (wide), one commodity per
-/// line (tall), as bare numbers after a commodity column (bare), or a
-/// column per commodity (barewide); a tidy layout has none in text
-/// (multiBalanceRowAsText, multiBalanceRowAsCellBuilders).
+/// layout says; a tidy layout has none in text (multiBalanceRowAsText).
 pub fn multi_balance_row_as_text<N>(
     ropts: &ReportOpts,
     layout: Layout,
@@ -686,21 +712,62 @@ pub fn multi_balance_row_as_text<N>(
         colour: ropts.color,
         ..AmountFormat::ONE_LINE_NO_COST
     };
-    let mut amounts: Vec<&MixedAmount> = Vec::new();
+    let date_span_cell =
+        |s: &DateSpan| spr::Cell::new(render_period_heading(ropts.period_titles, s));
+    let rows = multi_balance_row_as_cell_builders(
+        &fmt,
+        ropts,
+        layout,
+        &[],
+        all_commodities,
+        RowClass::Value,
+        &date_span_cell,
+        row,
+    );
+    raw_table_content(rows)
+}
+
+/// A multi-period report row's cells as lines, laid out as the layout
+/// says (multiBalanceRowAsCellBuilders): the amounts on one line each
+/// (wide), one commodity per line (tall), as bare numbers after a
+/// commodity column (bare), a column per commodity of the report
+/// (barewide), or a line per period and commodity, with the period's
+/// name, first and last dates and the commodity (tidy, which has no total
+/// or average). The periods' amounts come first unless --summary-only,
+/// then the row's total and average if wanted. `colspans` are the
+/// report's periods (none for text); `date_span_cell` shows one.
+#[allow(clippy::too_many_arguments)]
+pub fn multi_balance_row_as_cell_builders<N>(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    colspans: &[DateSpan],
+    all_commodities: &[Sym],
+    rc: RowClass,
+    date_span_cell: &dyn Fn(&DateSpan) -> spr::Cell<String>,
+    row: &PeriodicReportRow<N, MixedAmount>,
+) -> Vec<Vec<spr::Cell<Wide>>> {
+    let classified: Vec<(&str, &MixedAmount)> =
+        row.amounts.iter().map(|m| (amount_class(rc), m)).collect();
+    let mut clsamts: Vec<(&str, &MixedAmount)> = Vec::new();
     if !ropts.summary_only {
-        amounts.extend(&row.amounts);
+        clsamts.extend(&classified);
     }
     if ropts.has_totals_column() && !row.amounts.is_empty() {
-        amounts.push(&row.total);
+        clsamts.push((row_total_class(rc), &row.total));
     }
     if ropts.average && !row.amounts.is_empty() {
-        amounts.push(&row.average);
+        clsamts.push((row_average_class(rc), &row.average));
     }
-    let bare = |cs: &[Sym]| AmountFormat {
-        commodity: false,
-        commodity_order: Some(cs.to_vec()),
-        min_width: None,
-        ..fmt.clone()
+    let wb_cell = |s: &str| spr::Cell::new(Wide::new(s));
+    let cs: Vec<Sym> = if clsamts.iter().all(|(_, m)| m.looks_zero()) {
+        vec![Sym::from("")]
+    } else {
+        (clsamts.iter())
+            .flat_map(|(_, m)| m.commodities())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     };
     match layout {
         Layout::Wide(width) => {
@@ -709,9 +776,8 @@ pub fn multi_balance_row_as_text<N>(
                 ..fmt.clone()
             };
             vec![
-                amounts
-                    .iter()
-                    .map(|m| show_mixed_amount_b(&fmt, m))
+                (clsamts.iter())
+                    .map(|(cls, m)| cell_from_mixed_amount(&fmt, cls, m))
                     .collect(),
             ]
         }
@@ -720,8 +786,8 @@ pub fn multi_balance_row_as_text<N>(
                 max_width: None,
                 ..fmt.clone()
             };
-            let columns: Vec<Vec<Wide>> = (amounts.iter())
-                .map(|m| show_mixed_amount_lines_b(&fmt, m))
+            let columns: Vec<Vec<spr::Cell<Wide>>> = (clsamts.iter())
+                .map(|(cls, m)| cells_from_mixed_amount(&fmt, cls, m))
                 .collect();
             if columns.is_empty() {
                 return vec![vec![]];
@@ -730,41 +796,66 @@ pub fn multi_balance_row_as_text<N>(
             (0..n)
                 .map(|i| {
                     (columns.iter())
-                        .map(|c| c.get(i).cloned().unwrap_or_default())
+                        .map(|c| c.get(i).cloned().unwrap_or_else(spr::Cell::empty))
                         .collect()
                 })
                 .collect()
         }
         Layout::Bare => {
-            let cs: Vec<Sym> = if amounts.iter().all(|m| m.looks_zero()) {
-                vec![Sym::from("")]
-            } else {
-                (amounts.iter())
-                    .flat_map(|m| m.commodities())
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            };
-            let fmt = bare(&cs);
-            let columns: Vec<Vec<Wide>> = (amounts.iter())
-                .map(|m| show_mixed_amount_lines_b(&fmt, m))
+            let fmt = set_display_commodity_bare(&cs, fmt);
+            let columns: Vec<Vec<spr::Cell<Wide>>> = (clsamts.iter())
+                .map(|(cls, m)| cells_from_mixed_amount(&fmt, cls, m))
                 .collect();
             (cs.iter().zip(transpose(&columns)))
                 .map(|(c, mut line)| {
-                    line.insert(0, Wide::new(c));
+                    line.insert(0, wb_cell(c));
                     line
                 })
                 .collect()
         }
         Layout::BareWide => {
-            let fmt = bare(all_commodities);
+            let fmt = set_display_commodity_bare(all_commodities, fmt);
             vec![
-                (amounts.iter())
-                    .flat_map(|m| show_mixed_amount_lines_b(&fmt, m))
+                (clsamts.iter())
+                    .flat_map(|(cls, m)| cells_from_mixed_amount(&fmt, cls, m))
                     .collect(),
             ]
         }
-        Layout::Tidy => Vec::new(),
+        Layout::Tidy => {
+            let fmt = set_display_commodity_bare(&cs, fmt);
+            let date_cell = |d: Option<Day>| spr::Cell {
+                typ: CellType::Date,
+                ..wb_cell(&d.map_or_else(String::new, |d| d.to_string()))
+            };
+            (colspans.iter().zip(&classified))
+                .flat_map(|(span, (cls, m))| {
+                    (cs.iter().zip(cells_from_mixed_amount(&fmt, cls, m)))
+                        .map(|(c, a)| {
+                            vec![
+                                date_span_cell(span).map(|s| Wide::new(&s)),
+                                date_cell(span.start()),
+                                date_cell(span.end().map(prevday)),
+                                wb_cell(c),
+                                a,
+                            ]
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        }
+    }
+}
+
+/// An amount format for the bare layouts, which show commodity symbols in
+/// their own column(s): no symbols, the amounts in this commodity order,
+/// unpadded (setDisplayCommodityBare). The order must include every
+/// commodity to be shown: an amount in another is dropped.
+fn set_display_commodity_bare(cs: &[Sym], fmt: &AmountFormat) -> AmountFormat {
+    AmountFormat {
+        commodity: false,
+        commodity_order: Some(cs.to_vec()),
+        min_width: None,
+        ..fmt.clone()
     }
 }
 
@@ -840,6 +931,534 @@ pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan], span: &DateSpa
             .end()
             .map_or_else(String::new, |e| prevday(e).to_string()),
     }
+}
+
+// Spreadsheet output (csv, tsv, html, fods)
+
+/// Whether a row has an account's figures or the totals (RowClass).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowClass {
+    Value,
+    Total,
+}
+
+/// The class of an account cell (accountClass).
+pub const ACCOUNT_CLASS: &str = "account";
+
+/// The heading of the totals row in spreadsheets
+/// (totalRowHeadingSpreadsheet, totalRowHeadingBudgetCsv).
+pub const TOTAL_ROW_HEADING_SPREADSHEET: &str = "Total:";
+
+/// A no-break space, which indents account names in spreadsheets (nbsp).
+pub const NBSP: &str = "\u{a0}";
+
+/// The class of an account cell in a tree-mode report: "account", its
+/// row's indent, and the account's depth (its name's level, deeper than
+/// the indent when boring parents are squashed into its row), so that a
+/// UI can fold the tree; in list mode just "account" (treeAccountClass).
+pub fn tree_account_class(ropts: &ReportOpts, indent: usize, account: &str) -> String {
+    if ropts.account_list_mode == AccountListMode::Tree {
+        format!(
+            "account indent-{indent} depth-{}",
+            account_name_level(account)
+        )
+    } else {
+        ACCOUNT_CLASS.to_string()
+    }
+}
+
+/// The class of a figure (amountClass).
+fn amount_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "amount",
+        RowClass::Total => "amount coltotal",
+    }
+}
+
+/// The class of a row's total (rowTotalClass).
+fn row_total_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "amount rowtotal",
+        RowClass::Total => "amount coltotal",
+    }
+}
+
+/// The class of a row's average (rowAverageClass).
+fn row_average_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "amount rowaverage",
+        RowClass::Total => "amount colaverage",
+    }
+}
+
+/// The class of a budget goal (budgetClass).
+fn budget_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "budget",
+        RowClass::Total => "budget coltotal",
+    }
+}
+
+/// The class of a row's total goal (budgetTotalClass).
+fn budget_total_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "budget rowtotal",
+        RowClass::Total => "budget coltotal",
+    }
+}
+
+/// The class of a row's average goal (budgetAverageClass).
+fn budget_average_class(rc: RowClass) -> &'static str {
+    match rc {
+        RowClass::Value => "budget rowaverage",
+        RowClass::Total => "budget colaverage",
+    }
+}
+
+/// A period's heading: its compact name, or with --period-titles=dates its
+/// dates (renderPeriodHeading).
+pub fn render_period_heading(titles: PeriodTitles, span: &DateSpan) -> String {
+    match titles {
+        PeriodTitles::Dates => span.show_full(),
+        PeriodTitles::Compact => span.to_string(),
+    }
+}
+
+/// Totals rows: in the totals style, a double line above the first
+/// (addTotalBorders).
+pub fn add_total_borders<T>(rows: Vec<Vec<spr::Cell<T>>>) -> Vec<Vec<spr::Cell<T>>> {
+    (rows.into_iter().enumerate())
+        .map(|(i, row)| {
+            let top = if i == 0 {
+                Lines::DoubleLine
+            } else {
+                Lines::NoLine
+            };
+            (row.into_iter())
+                .map(|c| spr::Cell {
+                    style: Style::Body(Emphasis::Total),
+                    border: Border {
+                        top,
+                        ..Border::default()
+                    },
+                    ..c
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A single-column balance report as a spreadsheet: the heading row, a
+/// row per account (several in the bare layout, one per commodity), and
+/// unless --no-total the totals row; transposed with --transpose
+/// (balanceReportAsSpreadsheet, balanceReportAsSpreadsheetParts).
+pub fn balance_report_as_spreadsheet(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &BalanceReport,
+) -> Vec<Vec<spr::Cell<String>>> {
+    let all_commodities: Vec<Sym> = (report.items.iter())
+        .flat_map(|(_, m)| m.commodities())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let h_cell = |cls: &str, label: &str| spr::Cell::header(label).with_class(cls);
+    let mut headers = vec![h_cell(ACCOUNT_CLASS, "account")];
+    match layout {
+        Layout::BareWide => headers.extend(all_commodities.iter().map(|c| h_cell("amount", c))),
+        Layout::Bare => {
+            headers.push(spr::Cell::header("commodity"));
+            headers.push(h_cell("amount", "balance"));
+        }
+        _ => headers.push(h_cell("amount", "balance")),
+    }
+    let render_amount = |rc: RowClass, m: &MixedAmount| {
+        let fmt = if layout == Layout::Bare {
+            AmountFormat {
+                commodity: false,
+                commodity_order: Some(m.commodities().into_iter().collect()),
+                ..fmt.clone()
+            }
+        } else {
+            fmt.clone()
+        };
+        cell_from_mixed_amount(&fmt, amount_class(rc), m).into_text()
+    };
+    let rows = |rc: RowClass, name: &DisplayName, m: &MixedAmount| -> Vec<Vec<spr::Cell<String>>> {
+        let account_cell = match rc {
+            RowClass::Total => spr::Cell::new(name.name.to_string()).with_class(ACCOUNT_CLASS),
+            RowClass::Value => spr::Cell::new(render_balance_acct(ropts, NBSP, name))
+                .with_class(&tree_account_class(ropts, name.indent, &name.full)),
+        };
+        let lines = match layout {
+            Layout::BareWide => {
+                let fmt = AmountFormat {
+                    commodity: false,
+                    commodity_order: Some(all_commodities.clone()),
+                    ..AmountFormat::MACHINE
+                };
+                vec![
+                    (show_mixed_amount_lines_parts_b(&fmt, m).into_iter())
+                        .map(|(text, a)| cell_from_amount(&fmt, amount_class(rc), text.s, a))
+                        .collect(),
+                ]
+            }
+            Layout::Bare => (m.clone().strip_costs().amounts().into_iter())
+                .map(|a| {
+                    vec![
+                        spr::Cell::new(a.commodity.to_string()),
+                        render_amount(rc, &MixedAmount::from_amount(a)),
+                    ]
+                })
+                .collect(),
+            _ => vec![vec![render_amount(rc, m)]],
+        };
+        add_row_span_header(&[account_cell], lines)
+    };
+    let mut table = vec![add_header_borders(headers)];
+    for (name, m) in &report.items {
+        table.extend(rows(RowClass::Value, name, m));
+    }
+    if !ropts.no_total {
+        let total_name = DisplayName::flat(TOTAL_ROW_HEADING_SPREADSHEET);
+        table.extend(add_total_borders(rows(
+            RowClass::Total,
+            &total_name,
+            &report.total,
+        )));
+    }
+    if ropts.transpose {
+        table = spr::transpose(table);
+    }
+    table
+}
+
+/// A multi-period balance report's spreadsheet rows: the heading rows
+/// (two in the bare-wide layout, the periods above the commodities), the
+/// account rows, and unless --no-total the totals rows; with these
+/// commodity columns in the bare-wide layout
+/// (balanceSubReportAsSpreadsheetParts).
+pub fn balance_sub_report_as_spreadsheet_parts(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    all_commodities: &[Sym],
+    report: &MultiBalanceReport,
+) -> SpreadsheetParts {
+    let colspans = &report.dates;
+    let h_cell = |cls: &str, label: &str| spr::Cell::header(label).with_class(cls);
+    let mut date_headers: Vec<spr::Cell<String>> = Vec::new();
+    if !ropts.summary_only {
+        date_headers.extend(colspans.iter().map(|s| {
+            spr::Cell::header(&render_period_heading(ropts.period_titles, s))
+                .with_class(amount_class(RowClass::Value))
+        }));
+    }
+    if ropts.has_totals_column() {
+        date_headers.push(h_cell(row_total_class(RowClass::Value), "total"));
+    }
+    if ropts.average {
+        date_headers.push(h_cell(row_average_class(RowClass::Value), "average"));
+    }
+    let mut headers = vec![h_cell(ACCOUNT_CLASS, "account")];
+    match layout {
+        Layout::Tidy => headers.extend(TIDY_COLUMN_LABELS.iter().map(|l| spr::Cell::header(l))),
+        Layout::BareWide => {
+            for _ in &date_headers {
+                headers.extend(all_commodities.iter().map(|c| spr::Cell::header(c)));
+            }
+        }
+        Layout::Bare => {
+            headers.push(spr::Cell::header("commodity"));
+            headers.extend(date_headers.iter().cloned());
+        }
+        _ => headers.extend(date_headers.iter().cloned()),
+    }
+    let headers = add_header_borders(headers);
+    let all_headers = match layout {
+        Layout::BareWide => {
+            let mut top = vec![spr::Cell::empty()];
+            for h in date_headers {
+                top.extend(horizontal_span(all_commodities.len(), h));
+            }
+            let top = (top.into_iter())
+                .map(|c| spr::Cell {
+                    border: Border::default(),
+                    ..c
+                })
+                .collect();
+            vec![top, headers]
+        }
+        _ => vec![headers],
+    };
+    let date_span_cell =
+        |s: &DateSpan| spr::Cell::new(render_period_heading(ropts.period_titles, s));
+    let mut body = Vec::new();
+    for row in &report.rows {
+        let account_cell = spr::Cell::new(render_balance_acct(ropts, NBSP, &row.name))
+            .with_class(&tree_account_class(ropts, row.name.indent, &row.name.full));
+        let lines = multi_balance_row_as_cell_builders(
+            fmt,
+            ropts,
+            layout,
+            colspans,
+            all_commodities,
+            RowClass::Value,
+            &date_span_cell,
+            row,
+        );
+        let lines = (lines.into_iter())
+            .map(|l| l.into_iter().map(spr::Cell::into_text).collect())
+            .collect();
+        body.extend(add_row_span_header(&[account_cell], lines));
+    }
+    let totals = if ropts.no_total {
+        Vec::new()
+    } else {
+        multi_balance_totals_rows(
+            fmt,
+            ropts,
+            layout,
+            all_commodities,
+            colspans,
+            TOTAL_ROW_HEADING_SPREADSHEET,
+            &report.totals,
+        )
+    };
+    (all_headers, body, totals)
+}
+
+/// A spreadsheet's heading rows, body rows and totals rows.
+pub type SpreadsheetParts = (spr::Rows, spr::Rows, spr::Rows);
+
+/// The totals row of a multi-period report as spreadsheet rows: the label,
+/// then a total per column (multiBalanceTotalsRows).
+pub fn multi_balance_totals_rows<N>(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    all_commodities: &[Sym],
+    colspans: &[DateSpan],
+    label: &str,
+    row: &PeriodicReportRow<N, MixedAmount>,
+) -> Vec<Vec<spr::Cell<String>>> {
+    let date_span_cell =
+        |s: &DateSpan| spr::Cell::new(render_period_heading(ropts.period_titles, s));
+    let lines = multi_balance_row_as_cell_builders(
+        fmt,
+        ropts,
+        layout,
+        colspans,
+        all_commodities,
+        RowClass::Total,
+        &date_span_cell,
+        row,
+    );
+    let lines = (lines.into_iter())
+        .map(|l| l.into_iter().map(spr::Cell::into_text).collect())
+        .collect();
+    let label = spr::Cell::new(label.to_string()).with_class(ACCOUNT_CLASS);
+    add_total_borders(add_row_span_header(&[label], lines))
+}
+
+/// The tidy layout's column headings after the account's
+/// (tidyColumnLabels).
+pub const TIDY_COLUMN_LABELS: [&str; 5] =
+    ["period", "start_date", "end_date", "commodity", "value"];
+
+/// The number of heading columns of a multi-period report's spreadsheet
+/// (multiBalanceReportNumHeaderColumns).
+pub fn multi_balance_report_num_header_columns(layout: Layout) -> usize {
+    match layout {
+        Layout::Bare => 2,
+        Layout::Tidy => 0,
+        _ => 1,
+    }
+}
+
+/// A multi-period balance report as CSV records: the heading rows, the
+/// account rows and unless --no-total the totals rows, transposed with
+/// --transpose (multiBalanceReportAsCsv).
+pub fn multi_balance_report_as_csv(
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &MultiBalanceReport,
+) -> Vec<Vec<String>> {
+    let commodities = all_commodities_from_periodic_report(&report.rows);
+    let (mut rows, body, totals) = balance_sub_report_as_spreadsheet_parts(
+        &AmountFormat::MACHINE,
+        ropts,
+        layout,
+        &commodities,
+        report,
+    );
+    rows.extend(body);
+    rows.extend(totals);
+    let records = raw_table_content(rows);
+    if ropts.transpose {
+        transpose(&records)
+    } else {
+        records
+    }
+}
+
+/// A budget report as a spreadsheet, with the numbers of its heading rows
+/// and heading columns (budgetReportAsSpreadsheet): each period's actual
+/// amounts and goals in alternating columns, then the row totals' and
+/// averages' if wanted; the wide, bare and bare-wide layouts only;
+/// transposed with --transpose.
+pub fn budget_report_as_spreadsheet(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &BudgetReport,
+) -> Result<spr::Sheet, String> {
+    match layout {
+        Layout::Wide(_) | Layout::Bare | Layout::BareWide => {}
+        Layout::Tall => return Err("LayoutTall not supported for the chosen output format.".into()),
+        Layout::Tidy => return Err("LayoutTidy not supported for the chosen output format.".into()),
+    }
+    let mut leading_headers = vec!["Account".to_string()];
+    if layout == Layout::Bare {
+        leading_headers.push("Commodity".to_string());
+    }
+    let mut date_headers: Vec<String> = Vec::new();
+    if !ropts.summary_only {
+        for s in &report.dates {
+            date_headers.push(render_period_heading(ropts.period_titles, s));
+            date_headers.push("budget".to_string());
+        }
+    }
+    if ropts.row_total {
+        date_headers.extend(["Total".to_string(), "budget".to_string()]);
+    }
+    if ropts.average {
+        date_headers.extend(["Average".to_string(), "budget".to_string()]);
+    }
+    let all_commodities: Vec<Sym> = (report.rows.iter())
+        .flat_map(|r| r.amounts.iter())
+        .flat_map(|(actual, goal)| actual.iter().chain(goal))
+        .flat_map(MixedAmount::commodities)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let headers = |hs: Vec<String>| hs.iter().map(|h| spr::Cell::header(h)).collect::<Vec<_>>();
+    let all_headers = match layout {
+        Layout::BareWide => {
+            let mut top = vec![spr::Cell::empty()];
+            for h in &date_headers {
+                top.extend(horizontal_span(all_commodities.len(), spr::Cell::header(h)));
+            }
+            let mut second = leading_headers.clone();
+            for _ in &date_headers {
+                second.extend(all_commodities.iter().map(|c| c.to_string()));
+            }
+            vec![top, add_header_borders(headers(second))]
+        }
+        _ => {
+            let mut hs = leading_headers.clone();
+            hs.extend(date_headers);
+            vec![add_header_borders(headers(hs))]
+        }
+    };
+    let mut rows = all_headers;
+    let fixed = (rows.len(), leading_headers.len());
+    for row in &report.rows {
+        let account_cell = spr::Cell::new(render_balance_acct(ropts, NBSP, &row.name));
+        rows.extend(budget_row_as_texts(
+            fmt,
+            ropts,
+            layout,
+            &all_commodities,
+            RowClass::Value,
+            account_cell,
+            row,
+        ));
+    }
+    if !ropts.no_total {
+        let label = spr::Cell::new(TOTAL_ROW_HEADING_SPREADSHEET.to_string());
+        rows.extend(add_total_borders(budget_row_as_texts(
+            fmt,
+            ropts,
+            layout,
+            &all_commodities,
+            RowClass::Total,
+            label,
+            &report.totals,
+        )));
+    }
+    Ok(if ropts.transpose {
+        ((fixed.1, fixed.0), spr::transpose(rows))
+    } else {
+        (fixed, rows)
+    })
+}
+
+/// A budget report row's spreadsheet rows: the account cell, then the
+/// actual amounts and goals, as the layout says (budgetReportAsSpreadsheet's
+/// rowAsTexts).
+fn budget_row_as_texts<N>(
+    fmt: &AmountFormat,
+    ropts: &ReportOpts,
+    layout: Layout,
+    all_commodities: &[Sym],
+    rc: RowClass,
+    account_cell: spr::Cell<String>,
+    row: &PeriodicReportRow<N, BudgetCell>,
+) -> Vec<Vec<spr::Cell<String>>> {
+    let mut vals: Vec<(&str, Option<&MixedAmount>)> = Vec::new();
+    if !ropts.summary_only {
+        for (actual, goal) in &row.amounts {
+            vals.push((amount_class(rc), actual.as_ref()));
+            vals.push((budget_class(rc), goal.as_ref()));
+        }
+    }
+    if ropts.row_total {
+        vals.push((row_total_class(rc), row.total.0.as_ref()));
+        vals.push((budget_total_class(rc), row.total.1.as_ref()));
+    }
+    if ropts.average {
+        vals.push((row_average_class(rc), row.average.0.as_ref()));
+        vals.push((budget_average_class(rc), row.average.1.as_ref()));
+    }
+    let null = MixedAmount::null();
+    let bare_cells = |cs: &[Sym]| -> Vec<Vec<spr::Cell<String>>> {
+        let fmt = set_display_commodity_bare(cs, fmt);
+        (vals.iter())
+            .map(|(cls, m)| {
+                (cells_from_mixed_amount(&fmt, cls, m.unwrap_or(&null)).into_iter())
+                    .map(spr::Cell::into_text)
+                    .collect()
+            })
+            .collect()
+    };
+    let lines: Vec<Vec<spr::Cell<String>>> = match layout {
+        Layout::Bare => {
+            let cs: Vec<Sym> = (vals.iter())
+                .filter_map(|(_, m)| *m)
+                .flat_map(MixedAmount::commodities)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            (cs.iter().zip(transpose(&bare_cells(&cs))))
+                .map(|(c, mut line)| {
+                    line.insert(0, spr::Cell::new(c.to_string()));
+                    line
+                })
+                .collect()
+        }
+        Layout::BareWide => vec![bare_cells(all_commodities).concat()],
+        _ => vec![
+            (vals.iter())
+                .map(|(cls, m)| match m {
+                    None => spr::Cell::empty(),
+                    Some(m) => cell_from_mixed_amount(fmt, cls, m).into_text(),
+                })
+                .collect(),
+        ],
+    };
+    add_row_span_header(&[account_cell], lines)
 }
 
 // Budget reports
