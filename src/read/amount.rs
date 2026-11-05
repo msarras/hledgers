@@ -751,7 +751,9 @@ fn parensp(c: &mut Cursor, ctx: &AmountCtx, depth: usize) -> PResult<Amount> {
     c.skip_spaces();
     let a = sump(c, ctx, depth + 1)?;
     if !c.eat(')') {
-        return Err(c.unexpected(&[Item::label("closing parenthesis")]));
+        let mut expected = vec![Item::label("closing parenthesis")];
+        expected.extend(super::common::digit_hint(c));
+        return Err(c.unexpected(&expected));
     }
     c.skip_spaces();
     Ok(a)
@@ -986,7 +988,9 @@ fn lot_costp(c: &mut Cursor, ctx: &AmountCtx, quantity: &Decimal) -> PResult<Cos
         return Err(wrong_order(c));
     }
     if !c.eat('}') || (double && !c.eat('}')) {
-        return Err(c.unexpected(&[Item::tokens("}")]));
+        let mut expected = vec![Item::tokens("}")];
+        expected.extend(super::common::digit_hint(c));
+        return Err(c.unexpected(&expected));
     }
     Ok(if double {
         CostBasis {

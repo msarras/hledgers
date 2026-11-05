@@ -972,11 +972,10 @@ impl<'a> JournalParser<'a, '_> {
 
     /// `end apply account` (endapplyaccountdirectivep).
     fn end_apply_account_directivep(&mut self) -> R<()> {
-        let off = self.c.pos;
         rest_of_line(&mut self.c);
         if self.st.parent_accounts.pop().is_none() {
             return Err(Failure::Here(ParseError::trivial(
-                off,
+                self.c.pos,
                 Some(Item::tokens("End of apply account block with no beginning")),
                 &[],
             )));
@@ -1232,13 +1231,8 @@ impl<'a> JournalParser<'a, '_> {
             Err(_) if self.c.pos == amount_start => None,
             Err(e) => return Err(e.into()),
         };
-        // where a missing amount could have been
-        let hints: &[Item] = if amount.is_none() && self.c.pos == amount_start {
-            &[Item::Label(String::new())]
-        } else {
-            &[]
-        };
-        let hints: Vec<Item> = hints.iter().map(|_| Item::label("amount")).collect();
+        // what an error at the comment could also have been: a missing amount
+        let missing_amount = amount.is_none() && self.c.pos == amount_start;
         self.c.skip_spaces();
         let assertion = if self.c.peek() == Some('=') {
             let pos = self.pos();
@@ -1247,12 +1241,16 @@ impl<'a> JournalParser<'a, '_> {
         } else {
             None
         };
-        let hints = if assertion.is_some() || self.c.pos != amount_start {
-            Vec::new()
-        } else {
-            hints
-        };
-        self.c.skip_spaces();
+        let mut hints = Vec::new();
+        if missing_amount && assertion.is_none() && self.c.pos == amount_start {
+            hints.push(Item::label("amount"));
+        }
+        let spaced = self.c.skip_spaces();
+        hints.extend(super::common::digit_hint(&self.c));
+        // an assertion's amount may be followed by a cost (amountnobasisp)
+        if !spaced && assertion.as_ref().is_some_and(|a| a.amount.cost.is_none()) {
+            hints.push(Item::label("transaction price"));
+        }
         let (comment, tags, date, date2) = posting_commentp(&mut self.c, year, &hints)?;
         let posting = Posting {
             date,

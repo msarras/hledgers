@@ -146,6 +146,13 @@ pub fn peek_after_spaces(c: &Cursor) -> (bool, Option<char>) {
     (after.len() < rest.len(), after.chars().next())
 }
 
+/// The hint megaparsec keeps after a run of digits that could have been
+/// longer: "digit", if the text just before the cursor is a number's digits.
+pub fn digit_hint(c: &Cursor) -> Option<Item> {
+    let digit_before = c.pos > 0 && c.src.as_bytes()[c.pos - 1].is_ascii_digit();
+    digit_before.then(|| Item::label("digit"))
+}
+
 /// A newline, or the end of the input (eolof). `hints` are what an error
 /// here would also list.
 pub fn eolof(c: &mut Cursor, hints: &[Item]) -> PResult<()> {
@@ -414,7 +421,13 @@ fn comment_tags_and_dates(c: &mut Cursor, year: Option<i64>) -> PResult<(Vec<Tag
         let is_date = name == "date" || name == "date2";
         if name.is_empty() {
         } else if is_date && !matches!(c.peek(), None | Some(',' | '\n')) {
-            let d = datep(c, year)?;
+            let d = datep(c, year).map_err(|e| {
+                if e.offset() == value_start {
+                    c.unexpected(&[Item::label("full or partial date"), Item::EndOfInput])
+                } else {
+                    e
+                }
+            })?;
             dates.push((if name == "date" { "date" } else { "date2" }, d));
             read_up_to(c, ',', year, &mut dates)?;
             tags.push((
