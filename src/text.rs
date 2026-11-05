@@ -196,6 +196,55 @@ pub fn quote_if_spaced(s: &str) -> String {
     }
 }
 
+/// Without the single or double quotes enclosing it, if it has them
+/// (textStripQuotes).
+pub fn strip_quotes(s: &str) -> &str {
+    let enclosed = |q: char| s.len() >= 2 && s.starts_with(q) && s.ends_with(q);
+    if enclosed('\'') || enclosed('"') {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
+/// Text as Haskell shows a string, in double quotes with escapes: `\"`,
+/// `\\`, `\n` and the like for control characters, and decimal codes for
+/// characters beyond ASCII, `\&` separating a code from a following digit
+/// (show).
+pub fn show_string(s: &str) -> String {
+    const ASCII: [&str; 32] = [
+        "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "a", "b", "t", "n", "v", "f", "r", "SO",
+        "SI", "DLE", "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB", "CAN", "EM", "SUB", "ESC",
+        "FS", "GS", "RS", "US",
+    ];
+    let mut out = String::from("\"");
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        let next = chars.peek().copied();
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{7f}' => out.push_str("\\DEL"),
+            c if c > '\u{7f}' => {
+                out.push_str(&format!("\\{}", u32::from(c)));
+                if next.is_some_and(|n| n.is_ascii_digit()) {
+                    out.push_str("\\&");
+                }
+            }
+            c if c >= ' ' => out.push(c),
+            c => {
+                out.push('\\');
+                out.push_str(ASCII[c as usize]);
+                if c == '\u{e}' && next == Some('H') {
+                    out.push_str("\\&");
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// Split text into words at white space, as a shell does: white space inside
 /// single or double quotes does not split, and quotes enclosing a word or part
 /// of one are removed. None if a quote is not closed (wordsmay, words').
@@ -347,6 +396,24 @@ mod tests {
         assert_eq!(quote_if_spaced("'a b'"), "'a b'");
         assert_eq!(quote_if_needed("a'b"), "\"a'b\"");
         assert_eq!(quote_if_needed("ab"), "ab");
+    }
+
+    #[test]
+    fn haskell_strings() {
+        assert_eq!(show_string("a b"), "\"a b\"");
+        assert_eq!(show_string("x\"y\\z"), "\"x\\\"y\\\\z\"");
+        assert_eq!(show_string("d\u{e9}penses"), "\"d\\233penses\"");
+        assert_eq!(show_string("\u{e9}1"), "\"\\233\\&1\"");
+        assert_eq!(
+            show_string("\t\n\u{7}\u{0}\u{7f}'"),
+            "\"\\t\\n\\a\\NUL\\DEL'\""
+        );
+        assert_eq!(show_string("\u{e}H\u{1b}"), "\"\\SO\\&H\\ESC\"");
+        assert_eq!(strip_quotes("'a b'"), "a b");
+        assert_eq!(strip_quotes("\"a\""), "a");
+        assert_eq!(strip_quotes("'a\""), "'a\"");
+        assert_eq!(strip_quotes("'"), "'");
+        assert_eq!(strip_quotes("''"), "");
     }
 
     // The doctests of words' and wordsmay.
