@@ -227,34 +227,22 @@ impl Neg for Decimal {
     }
 }
 
-/// Adding zero gives the other operand unchanged, keeping its places.
+/// Addition aligns to the larger places (roundMax); a zero operand's places
+/// count too, so 1.50 + -1.50 + 1 = 1.00.
 impl Add for &Decimal {
     type Output = Decimal;
 
     fn add(self, rhs: &Decimal) -> Decimal {
-        if self.is_zero() {
-            return rhs.clone();
-        }
-        if rhs.is_zero() {
-            return self.clone();
-        }
         let (places, a, b) = self.aligned(rhs);
         Decimal::new(a + b, places)
     }
 }
 
-/// Subtracting from zero negates, keeping the places; subtracting zero gives
-/// the left operand unchanged.
+/// Subtraction aligns to the larger places (roundMax), a zero operand's too.
 impl Sub for &Decimal {
     type Output = Decimal;
 
     fn sub(self, rhs: &Decimal) -> Decimal {
-        if self.is_zero() {
-            return -rhs;
-        }
-        if rhs.is_zero() {
-            return self.clone();
-        }
         let (places, a, b) = self.aligned(rhs);
         Decimal::new(a - b, places)
     }
@@ -442,20 +430,25 @@ mod tests {
     }
 
     #[test]
-    fn addition_aligns_places_and_skips_zeros() {
+    fn addition_aligns_places_including_a_zero_operand() {
         assert_eq!(rep(&(dec("1.5") + dec("0.25"))), ("175".into(), 2));
         assert_eq!(rep(&(dec("1.50") + dec("-1.5"))), ("0".into(), 2));
-        // Adding zero gives the other operand, whatever the zero's places.
-        assert_eq!(rep(&(raw(0, 3) + raw(5, 1))), ("5".into(), 1));
-        assert_eq!(rep(&(raw(5, 1) + raw(0, 3))), ("5".into(), 1));
-        assert_eq!(rep(&(raw(0, 3) + raw(0, 1))), ("0".into(), 1));
+        // A zero operand's places count too (roundMax): hledger's balance
+        // totals show 1,000.50 + -1,000.50 + 1 as 1.00.
+        assert_eq!(rep(&(raw(0, 3) + raw(5, 1))), ("500".into(), 3));
+        assert_eq!(rep(&(raw(5, 1) + raw(0, 3))), ("500".into(), 3));
+        assert_eq!(rep(&(raw(0, 3) + raw(0, 1))), ("0".into(), 3));
+        assert_eq!(
+            rep(&(dec("1000.50") + dec("-1000.50") + dec("1"))),
+            ("100".into(), 2)
+        );
     }
 
     #[test]
     fn subtraction_and_negation_keep_places() {
         assert_eq!(rep(&(dec("1.5") - dec("0.25"))), ("125".into(), 2));
-        assert_eq!(rep(&(raw(0, 2) - raw(5, 1))), ("-5".into(), 1));
-        assert_eq!(rep(&(raw(5, 1) - raw(0, 3))), ("5".into(), 1));
+        assert_eq!(rep(&(raw(0, 2) - raw(5, 1))), ("-50".into(), 2));
+        assert_eq!(rep(&(raw(5, 1) - raw(0, 3))), ("500".into(), 3));
         assert_eq!(rep(&-raw(0, 2)), ("0".into(), 2));
         assert_eq!(rep(&-raw(5, 3)), ("-5".into(), 3));
     }
