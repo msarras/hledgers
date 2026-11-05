@@ -199,7 +199,7 @@ fn journal_strict_checks(_j: &Journal) -> Result<(), String> {
 /// is otherwise journal.
 pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, String> {
     let (prefix, f) = journal::split_reader_prefix(prefixed);
-    if f != "-" && !std::path::Path::new(f).is_file() {
+    if f != "-" && !file_exists(f) {
         return Err(format!(
             "data file \"{f}\" was not found.\n\
              Please create it first, eg with \"hledger add\" or a text editor.\n\
@@ -224,6 +224,11 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
     };
     let (j, st) = journal::parse_journal(iopts, f, &text)?;
     finalise::journal_finalise(iopts, f, &text, j, st)
+}
+
+/// Whether a file exists and is not a directory (doesFileExist).
+pub fn file_exists(f: &str) -> bool {
+    std::fs::metadata(f).is_ok_and(|m| !m.is_dir())
 }
 
 /// The format a file extension suggests, journal by default (findReader).

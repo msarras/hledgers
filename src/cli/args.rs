@@ -12,20 +12,82 @@ pub enum Arity {
     Opt,
 }
 
-/// A command-line flag. Its first long name is its name in [`RawOpts`].
+/// A command-line flag (a cmdargs Flag): its long and short names, whether
+/// it takes a value, and the options it sets in [`RawOpts`]: by default one
+/// named as its first long name (or its short name), set to its value. A
+/// flag without a value sets them to `default` (usually empty), and a flag
+/// whose value is optional uses `default` when none is given.
 pub struct Flag {
     pub longs: &'static [&'static str],
     pub shorts: &'static [char],
     pub arity: Arity,
+    pub sets: &'static [&'static str],
+    pub default: &'static str,
     pub value_name: &'static str,
     pub help: &'static str,
     pub hidden: bool,
 }
 
 impl Flag {
-    fn name(&self) -> &'static str {
-        self.longs[0]
+    /// A flag with these long names and arity, setting the option of its
+    /// first name.
+    pub const fn new(
+        longs: &'static [&'static str],
+        arity: Arity,
+        value_name: &'static str,
+        help: &'static str,
+    ) -> Flag {
+        Flag {
+            longs,
+            shorts: &[],
+            arity,
+            sets: &[],
+            default: "",
+            value_name,
+            help,
+            hidden: false,
+        }
     }
+
+    /// This flag with these short names.
+    pub const fn short(self, shorts: &'static [char]) -> Flag {
+        Flag { shorts, ..self }
+    }
+
+    /// This flag setting these options instead.
+    pub const fn sets(self, sets: &'static [&'static str]) -> Flag {
+        Flag { sets, ..self }
+    }
+
+    /// This flag with this default value.
+    pub const fn default(self, default: &'static str) -> Flag {
+        Flag { default, ..self }
+    }
+
+    /// This flag, not shown in help.
+    pub const fn hidden(self) -> Flag {
+        Flag {
+            hidden: true,
+            ..self
+        }
+    }
+
+    /// The options it sets.
+    fn names(&self) -> Vec<&'static str> {
+        if !self.sets.is_empty() {
+            self.sets.to_vec()
+        } else if let Some(l) = self.longs.first() {
+            vec![*l]
+        } else {
+            vec![short_name(self.shorts[0])]
+        }
+    }
+}
+
+/// A short flag's name as an option name.
+fn short_name(c: char) -> &'static str {
+    const NAMES: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz?";
+    NAMES.find(c).map_or("?", |i| &NAMES[i..i + c.len_utf8()])
 }
 
 /// A command (or the main program), with its flags beyond the general ones.
@@ -35,29 +97,19 @@ pub struct Mode {
     pub flags: &'static [Flag],
 }
 
-/// The flags accepted by every command.
-pub static GENERAL_FLAGS: &[Flag] = &[
-    Flag {
-        longs: &["file"],
-        shorts: &['f'],
-        arity: Arity::Req,
-        value_name: "[FMT:]FILE",
-        help: "Use this as the journal file (- means stdin). If not specified, $LEDGER_FILE or ~/.hledger.journal will be used. If specified more than once, the files will be read in order. Each file's format (journal, csv, timeclock, timedot, rules..) is inferred from the file extension or a FMT: prefix. Some commands (add, import) write to the (first) file, and expect it to be in journal format.",
-        hidden: false,
-    },
-    Flag {
-        longs: &["version"],
-        shorts: &[],
-        arity: Arity::None,
-        value_name: "",
-        help: "show version information",
-        hidden: false,
-    },
-];
+/// The flags accepted by every command: the general input, output and help
+/// flags, and the hidden ones (cligeneralflagsgroups1 and hiddenflags).
+pub fn general_flags() -> impl Iterator<Item = &'static Flag> {
+    super::opts::INPUT_FLAGS
+        .iter()
+        .chain(super::opts::REPORT_FLAGS)
+        .chain(super::opts::HELP_FLAGS)
+        .chain(super::opts::HIDDEN_FLAGS)
+}
 
 /// Parsed options as (name, value) pairs in command-line order; positional
 /// arguments have the name `args`. Where a flag repeats, the rightmost wins.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RawOpts(pub Vec<(String, String)>);
 
 impl RawOpts {
@@ -119,19 +171,25 @@ impl RawOpts {
     fn set(&mut self, name: &str, value: &str) {
         self.0.push((name.to_string(), value.to_string()));
     }
+
+    fn set_all(&mut self, flag: &Flag, value: &str) {
+        for n in flag.names() {
+            self.set(n, value);
+        }
+    }
 }
 
-fn find_long(mode: &Mode, name: &str) -> Option<&'static Flag> {
-    GENERAL_FLAGS
+fn find_long(mode: &'static Mode, name: &str) -> Option<&'static Flag> {
+    mode.flags
         .iter()
-        .chain(mode.flags)
+        .chain(general_flags())
         .find(|f| f.longs.contains(&name))
 }
 
-fn find_short(mode: &Mode, c: char) -> Option<&'static Flag> {
-    GENERAL_FLAGS
+fn find_short(mode: &'static Mode, c: char) -> Option<&'static Flag> {
+    mode.flags
         .iter()
-        .chain(mode.flags)
+        .chain(general_flags())
         .find(|f| f.shorts.contains(&c))
 }
 
@@ -165,7 +223,7 @@ static NO_MODE: Mode = Mode {
 };
 
 /// Parse arguments (without the command name) against a mode's flags.
-pub fn process(mode: &Mode, args: &[String]) -> Result<RawOpts, String> {
+pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> {
     let mut opts = RawOpts::default();
     let mut rest = args.iter();
     while let Some(a) = rest.next() {
@@ -181,32 +239,39 @@ pub fn process(mode: &Mode, args: &[String]) -> Result<RawOpts, String> {
                 (Arity::None, Some(_)) => {
                     return Err(format!("Unhandled argument to flag, none expected: {a}"));
                 }
-                (Arity::None | Arity::Opt, None) => "",
+                (Arity::None | Arity::Opt, None) => flag.default,
                 (_, Some(v)) => v,
                 (Arity::Req, None) => rest
                     .next()
                     .ok_or_else(|| format!("--{name} needs a value, none provided"))?,
             };
-            opts.set(flag.name(), value);
+            opts.set_all(flag, value);
         } else if let Some(shorts) = a.strip_prefix('-').filter(|s| !s.is_empty()) {
             for (i, c) in shorts.char_indices() {
                 let flag = find_short(mode, c).ok_or_else(|| format!("Unknown flag: -{c}"))?;
                 let joined = &shorts[i + c.len_utf8()..];
                 match flag.arity {
-                    Arity::None => opts.set(flag.name(), ""),
+                    Arity::None => opts.set_all(flag, flag.default),
                     Arity::Opt => {
-                        opts.set(flag.name(), joined);
+                        opts.set_all(
+                            flag,
+                            if joined.is_empty() {
+                                flag.default
+                            } else {
+                                joined
+                            },
+                        );
                         break;
                     }
                     Arity::Req if !joined.is_empty() => {
-                        opts.set(flag.name(), joined);
+                        opts.set_all(flag, joined);
                         break;
                     }
                     Arity::Req => {
                         let v = rest
                             .next()
                             .ok_or_else(|| format!("-{c} needs a value, none provided"))?;
-                        opts.set(flag.name(), v);
+                        opts.set_all(flag, v);
                     }
                 }
             }

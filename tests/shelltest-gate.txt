@@ -1,3 +1,8 @@
 # Test files whose cases must all pass. Globs are relative to hledger/hledger/test/
 # (or rules/*.test for this repo's tests/rules/); FILE:N-M,K selects case numbers.
-cli/cli.test:1-5
+# Cases left out need a later milestone; each milestone's report names them.
+cli/cli.test:1-5,15-23,26,29,35-36,42-45,51
+journal/include/include.test:9-21
+errors/parseable.test
+errors/parseable-dates.test
+errors/parseable-regexps.test

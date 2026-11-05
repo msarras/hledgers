@@ -464,7 +464,7 @@ impl<'a> JournalParser<'a, '_> {
         } else {
             glob.matches(&dir)
         };
-        files.retain(|f| Path::new(f).is_file());
+        files.retain(|f| super::file_exists(f));
         let mut files: Vec<String> = files.iter().map(|f| normalise_path(f)).collect();
         files.sort();
         let current = self
@@ -1439,6 +1439,23 @@ pub fn canonical_path(p: &str) -> PathBuf {
             canonical_path(&dir.to_string_lossy()).join(name)
         }
         _ => path.to_path_buf(),
+    }
+}
+
+/// The files and directories a glob pattern matches, relative to a
+/// directory, sorted (for -f's patterns).
+pub fn glob_matches(dir: &str, pattern: &str) -> Vec<String> {
+    match Glob::compile(pattern) {
+        Ok(g) => {
+            let mut found: Vec<String> = g
+                .matches(Path::new(dir))
+                .into_iter()
+                .filter(|f| Path::new(f).exists())
+                .collect();
+            found.sort();
+            found
+        }
+        Err(_) => Vec::new(),
     }
 }
 
