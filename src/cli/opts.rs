@@ -344,6 +344,22 @@ impl CliOpts {
     /// `-` for standard input), or $LEDGER_FILE, or ~/.hledger.journal
     /// (journalFilePathFromOpts).
     pub fn journal_file_paths(&self) -> Result<Vec<String>, String> {
+        let paths = self.possible_journal_file_paths()?;
+        if self.files.is_empty() && !std::path::Path::new(&paths[0]).exists() {
+            return Err(format!(
+                "data file \"{}\" was not found.\n\
+                 Please create it first, eg with \"hledger add\" or a text editor.\n\
+                 Or, specify an existing data file with -f or $LEDGER_FILE.\n",
+                paths[0]
+            ));
+        }
+        Ok(paths)
+    }
+
+    /// The journal files to read, as [`journal_file_paths`](Self::journal_file_paths)
+    /// gives them, but the default file need not exist
+    /// (journalFilePathFromOptsNoDefault, defaultJournalPath).
+    pub fn possible_journal_file_paths(&self) -> Result<Vec<String>, String> {
         let cwd = std::env::current_dir()
             .map(|d| d.display().to_string())
             .unwrap_or_default();
@@ -361,13 +377,6 @@ impl CliOpts {
         } else {
             expand_path_or_glob(&cwd, &ledger_file)?
         };
-        if !std::path::Path::new(&f).exists() {
-            return Err(format!(
-                "data file \"{f}\" was not found.\n\
-                 Please create it first, eg with \"hledger add\" or a text editor.\n\
-                 Or, specify an existing data file with -f or $LEDGER_FILE.\n"
-            ));
-        }
         Ok(vec![f])
     }
 

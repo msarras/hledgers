@@ -149,12 +149,14 @@ mod tests {
             shape(r#"sh -c 'D=$(mktemp -d "${TMPDIR:-/tmp}/x.XXXXXX"); rm -rf "$D"'"#),
             Shape::Compound
         );
+        assert_eq!(shape("hledger x | ls"), Shape::Compound);
+        assert_eq!(shape("sh -c 'ls'"), Shape::Compound);
         for cmd in [
-            "hledger x | ls",
             "for a in b; do hledger $a; done",
             "hledger x | grep -i y",
             "hledger x | sed 1d",
-            "sh -c 'ls'",
+            "ls -a",
+            "ls a b",
             "$x y",
         ] {
             assert!(matches!(shape(cmd), Shape::Unsupported(_)), "{cmd}");
@@ -228,6 +230,20 @@ mod tests {
         assert_eq!(
             stdout(d, "(cd s; echo in >f); cat s/f; rm -rf s", ""),
             "in\n"
+        );
+        assert_eq!(
+            stdout(
+                d,
+                "mkdir -p l/B l/a; touch l/.h l/c l/_d; ls l; ls l/c; cd l; ls; cd ..; rm -rf l",
+                ""
+            ),
+            "B\n_d\na\nc\nl/c\nB\n_d\na\nc\n"
+        );
+        let out = run_in(d, "ls nosuch", "");
+        assert_eq!(out.status, 2);
+        assert_eq!(
+            String::from_utf8(out.stderr).unwrap(),
+            "ls: cannot access 'nosuch': No such file or directory\n"
         );
         assert_eq!(
             stdout(

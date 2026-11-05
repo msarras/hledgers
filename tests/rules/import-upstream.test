@@ -1,0 +1,188 @@
+# * import, and print --new, with .latest files, as upstream does them
+# (expectations from the reference hledger; fixtures in import/)
+
+# ** 1. Each file's latest date is remembered with how many transactions it had, in .latest.FILE;
+# a later import takes only the transactions after those (same-date counts).
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv; printf '2020-01-02,taxi,7\n2020-01-03,rent,500\n' >>bank.csv; hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv; cat a.j; cd /; rm -rf $D; exit $s
+imported 3 new transactions from bank.csv to D/a.j
+2020-01-02
+2020-01-02
+imported 2 new transactions from bank.csv to D/a.j
+2020-01-03
+; the main journal
+2019-12-01 opening
+    assets:bank  100
+    equity
+
+2020-01-01 coffee
+    assets:bank                                    3
+    expenses:misc                                 -3
+
+2020-01-02 lunch
+    assets:bank                                   12
+    expenses:misc                                -12
+
+2020-01-02 books
+    assets:bank                                   30
+    expenses:misc                                -30
+
+2020-01-02 taxi
+    assets:bank                                    7
+    expenses:misc                                 -7
+
+2020-01-03 rent
+    assets:bank                                  500
+    expenses:misc                               -500
+>= 0
+
+# ** 2. A row dated before the latest date (backfilled) is not imported.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; printf '2020-01-01,refund,-3\n' >>bank.csv; hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv; cd /; rm -rf $D; exit $s
+imported 3 new transactions from bank.csv to D/a.j
+no new transactions found in bank.csv
+2020-01-02
+2020-01-02
+>= 0
+
+# ** 3. --catchup marks the transactions as imported without importing them;
+# with --dry-run it says how many it would skip, and writes nothing.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f a.j import --catchup --dry-run bank.csv 2>e; s=$?; sed "s|$D|D|" e; test -e .latest.bank.csv || echo no latest; hledger -f a.j import --catchup bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv; printf '2020-01-04,gift,20\n' >>bank.csv; hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat a.j; cd /; rm -rf $D; exit $s
+would skip 3 new transactions (dry run)
+
+no latest
+marked bank.csv as caught up, skipping 3 transactions
+
+2020-01-02
+2020-01-02
+imported 1 new transactions from bank.csv to D/a.j
+; the main journal
+2019-12-01 opening
+    assets:bank  100
+    equity
+
+2020-01-04 gift
+    assets:bank                                   20
+    expenses:misc                                -20
+>= 0
+
+# ** 4. Several files are imported together, named in the message, each with its own .latest file.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cp import/card.csv $D && cp import/card.csv.rules $D && cd $D && hledger -f a.j import bank.csv card.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv .latest.card.csv; cat a.j; cd /; rm -rf $D; exit $s
+imported 4 new transactions from bank.csv, card.csv to D/a.j
+2020-01-02
+2020-01-02
+2019-12-30
+; the main journal
+2019-12-01 opening
+    assets:bank  100
+    equity
+
+2019-12-30 train
+    assets:card                                    8
+    expenses:misc                                 -8
+
+2020-01-01 coffee
+    assets:bank                                    3
+    expenses:misc                                 -3
+
+2020-01-02 lunch
+    assets:bank                                   12
+    expenses:misc                                -12
+
+2020-01-02 books
+    assets:bank                                   30
+    expenses:misc                                -30
+>= 0
+
+# ** 5. With nothing new since the latest dates, nothing is imported, and the .latest file is kept.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat .latest.bank.csv; cd /; rm -rf $D; exit $s
+imported 3 new transactions from bank.csv to D/a.j
+no new transactions found in bank.csv
+2020-01-02
+2020-01-02
+>= 0
+
+# ** 6. print --new shows only the transactions added since the last print --new, and updates .latest.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f bank.csv print --new; s=$?; hledger -f bank.csv print --new; printf '2020-01-03,rent,500\n' >>bank.csv; hledger -f bank.csv print --new; cat .latest.bank.csv; cd /; rm -rf $D; exit $s
+2020-01-01 coffee
+    assets:bank                                    3
+    expenses:misc                                 -3
+
+2020-01-02 lunch
+    assets:bank                                   12
+    expenses:misc                                -12
+
+2020-01-02 books
+    assets:bank                                   30
+    expenses:misc                                -30
+
+2020-01-03 rent
+    assets:bank                                  500
+    expenses:misc                               -500
+
+2020-01-03
+>= 0
+
+# ** 7. With --strict, the journal with the new transactions is checked first (the last new one
+# first), and nothing is imported if that fails.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cp import/strict.j $D && cd $D && hledger -f strict.j import --strict bank.csv 2>e; s=$?; sed "s|$D|D|" e; test -e .latest.bank.csv || echo no latest; printf 'account expenses:misc\n' >>strict.j; hledger -f strict.j import --strict bank.csv 2>e; s=$?; sed "s|$D|D|" e; cat strict.j; cd /; rm -rf $D; exit $s
+hledger: Error: user error (bank.csv:4:
+  | 2020-01-02 books
+  |     assets:bank                                   30
+4 |     expenses:misc                                -30
+  |     ^^^^^^^^^^^^^
+
+Strict account checking is enabled, and
+account "expenses:misc" has not been declared.
+Consider adding an account directive. Examples:
+
+account expenses:misc
+)
+no latest
+imported 3 new transactions from bank.csv to D/strict.j
+account assets:bank
+account equity
+commodity 1.
+2019-12-01 opening
+    assets:bank  100
+    equity
+account expenses:misc
+
+2020-01-01 coffee
+    assets:bank                                    3
+    expenses:misc                                 -3
+
+2020-01-02 lunch
+    assets:bank                                   12
+    expenses:misc                                -12
+
+2020-01-02 books
+    assets:bank                                   30
+    expenses:misc                                -30
+>= 0
+
+# ** 8. --dry-run shows what would be imported, and writes no .latest file.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && hledger -f a.j import --dry-run bank.csv 2>e; s=$?; sed "s|$D|D|" e; test -e .latest.bank.csv || echo no latest; cat a.j; cd /; rm -rf $D; exit $s
+2020-01-01 coffee
+    assets:bank                                    3
+    expenses:misc                                 -3
+
+2020-01-02 lunch
+    assets:bank                                   12
+    expenses:misc                                -12
+
+2020-01-02 books
+    assets:bank                                   30
+    expenses:misc                                -30
+
+would import 3 new transactions from bank.csv:
+
+no latest
+; the main journal
+2019-12-01 opening
+    assets:bank  100
+    equity
+>= 0
+
+# ** 9. A .latest file must hold only dates.
+$ D=$(mktemp -d) && cp import/a.j $D && cp import/bank.csv $D && cp import/bank.csv.rules $D && cd $D && printf '2020-01-01\nyesterday\n' >.latest.bank.csv; hledger -f a.j import bank.csv 2>e; s=$?; sed "s|$D|D|" e; cd /; rm -rf $D; exit $s
+hledger: Error: ./.latest.bank.csv:2: invalid date: "yesterday"
+>= 1

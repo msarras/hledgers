@@ -138,7 +138,7 @@ pub fn aliases_from_opts(iopts: &InputOpts) -> Result<Vec<AccountAlias>, String>
 /// in it or a file it includes, which each includer prefixes with its
 /// name; or a message about something with no place in the files, shown
 /// as it is.
-enum Failure {
+pub(super) enum Failure {
     Here(ParseError),
     Included(String),
     Unlocated(String),
@@ -150,7 +150,17 @@ impl From<ParseError> for Failure {
     }
 }
 
-type R<T> = Result<T, Failure>;
+impl Failure {
+    /// The complete message, an error in this file shown in its text.
+    pub(super) fn message(self, file: &str, text: &str) -> String {
+        match self {
+            Failure::Here(e) => e.pretty(file, text),
+            Failure::Included(msg) | Failure::Unlocated(msg) => msg,
+        }
+    }
+}
+
+pub(super) type R<T> = Result<T, Failure>;
 
 /// Parse one file into the journal, as if it were written where it is
 /// included. An error in it, or in a file it includes, becomes a complete
@@ -618,11 +628,6 @@ impl<'a> JournalParser<'a, '_> {
                 _ => "journal",
             })
         });
-        if let Some(f @ ("timeclock" | "timedot")) = format {
-            let msg =
-                format!("reading {f} files is not supported yet (hledgers milestone 7): {file}");
-            return Err(Failure::Here(ParseError::fail_at(self.c.src, off, msg)));
-        }
         let sep = match format {
             Some("csv") => Some(','),
             Some("ssv") => Some(';'),
@@ -637,6 +642,20 @@ impl<'a> JournalParser<'a, '_> {
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
         self.j.files.push((file.to_string(), text.clone()));
+        if let Some(f @ ("timeclock" | "timedot")) = format {
+            // its transactions, made with the parse state in effect here
+            let txns = if f == "timeclock" {
+                super::timeclock::timeclock_transactions(self.iopts, self.st, file, &text)
+            } else {
+                super::timedot::timedot_transactions(self.st, file, &text)
+            };
+            let txns = txns.map_err(|e| match e {
+                Failure::Here(e) => Failure::Included(e.pretty(file, &text)),
+                e => e,
+            })?;
+            self.j.txns.extend(txns);
+            return Ok(());
+        }
         let mut st = self.st.clone();
         self.stack.push((file.to_string(), canonical_path(file)));
         let r = parse_file(self.iopts, &mut st, self.stack, self.j, file, &text);
@@ -653,7 +672,7 @@ impl<'a> JournalParser<'a, '_> {
     fn include_converted_file(&mut self, file: &str, sep: Option<char>) -> R<()> {
         let read = match sep {
             Some(sep) => super::csv::read_included_csv(self.iopts, file, sep),
-            None => super::csv::read_rules_data(self.iopts, file).map(|(j, _)| j),
+            None => super::csv::read_rules_data_with(self.iopts, file, |j, _| Ok(j)),
         };
         let cj = read.map_err(Failure::Included)?;
         let opt_aliases = self
@@ -768,13 +787,7 @@ impl<'a> JournalParser<'a, '_> {
     /// An account name with the parent account and --alias options applied
     /// (applyParentAndOptionAliases).
     fn apply_parent_and_option_aliases(&mut self, a: &str) -> R<String> {
-        let parent = self.st.parent_accounts.join(":");
-        let aliases = self
-            .st
-            .opt_aliases
-            .as_ref()
-            .map_err(|e| Failure::Unlocated(e.clone()))?;
-        Ok(alias_or_die(aliases, &join_account_names(&parent, a)))
+        apply_parent_and_option_aliases(self.st, a)
     }
 
     /// `commodity AMOUNT` declaring a commodity and its display style, or
@@ -1414,6 +1427,30 @@ impl<'a> JournalParser<'a, '_> {
         };
         Ok(Some((posting, multiplier)))
     }
+}
+
+/// An account name, which may contain semicolons only if `allow_semicolon`,
+/// with the alias directives, parent account and --alias options in effect
+/// applied (modifiedaccountnamep). Fails without consuming input if there is
+/// none.
+pub(super) fn modified_account_namep(
+    c: &mut Cursor,
+    st: &ParseState,
+    allow_semicolon: bool,
+) -> R<String> {
+    let a = accountnamep(c, allow_semicolon)?;
+    apply_parent_and_option_aliases(st, &alias_or_die(&st.aliases, &a))
+}
+
+/// An account name with the parent account and --alias options applied
+/// (applyParentAndOptionAliases).
+fn apply_parent_and_option_aliases(st: &ParseState, a: &str) -> R<String> {
+    let parent = st.parent_accounts.join(":");
+    let aliases = st
+        .opt_aliases
+        .as_ref()
+        .map_err(|e| Failure::Unlocated(e.clone()))?;
+    Ok(alias_or_die(aliases, &join_account_names(&parent, a)))
 }
 
 /// The aliases applied to an account name; a regular expression alias whose

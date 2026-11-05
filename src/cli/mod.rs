@@ -12,7 +12,6 @@ use std::ffi::OsString;
 
 use crate::amount::currency::to_currency_code;
 use crate::cli::commands::compound::compound_balance_command as compound;
-use crate::dates::Day;
 use crate::model::Journal;
 use crate::valuation::{ConversionOp, journal_to_cost};
 use opts::CliOpts;
@@ -62,17 +61,6 @@ fn ensure_debug_flag_has_value(args: Vec<String>) -> Vec<String> {
     out
 }
 
-/// Today's date, in the local time zone.
-fn current_day() -> Day {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    let offset = crate::dates::local_utc_offset_seconds(secs);
-    Day::from_ymd(1970, 1, 1)
-        .expect("a valid date")
-        .add_days((secs + offset).div_euclid(86400))
-}
-
 fn dispatch(prog_args: &[String]) -> Result<(), String> {
     let args = ensure_debug_flag_has_value(replace_numeric_flags(prog_args));
     let cmd = args::command_index(&args);
@@ -103,7 +91,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     let to_file = raw.string("output-file").is_some_and(|f| f != "-");
     let color =
         !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
-    let mut opts = CliOpts::from_raw_opts(raw, current_day(), color)?;
+    let mut opts = CliOpts::from_raw_opts(raw, crate::dates::current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
     if opts.raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
@@ -115,6 +103,9 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     let Some(_) = cmd else {
         return io::write_output(&opts, &commands::quickref::render());
     };
+    if mode.name == "import" {
+        return commands::import::import(&opts, with_possible_journal(&opts)?);
+    }
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
         "activity" => |o, j| commands::activity::activity(o, &j),
@@ -155,6 +146,26 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
 /// (maybeWarnUnknownValuationCommodity).
 fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
+    let iopts = journal_input_opts(opts, &paths)?;
+    let mut j = crate::read::read_journal_files(&iopts, &paths)?;
+    journal_transform(opts, &mut j);
+    maybe_warn_unknown_valuation_commodity(opts, &j);
+    Ok(j)
+}
+
+/// The journal the options say to read, of which the first file need not
+/// exist yet, for the commands that write to it (withPossibleJournal).
+fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
+    let paths = opts.possible_journal_file_paths()?;
+    let iopts = journal_input_opts(opts, &paths)?;
+    let mut j = crate::read::read_possible_journal_files(&iopts, &paths)?;
+    journal_transform(opts, &mut j);
+    Ok(j)
+}
+
+/// The input options for reading these journal files: the data directory
+/// is beside the first.
+fn journal_input_opts(opts: &CliOpts, paths: &[String]) -> Result<crate::read::InputOpts, String> {
     let mut iopts = opts.input.clone();
     iopts.journal_dir = paths.first().map(|p| {
         crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
@@ -162,14 +173,17 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     if iopts.anon {
         return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());
     }
-    let mut j = crate::read::read_journal_files(&iopts, &paths)?;
-    // with --pivot, even an empty one (maybePivot)
+    Ok(iopts)
+}
+
+/// The journal transformed for the report after reading (journalTransform):
+/// pivoted with --pivot, even an empty one (maybePivot), and its lot detail
+/// prepared.
+fn journal_transform(opts: &CliOpts, j: &mut Journal) {
     if let Some(name) = opts.raw.string("pivot") {
         j.pivot(name);
     }
-    prepare_lot_detail(opts, &mut j);
-    maybe_warn_unknown_valuation_commodity(opts, &j);
-    Ok(j)
+    prepare_lot_detail(opts, j);
 }
 
 /// Prepare the journal's lot detail for the report (journalPrepareLotDetail):

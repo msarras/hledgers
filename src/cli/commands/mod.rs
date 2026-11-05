@@ -13,6 +13,7 @@ pub mod descriptions;
 pub mod diff;
 pub mod files;
 pub mod holdings;
+pub mod import;
 pub mod notes;
 pub mod payees;
 pub mod prices;
@@ -51,7 +52,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("get", &[]),
     &command("help", &[]),
     &holdings::MODE,
-    &command("import", &[]),
+    &import::MODE,
     &compound::INCOMESTATEMENT.mode,
     &notes::MODE,
     &payees::MODE,

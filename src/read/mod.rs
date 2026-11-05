@@ -10,8 +10,11 @@ pub mod csv;
 pub mod errors;
 pub mod finalise;
 pub mod journal;
+pub mod latest;
 pub mod modifiers;
 pub mod rules;
+pub mod timeclock;
+pub mod timedot;
 
 use crate::amount::CommodityStyles;
 use crate::dates::{DateSpan, Day};
@@ -153,15 +156,36 @@ impl Default for InputOpts {
 
 /// Read, finalise and combine journal files, each perhaps with a reader
 /// prefix (`journal:`, `csv:`...) or `-` for standard input
-/// (readJournalFiles).
+/// (readJournalFiles). With --new, only the transactions each file has
+/// added since it was last read this way are kept, and once all are read
+/// and checked, each file's latest dates are saved.
 pub fn read_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal, String> {
-    let iopts = InputOpts {
+    let deferred = InputOpts {
         defer: true,
         ..iopts.clone()
     };
+    let (j, latest) = read_journal_files_and_latest_dates(&deferred, files)?;
+    if iopts.strict {
+        checks::journal_strict_checks(&j)?;
+    }
+    if iopts.new && iopts.new_save {
+        latest::save_latest_dates_for_files(&latest)?;
+    }
+    Ok(j)
+}
+
+/// Journal files read, finalised and combined; and with --new, each file's
+/// latest dates (readJournalFilesAndLatestDates).
+pub fn read_journal_files_and_latest_dates(
+    iopts: &InputOpts,
+    files: &[String],
+) -> Result<(Journal, Vec<latest::LatestDatesForFile>), String> {
     let mut journals = Vec::new();
+    let mut latest = Vec::new();
     for f in files {
-        journals.push(read_journal_file(&iopts, f)?);
+        let (j, l) = read_journal_file_and_latest_dates(iopts, f)?;
+        journals.push(j);
+        latest.extend(l);
     }
     let declared: Vec<_> = journals
         .iter()
@@ -200,16 +224,72 @@ pub fn read_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal
         }
     }
     finalise::journal_number_and_tie_transactions(&mut j);
+    Ok((j, latest))
+}
+
+/// Like [`read_journal_files`], but a first file that does not exist is an
+/// empty journal of that name, for the commands that write to it
+/// (readPossibleJournalFiles). The journals are combined without
+/// preferring the later files' commodity declarations.
+pub fn read_possible_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal, String> {
+    let Some((first, rest)) = files.split_first() else {
+        return Ok(Journal::default());
+    };
+    let deferred = InputOpts {
+        defer: true,
+        ..iopts.clone()
+    };
+    let f = journal::split_reader_prefix(first).1;
+    let mut j = if f == "-" || file_exists(f) {
+        read_journal_file(&deferred, first)?
+    } else {
+        Journal {
+            files: vec![(f.to_string(), String::new())],
+            ..Journal::default()
+        }
+    };
+    for f in rest {
+        j = finalise::journal_concat(j, read_journal_file(&deferred, f)?);
+    }
+    finalise::journal_number_and_tie_transactions(&mut j);
     if iopts.strict {
         checks::journal_strict_checks(&j)?;
     }
     Ok(j)
 }
 
-/// Read and finalise one journal file (readJournalFile). Its format comes
-/// from a reader prefix, or the input options, or its file extension, and
-/// is otherwise journal.
+/// Read and finalise one journal file (readJournalFile), and with --new,
+/// unless deferred, save its latest dates.
 pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, String> {
+    let (j, latest) = read_journal_file_and_latest_dates(iopts, prefixed)?;
+    if let Some(l) = latest.filter(|_| iopts.new_save && !iopts.defer) {
+        latest::save_latest_dates(&l.dates, &l.file)?;
+    }
+    Ok(j)
+}
+
+/// Read and finalise one journal file; with --new, keep only the
+/// transactions it has added since its latest dates were saved, and give
+/// its new latest dates (readJournalFileAndLatestDates).
+fn read_journal_file_and_latest_dates(
+    iopts: &InputOpts,
+    prefixed: &str,
+) -> Result<(Journal, Option<latest::LatestDatesForFile>), String> {
+    let j = read_journal_file_only(iopts, prefixed)?;
+    if !iopts.new {
+        return Ok((j, None));
+    }
+    let f = journal::split_reader_prefix(prefixed).1;
+    let seen = latest::previous_latest_dates(f)?;
+    let (j, dates) = latest::journal_filter_since_latest_dates(&seen, j);
+    let file = f.to_string();
+    Ok((j, Some(latest::LatestDatesForFile { file, dates })))
+}
+
+/// Read and finalise one journal file (readJournal). Its format comes from
+/// a reader prefix, or the input options, or its file extension, and is
+/// otherwise journal.
+fn read_journal_file_only(iopts: &InputOpts, prefixed: &str) -> Result<Journal, String> {
     let (prefix, f) = journal::split_reader_prefix(prefixed);
     if f != "-" && !file_exists(f) {
         return Err(format!(
@@ -222,7 +302,7 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         .or(iopts.format.as_deref())
         .unwrap_or_else(|| format_from_extension(f));
     let read = match format {
-        "journal" => None,
+        "journal" | "timeclock" | "timedot" => None,
         "csv" => Some(csv::read_csv_file(iopts, f, ',')),
         "ssv" => Some(csv::read_csv_file(iopts, f, ';')),
         "tsv" => Some(csv::read_csv_file(iopts, f, '\t')),
@@ -242,6 +322,11 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         read_file_portably(f)
     }
     .map_err(with_decoding_hint)?;
+    match format {
+        "timeclock" => return timeclock::read_timeclock(iopts, f, &text),
+        "timedot" => return timedot::read_timedot(iopts, f, &text),
+        _ => {}
+    }
     let (j, st) = journal::parse_journal(iopts, f, &text)?;
     finalise::journal_finalise(iopts, f, &text, j, st)
 }

@@ -133,6 +133,17 @@ pub fn local_utc_offset_seconds(_utc_secs: i64) -> i64 {
     0
 }
 
+/// Today's date, in the local time zone (getCurrentDay).
+pub fn current_day() -> Day {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let offset = local_utc_offset_seconds(secs);
+    Day::from_ymd(1970, 1, 1)
+        .expect("a valid date")
+        .add_days((secs + offset).div_euclid(86400))
+}
+
 pub fn is_leap_year(year: i64) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }

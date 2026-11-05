@@ -10,10 +10,17 @@
 //! field's assignments are the top-level ones followed by those of the blocks
 //! whose matchers match, in the order written; the last one is in effect.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
+use dashu_int::IBig;
+use dashu_int::ops::{Abs, DivRem};
+
 use super::csv::CsvRecord;
+use crate::amount::render::AmountFormat;
+use crate::amount::{Amount, AmountStyle, Precision};
+use crate::decimal::Decimal;
 use crate::parse::{Alts, Item, PResult, ParseError, Parser, choice_try, is_non_newline_space, or};
 use crate::regex::{Regexp, to_regex_ci};
 use crate::text::{is_space, quote_if_needed, strip};
@@ -388,10 +395,15 @@ fn parse_and_validate_rules(
     Ok(rules)
 }
 
-/// Line numbers of offsets in the text being parsed.
+/// Line numbers of offsets in the text being parsed; and the let names
+/// declared so far, and the names written in `%{...}` expressions that are
+/// not hledger fields, which are checked once every let is known.
 struct Lines {
     file: Arc<str>,
     starts: Vec<usize>,
+    lets: RefCell<BTreeSet<String>>,
+    /// Each name, and where it starts and ends.
+    names: RefCell<Vec<(String, usize, usize)>>,
 }
 
 impl Lines {
@@ -401,7 +413,19 @@ impl Lines {
         Lines {
             file: Arc::from(file),
             starts,
+            lets: RefCell::default(),
+            names: RefCell::default(),
         }
+    }
+
+    /// The error for the first name written in a `%{...}` expression that
+    /// is neither a hledger field nor a let declared so far, if any.
+    fn unknown_name_error(&self, src: &str) -> Option<ParseError> {
+        let lets = self.lets.borrow();
+        let names = self.names.borrow();
+        let (name, off, end) = names.iter().find(|(n, ..)| !lets.contains(n))?;
+        let msg = unknown_name_message(name, !lets.is_empty());
+        Some(ParseError::fail_at_raised(src, *off, *end, msg))
     }
 
     /// The rules position of an offset: the file, and the line (getRulesPos).
@@ -436,10 +460,18 @@ enum RuleItem {
     Blocks(Vec<ConditionalBlock>),
 }
 
-/// Rules, one per line, until the end of the input (rulesp).
+/// Rules, one per line, until the end of the input (rulesp). The names in
+/// `%{...}` expressions that are not hledger fields must be lets, declared
+/// anywhere; on a syntax error, a name written earlier that is not a let
+/// declared before it is reported instead, as upstream reports it there.
 fn rulesp(p: &mut Parser, lines: &Lines) -> PResult<CsvRules> {
-    let items = p.many(|p| rule_itemp(p, lines))?;
-    p.eof()?;
+    let items = p
+        .many(|p| rule_itemp(p, lines))
+        .and_then(|items| p.eof().map(|()| items))
+        .map_err(|e| lines.unknown_name_error(p.src).unwrap_or(e))?;
+    if let Some(e) = lines.unknown_name_error(p.src) {
+        return Err(e);
+    }
     let (mut directives, mut field_indexes, mut assignments, mut blocks) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for item in items {
@@ -646,16 +678,23 @@ fn fieldnamep(p: &mut Parser) -> PResult<String> {
 }
 
 /// `FIELD VALUE` or `FIELD: VALUE`, or a field with no value
-/// (fieldassignmentp).
+/// (fieldassignmentp); or `let NAME VALUE`, assigning the let `let:NAME`.
 fn fieldassignmentp(p: &mut Parser, lines: &Lines) -> PResult<FieldAssignment> {
     p.label("field assignment", |p| {
         let pos = lines.pos(p.pos);
-        let f = journalfieldnamep(p)?;
+        let rest = p.rest();
+        let f = if rest.starts_with("let") && rest[3..].starts_with(is_non_newline_space) {
+            p.string("let")?;
+            spaces1(p)?;
+            letnamep(p, lines)?
+        } else {
+            journalfieldnamep(p)?
+        };
         let mut tried = Alts::new(p);
         let v = match tried.run(p, |p| {
             p.attempt(|p| {
                 assignmentseparatorp(p)?;
-                fieldvalp(p)
+                fieldvalp(p, lines)
             })
         }) {
             Some(r) => r?,
@@ -666,6 +705,31 @@ fn fieldassignmentp(p: &mut Parser, lines: &Lines) -> PResult<FieldAssignment> {
         };
         Ok(FieldAssignment::new(&f, &v, pos))
     })
+}
+
+/// A let's name, as `let:NAME`: a lowercase letter, then lowercase letters,
+/// digits and underscores; not a hledger field's or a template function's
+/// name. It is declared from here on.
+fn letnamep(p: &mut Parser, lines: &Lines) -> PResult<String> {
+    let off = p.pos;
+    p.label("let name", |p| p.satisfy(None, |c| c.is_ascii_lowercase()))?;
+    p.take_while(None, |c| {
+        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'
+    });
+    let name = p.src[off..p.pos].to_string();
+    let reserved = if journal_field_names().contains(&name) {
+        Some("a hledger field")
+    } else if template_function(&name).is_some() {
+        Some("a template function")
+    } else {
+        None
+    };
+    if let Some(what) = reserved {
+        let msg = format!("let name \"{name}\" is {what}; choose another name");
+        return Err(ParseError::fail_at_raised(p.src, off, p.pos, msg));
+    }
+    lines.lets.borrow_mut().insert(name.clone());
+    Ok(format!("let:{name}"))
 }
 
 /// A hledger field name (journalfieldnamep).
@@ -697,7 +761,7 @@ fn assignmentseparatorp(p: &mut Parser) -> PResult<()> {
 
 /// A field assignment's value: the rest of the line, as written, with its
 /// `%{...}` expressions checked (fieldvalp).
-fn fieldvalp(p: &mut Parser) -> PResult<String> {
+fn fieldvalp(p: &mut Parser, lines: &Lines) -> PResult<String> {
     let start = p.pos;
     loop {
         let rest = p.rest();
@@ -709,16 +773,17 @@ fn fieldvalp(p: &mut Parser) -> PResult<String> {
             p.pos += 1;
             return Ok(v);
         }
-        templatepartp(p, |c| c != '\n')?;
+        templatepartp(p, Some(lines), |c| c != '\n')?;
     }
 }
 
 /// Part of a template: text whose characters satisfy `ok`, or a `%{...}`
 /// expression, which is checked here so that errors are reported where it
-/// is written (templatepartp).
-fn templatepartp(p: &mut Parser, ok: impl Fn(char) -> bool) -> PResult<()> {
+/// is written (templatepartp). With the parse context, names that are not
+/// hledger fields are noted in it, to be checked against the lets.
+fn templatepartp(p: &mut Parser, cx: Option<&Lines>, ok: impl Fn(char) -> bool) -> PResult<()> {
     if p.rest().starts_with("%{") {
-        return templateexprp(p).map(drop);
+        return templateexprp(p, cx).map(drop);
     }
     if p.take_while(None, |c| ok(c) && c != '%').is_empty() {
         p.satisfy(None, ok)?;
@@ -733,11 +798,11 @@ const TERM_LABEL: &str = "function call, hledger field name, CSV field reference
 /// bad arguments and unknown field names are errors here; syntax errors are
 /// made fancy, so that alternatives tried later do not replace them
 /// (templateexprp).
-fn templateexprp(p: &mut Parser) -> PResult<Expr> {
+fn templateexprp(p: &mut Parser, cx: Option<&Lines>) -> PResult<Expr> {
     p.string("%{")?;
     let inner = |p: &mut Parser| {
         p.skip_spaces();
-        let e = termp(p)?;
+        let e = termp(p, cx)?;
         p.skip_spaces();
         p.char('}')?;
         Ok(e)
@@ -745,10 +810,10 @@ fn templateexprp(p: &mut Parser) -> PResult<Expr> {
     inner(p).map_err(|e: ParseError| e.into_fancy(p.src))
 }
 
-fn termp(p: &mut Parser) -> PResult<Expr> {
+fn termp(p: &mut Parser, cx: Option<&Lines>) -> PResult<Expr> {
     p.label(TERM_LABEL, |p| {
         let mut tried = Alts::new(p);
-        if let Some(r) = tried.run(p, namedp) {
+        if let Some(r) = tried.run(p, |p| namedp(p, cx)) {
             return r;
         }
         if let Some(r) = tried.run(p, |p| templatefieldrefp(p).map(Expr::Field)) {
@@ -767,8 +832,9 @@ fn termp(p: &mut Parser) -> PResult<Expr> {
     })
 }
 
-/// A function call, or a bare name, which refers to a hledger field.
-fn namedp(p: &mut Parser) -> PResult<Expr> {
+/// A function call, or a bare name, which refers to a let or a hledger
+/// field.
+fn namedp(p: &mut Parser, cx: Option<&Lines>) -> PResult<Expr> {
     let off = p.pos;
     p.satisfy(None, |c| c.is_ascii_lowercase())?;
     p.take_while(None, |c| {
@@ -783,7 +849,7 @@ fn namedp(p: &mut Parser) -> PResult<Expr> {
         p.skip_spaces();
         let args = p.sep_by(
             |p| {
-                let t = termp(p)?;
+                let t = termp(p, cx)?;
                 p.skip_spaces();
                 Ok(t)
             },
@@ -798,7 +864,17 @@ fn namedp(p: &mut Parser) -> PResult<Expr> {
     })?;
     let checked = match &args {
         Some(args) => check_template_call(&name, args),
-        None => check_hledger_field_reference(&name),
+        None if template_function(&name).is_some() => Err(format!(
+            "{name} is a function; it should be followed by parentheses, eg {name}(...)"
+        )),
+        None => {
+            if !is_referable_hledger_field(&name)
+                && let Some(cx) = cx
+            {
+                cx.names.borrow_mut().push((name.clone(), off, p.pos));
+            }
+            Ok(())
+        }
     };
     if let Err(msg) = checked {
         return Err(ParseError::fail_at_raised(p.src, off, p.pos, msg));
@@ -967,7 +1043,12 @@ fn conditionaltablep(p: &mut Parser, lines: &Lines) -> PResult<Vec<ConditionalBl
         let fields = p.sep_by1(
             |p| {
                 p.skip_spaces();
-                let f = journalfieldnamep(p)?;
+                let f = if p.rest().starts_with("let:") {
+                    p.string("let:")?;
+                    letnamep(p, lines)?
+                } else {
+                    journalfieldnamep(p)?
+                };
                 p.skip_spaces();
                 Ok(f)
             },
@@ -1032,7 +1113,7 @@ fn bodylinep(
     let values = p.sep_by(
         |p| {
             let start = p.pos;
-            p.many(|p| templatepartp(p, ok))?;
+            p.many(|p| templatepartp(p, Some(lines), ok))?;
             Ok(p.src[start..p.pos].to_string())
         },
         |p| p.char(sep),
@@ -1184,7 +1265,8 @@ fn check_field_reference_loops(p: &Parser, lines: &Lines, rules: &CsvRules) -> P
     let other_refs = |a: &FieldAssignment| -> Vec<String> {
         a.template
             .hledger_field_refs()
-            .into_iter()
+            .iter()
+            .map(|f| rules.name_key(f))
             .filter(|f| *f != a.name)
             .collect()
     };
@@ -1313,28 +1395,107 @@ fn check_template_call(name: &str, args: &[Expr]) -> Result<(), String> {
     match name {
         "replace" => check_replace(args),
         "substr" => check_substr(args),
+        "split" => check_split(args),
         _ => Ok(()),
     }
 }
 
-/// Check that a bare name in a `%{...}` expression is a hledger field that
-/// can be referred to (checkHledgerFieldReference). skip, end and merge are
-/// actions, not values.
-fn check_hledger_field_reference(name: &str) -> Result<(), String> {
-    if template_function(name).is_some() {
-        return Err(format!(
-            "{name} is a function; it should be followed by parentheses, eg {name}(...)"
-        ));
-    }
-    if journal_field_names().iter().any(|f| f == name) && !matches!(name, "skip" | "end" | "merge")
-    {
+/// split's weights and part number, when they are written as literals,
+/// must be valid.
+fn check_split(args: &[Expr]) -> Result<(), String> {
+    let literal = |e: &Expr| match e {
+        Expr::Str(s) => Some(s.clone()),
+        Expr::Number(n) => Some(n.to_string()),
+        _ => None,
+    };
+    let Some(weights) = args.get(1).and_then(literal) else {
         return Ok(());
+    };
+    let n = split_weights(&weights)
+        .ok_or_else(|| SPLIT_WEIGHTS_ERROR.to_string())?
+        .len();
+    match args.get(2).and_then(literal) {
+        Some(i) => split_part(&i, n).map(drop),
+        None => Ok(()),
     }
-    Err(format!(
-        "unknown hledger field \"{name}\". To refer to a CSV field, write %{name}. The hledger \
-         fields are: date, date2, status, code, description, comment, amount, balance, currency, \
-         and commentN, accountN, amountN, balanceN, currencyN (N = 1-99)"
-    ))
+}
+
+const SPLIT_WEIGHTS_ERROR: &str =
+    "split's weights should be a positive count or a list like \"30:70\"";
+
+/// split's weights: a count of equal parts, or positive decimal numbers
+/// separated by colons, as whole numbers in the same proportions.
+fn split_weights(s: &str) -> Option<Vec<IBig>> {
+    let s = strip(s);
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+        let n: usize = s.parse().ok().filter(|&n| n > 0)?;
+        return Some(vec![IBig::ONE; n]);
+    }
+    let ws: Vec<Decimal> = s
+        .split(':')
+        .map(|w| {
+            let w = strip(w);
+            let plain = !w.is_empty()
+                && w.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                && w.bytes().filter(|&b| b == b'.').count() <= 1;
+            plain
+                .then(|| w.parse::<Decimal>().ok())
+                .flatten()
+                .filter(|d| *d > Decimal::ZERO)
+        })
+        .collect::<Option<_>>()?;
+    let places = ws.iter().map(Decimal::places).max().unwrap_or(0);
+    Some(
+        ws.iter()
+            .map(|w| w.round_to(places).mantissa().clone())
+            .collect(),
+    )
+}
+
+/// split's part number, from 1 to the number of parts.
+fn split_part(s: &str, n: usize) -> Result<usize, String> {
+    strip(s)
+        .parse::<usize>()
+        .ok()
+        .filter(|i| (1..=n).contains(i))
+        .ok_or_else(|| format!("split's part number should be between 1 and {n}"))
+}
+
+/// A whole number of units split in proportion to positive whole-number
+/// weights, exactly: each part is its share rounded down, then the units
+/// left over go one each to the parts whose shares lost the most in
+/// rounding, the later part first among equal losses. The parts add up to
+/// the whole, and equal weights get parts at most one unit apart.
+pub fn allocate(units: &IBig, weights: &[IBig]) -> Vec<IBig> {
+    let total: IBig = weights.iter().sum();
+    let (mut parts, losses): (Vec<IBig>, Vec<IBig>) =
+        weights.iter().map(|w| (units * w).div_rem(&total)).unzip();
+    let left = units - parts.iter().sum::<IBig>();
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_by(|&a, &b| losses[b].cmp(&losses[a]).then(b.cmp(&a)));
+    let left = usize::try_from(&left).unwrap_or(0);
+    for &i in order.iter().take(left) {
+        parts[i] += IBig::ONE;
+    }
+    parts
+}
+
+/// Whether a bare name in a `%{...}` expression is a hledger field that can
+/// be referred to (checkHledgerFieldReference). skip, end and merge are
+/// actions, not values.
+fn is_referable_hledger_field(name: &str) -> bool {
+    journal_field_names().iter().any(|f| f == name) && !matches!(name, "skip" | "end" | "merge")
+}
+
+/// The error for a bare name that refers to nothing; it mentions lets if
+/// the rules declare any (checkHledgerFieldReference).
+fn unknown_name_message(name: &str, lets: bool) -> String {
+    let or_let = if lets { " or let name" } else { "" };
+    format!(
+        "unknown hledger field{or_let} \"{name}\". To refer to a CSV field, write %{name}. The \
+         hledger fields are: date, date2, status, code, description, comment, amount, balance, \
+         currency, and commentN, accountN, amountN, balanceN, currencyN (N = 1-99)"
+    )
 }
 
 /// A function usable in `%{...}` expressions: its name and its minimum and
@@ -1344,7 +1505,7 @@ struct TemplateFunction {
     arity: (usize, Option<usize>),
 }
 
-const TEMPLATE_FUNCTIONS: [TemplateFunction; 12] = [
+const TEMPLATE_FUNCTIONS: [TemplateFunction; 13] = [
     tf("upper", 1, Some(1)),
     tf("lower", 1, Some(1)),
     tf("capitalize", 1, Some(1)),
@@ -1357,6 +1518,7 @@ const TEMPLATE_FUNCTIONS: [TemplateFunction; 12] = [
     tf("default", 1, None),
     tf("replace", 3, Some(3)),
     tf("substr", 2, Some(3)),
+    tf("split", 3, Some(3)),
 ];
 
 const fn tf(name: &'static str, lo: usize, hi: Option<usize>) -> TemplateFunction {
@@ -1490,7 +1652,7 @@ fn template_parts(s: &str) -> Option<Vec<Part>> {
         let next = p.rest()[c.len_utf8()..].chars().next();
         let part = match (c, next) {
             ('\\', Some(d)) if d.is_ascii_digit() => Part::Match(templatematchrefp(&mut p).ok()?),
-            ('%', Some('{')) => Part::Expr(templateexprp(&mut p).ok()?),
+            ('%', Some('{')) => Part::Expr(templateexprp(&mut p, None).ok()?),
             ('%', Some(n)) if n == '(' || is_field_name_char(n) => {
                 Part::Field(templatefieldrefp(&mut p).ok()?)
             }
@@ -1514,6 +1676,10 @@ fn template_parts(s: &str) -> Option<Vec<Part>> {
 /// Which conditional blocks' matchers a template's match group references
 /// use: all of them for a top-level assignment, or its own block's.
 pub type Scope = Option<usize>;
+
+/// How a template's `%{...}` expressions get the value of a let or hledger
+/// field they name, given the fields whose values are being worked out.
+type Lookup<'a> = dyn FnMut(&str, &mut Vec<String>) -> Result<String, String> + 'a;
 
 impl CsvRules {
     /// A directive's value, the last one if it is written more than once
@@ -1579,13 +1745,15 @@ impl CsvRules {
             .map(|a| a.template.text.as_str())
     }
 
-    /// The final value of a hledger field for a record, with CSV field
-    /// references, match group references and `%{...}` expressions
-    /// interpolated (hledgerFieldValue). In an assignment's expressions, the
-    /// field's own name gives its value from its previous assignment, and
-    /// another hledger field's name that field's final value; both are
-    /// empty if there is none.
-    pub fn field_value(&self, record: &[CsvRecord], f: &str) -> Option<String> {
+    /// The final value of a hledger field (or a let, `let:NAME`) for a
+    /// record, with CSV field references, match group references and
+    /// `%{...}` expressions interpolated (hledgerFieldValue). In an
+    /// assignment's expressions, the field's own name gives its value from
+    /// its previous assignment, and another name that let's or hledger
+    /// field's final value; both are empty if there is none. A let's value
+    /// that is an amount expression is put in parentheses. An error comes
+    /// from a template function (split) that can not make a value.
+    pub fn field_value(&self, record: &[CsvRecord], f: &str) -> Result<Option<String>, String> {
         self.field_value_seen(record, f, &mut Vec::new())
     }
 
@@ -1594,7 +1762,7 @@ impl CsvRules {
         record: &[CsvRecord],
         f: &str,
         seen: &mut Vec<String>,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, String> {
         let assignments = self.field_assignments(record, f);
         seen.push(f.to_string());
         let v = self.value_from(record, f, &assignments, seen);
@@ -1609,19 +1777,33 @@ impl CsvRules {
         f: &str,
         assignments: &[(&FieldAssignment, Scope)],
         seen: &mut Vec<String>,
-    ) -> Option<String> {
-        let ((a, scope), earlier) = assignments.split_last()?;
-        let mut lookup = |g: &str, seen: &mut Vec<String>| {
-            if g == f {
-                self.value_from(record, f, earlier, seen)
-                    .unwrap_or_default()
-            } else if seen.iter().any(|s| s == g) {
-                String::new()
-            } else {
-                self.field_value_seen(record, g, seen).unwrap_or_default()
-            }
+    ) -> Result<Option<String>, String> {
+        let Some(((a, scope), earlier)) = assignments.split_last() else {
+            return Ok(None);
         };
-        Some(self.render(*scope, record, &a.template, &mut lookup, seen))
+        let mut lookup = |g: &str, seen: &mut Vec<String>| -> Result<String, String> {
+            let v = if g == f {
+                self.value_from(record, f, earlier, seen)?
+            } else if seen.iter().any(|s| s == g) {
+                None
+            } else {
+                self.field_value_seen(record, g, seen)?
+            };
+            Ok(v.unwrap_or_default())
+        };
+        self.render(*scope, record, &a.template, &mut lookup, seen)
+            .map(Some)
+    }
+
+    /// What a bare name in a `%{...}` expression refers to: the let of that
+    /// name (`let:NAME`) if the rules have one, otherwise the hledger field.
+    fn name_key(&self, name: &str) -> String {
+        let key = format!("let:{name}");
+        if self.by_field.contains_key(&key) {
+            key
+        } else {
+            name.to_string()
+        }
     }
 
     /// A template rendered for a record (renderTemplate). Interpolated values
@@ -1631,11 +1813,11 @@ impl CsvRules {
         scope: Scope,
         record: &[CsvRecord],
         t: &Template,
-        lookup: &mut dyn FnMut(&str, &mut Vec<String>) -> String,
+        lookup: &mut Lookup,
         seen: &mut Vec<String>,
-    ) -> String {
+    ) -> Result<String, String> {
         let Some(parts) = &t.parts else {
-            return t.text.clone();
+            return Ok(t.text.clone());
         };
         let mut out = String::new();
         for part in parts {
@@ -1644,13 +1826,13 @@ impl CsvRules {
                 Part::Match(n) => {
                     out.push_str(&self.match_group(scope, record, n).unwrap_or_default())
                 }
-                Part::Expr(e) => out.push_str(strip(&self.eval(scope, record, e, lookup, seen))),
+                Part::Expr(e) => out.push_str(strip(&self.eval(scope, record, e, lookup, seen)?)),
                 Part::Field(r) => {
                     out.push_str(&self.field_reference(record, r).unwrap_or_default())
                 }
             }
         }
-        out
+        Ok(out)
     }
 
     /// A `%{...}` expression's value (evalTemplateExpr, before stripping).
@@ -1659,23 +1841,104 @@ impl CsvRules {
         scope: Scope,
         record: &[CsvRecord],
         e: &Expr,
-        lookup: &mut dyn FnMut(&str, &mut Vec<String>) -> String,
+        lookup: &mut Lookup,
         seen: &mut Vec<String>,
-    ) -> String {
-        match e {
+    ) -> Result<String, String> {
+        Ok(match e {
             Expr::Call(name, args) => {
-                let args: Vec<String> = args
+                let args = args
                     .iter()
                     .map(|a| self.eval(scope, record, a, lookup, seen))
-                    .collect();
+                    .collect::<Result<Vec<String>, String>>()?;
+                if name == "split" {
+                    return self.split(record, &args, seen);
+                }
                 apply_template_function(name, &args)
             }
             Expr::Field(r) => self.field_reference(record, r).unwrap_or_default(),
-            Expr::HledgerField(f) => strip(&lookup(f, seen)).to_string(),
+            Expr::HledgerField(name) => {
+                let key = self.name_key(name);
+                let v = strip(&lookup(&key, seen)?).to_string();
+                if key.starts_with("let:") && is_amount_expression(&v) {
+                    format!("({v})")
+                } else {
+                    v
+                }
+            }
             Expr::Match(n) => self.match_group(scope, record, n).unwrap_or_default(),
             Expr::Str(s) => s.clone(),
             Expr::Number(n) => n.to_string(),
+        })
+    }
+
+    /// `split(VALUE, WEIGHTS, I)`: part I of the amount VALUE split exactly in
+    /// proportion to WEIGHTS (a count of equal parts, or a list like
+    /// "30:70"). VALUE is read as a CSV amount value is, with the
+    /// decimal-mark rule and the currency rule's commodity; its value,
+    /// rounded to the decimal places written, is split into whole units of
+    /// its last place (see [`allocate`]), the sign kept. The part is written
+    /// with the amount's commodity, without digit group marks, with exactly
+    /// those decimal places, so that reading it again changes nothing.
+    fn split(
+        &self,
+        record: &[CsvRecord],
+        args: &[String],
+        seen: &mut Vec<String>,
+    ) -> Result<String, String> {
+        let [value, weights, part] = args else {
+            return Ok(String::new());
+        };
+        let weights = split_weights(weights).ok_or_else(|| SPLIT_WEIGHTS_ERROR.to_string())?;
+        let i = split_part(part, weights.len())?;
+        let decimal_mark = match self.directive("decimal-mark").map(strip) {
+            Some(",") => Some(','),
+            Some(".") => Some('.'),
+            _ => None,
+        };
+        let currency = if seen.iter().any(|s| s == "currency") {
+            String::new()
+        } else {
+            self.field_value_seen(record, "currency", seen)?
+                .unwrap_or_default()
+        };
+        let default = match strip(&currency) {
+            "" => None,
+            c => super::csv::parse_currency(c, decimal_mark),
+        };
+        let v = strip(value);
+        let expr = is_amount_expression(v);
+        let text = if expr {
+            v.to_string()
+        } else {
+            simplify_sign(v)
+        };
+        let amount = super::csv::parse_csv_amount(&text, expr, decimal_mark, default.as_ref())
+            .map_err(|_| format!("split's first argument \"{value}\" is not an amount"))?;
+        let places = match amount.style.precision {
+            Precision::Fixed(p) => p,
+            Precision::Natural => amount.quantity.places(),
+        };
+        let q = amount.quantity.round_to(places);
+        let units = q.mantissa().clone().abs();
+        let mut mantissa = allocate(&units, &weights).swap_remove(i - 1);
+        if q.is_negative() {
+            mantissa = -mantissa;
         }
+        let part = Amount {
+            quantity: Decimal::new(mantissa, places),
+            style: Arc::new(AmountStyle {
+                digit_groups: None,
+                decimal_mark: Some(decimal_mark.unwrap_or('.')),
+                precision: Precision::Fixed(places),
+                ..(*amount.style).clone()
+            }),
+            ..Amount::null()
+        };
+        let part = Amount {
+            commodity: amount.commodity.clone(),
+            ..part
+        };
+        Ok(crate::amount::render::show_amount_b(&AmountFormat::DEFAULT, &part).s)
     }
 
     /// The value of match group N of the matchers of the conditional blocks
@@ -2336,11 +2599,11 @@ mod tests {
         );
         let record = rec(&["2019-02-01", "PREFIX Text 1 - Text 2"]);
         assert_eq!(
-            r.field_value(&record, "account1").as_deref(),
+            r.field_value(&record, "account1").unwrap().as_deref(),
             Some("account:Text 1:Text 2")
         );
         assert_eq!(
-            r.field_value(&record, "comment1").as_deref(),
+            r.field_value(&record, "comment1").unwrap().as_deref(),
             Some("Text 1 - Text 2")
         );
     }
@@ -2396,7 +2659,7 @@ mod tests {
                 vec![fa("comment", t)],
                 vec![],
             );
-            r2.field_value(&rec(fields), "comment").unwrap()
+            r2.field_value(&rec(fields), "comment").unwrap().unwrap()
         };
         assert_eq!(value("%{negate(%a)}", &["$-5"]), "$5");
         assert_eq!(value("%{abs(%a)}", &["(5 USD)"]), "5 USD");
@@ -2415,5 +2678,123 @@ mod tests {
         assert_eq!(value("%(a b %a", &["v"]), "%(a b %a");
         assert_eq!(regex_group_count("(a)[(]\\(b(c)"), 2);
         assert_eq!(max_backref("\\1 \\\\3x\\12"), 12);
+    }
+
+    fn big(n: i64) -> IBig {
+        IBig::from(n)
+    }
+
+    fn allocated(units: i64, weights: &[i64]) -> Vec<i64> {
+        let ws: Vec<IBig> = weights.iter().map(|&w| big(w)).collect();
+        allocate(&big(units), &ws)
+            .iter()
+            .map(|p| i64::try_from(p).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn allocation_examples() {
+        // 100.00 in 3: the unit left over goes to the last part
+        assert_eq!(allocated(10000, &[1, 1, 1]), [3333, 3333, 3334]);
+        // 333.33 in 2
+        assert_eq!(allocated(33333, &[1, 1]), [16666, 16667]);
+        // 333.33 as 30:70: 9999.9 and 23333.1, so the first part gets the unit
+        assert_eq!(allocated(33333, &[30, 70]), [10000, 23333]);
+        // two units left over, among four equal losses: the last two parts
+        assert_eq!(allocated(10, &[1, 1, 1, 1]), [2, 2, 3, 3]);
+        // larger losses first, then later parts
+        assert_eq!(allocated(10, &[1, 2, 3]), [2, 3, 5]);
+        assert_eq!(allocated(0, &[1, 1, 1]), [0, 0, 0]);
+        assert_eq!(allocated(7, &[5]), [7]);
+    }
+
+    /// Property checks over many amounts and weights: the parts add up to
+    /// the whole, each is within one unit of its exact share (below it, or
+    /// above by less than a unit), and equal weights get parts at most one
+    /// unit apart.
+    #[test]
+    fn allocation_properties() {
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        for case in 0..5000 {
+            let n = 1 + next(9) as usize;
+            let equal = case % 2 == 0;
+            let weights: Vec<i64> = (0..n)
+                .map(|_| if equal { 1 } else { 1 + next(1000) as i64 })
+                .collect();
+            let units = next(1_000_000) as i64;
+            let parts = allocated(units, &weights);
+            assert_eq!(parts.iter().sum::<i64>(), units, "{units} {weights:?}");
+            let total: i64 = weights.iter().sum();
+            for (p, w) in parts.iter().zip(&weights) {
+                // p*total within (exact - total, exact + total)
+                let exact = units as i128 * *w as i128;
+                let scaled = *p as i128 * total as i128;
+                assert!(
+                    (scaled - exact).abs() < total as i128,
+                    "{units} {weights:?}"
+                );
+            }
+            if equal {
+                let (lo, hi) = (parts.iter().min().unwrap(), parts.iter().max().unwrap());
+                assert!(hi - lo <= 1, "{units} {weights:?} {parts:?}");
+                // the larger parts are the last ones
+                assert!(parts.windows(2).all(|w| w[0] <= w[1]), "{parts:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn split_arguments() {
+        assert_eq!(split_weights("3").map(|w| w.len()), Some(3));
+        assert_eq!(split_weights(" 30:70 "), Some(vec![big(30), big(70)]));
+        assert_eq!(split_weights("0.3:0.70"), Some(vec![big(30), big(70)]));
+        for bad in [
+            "0", "", "30:", ":70", "30:0", "-1", "1:-1", "a:b", "1e2:1", "1.2.3:1",
+        ] {
+            assert_eq!(split_weights(bad), None, "{bad}");
+        }
+        assert_eq!(split_part("2", 3), Ok(2));
+        for bad in ["0", "4", "x", "-1", ""] {
+            assert_eq!(
+                split_part(bad, 3),
+                Err("split's part number should be between 1 and 3".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn split_values() {
+        let r = rules_with(&[("a", 1)], vec![], vec![]);
+        let value = |assignments: Vec<FieldAssignment>, fields: &[&str]| {
+            let r2 = CsvRules::new(Vec::new(), r.field_indexes.clone(), assignments, vec![]);
+            r2.field_value(&rec(fields), "comment").map(Option::unwrap)
+        };
+        let split = |t: &str, fields: &[&str]| value(vec![fa("comment", t)], fields);
+        assert_eq!(split("%{split(%a, 3, 3)}", &["100.00"]), Ok("33.34".into()));
+        assert_eq!(
+            split("%{split(%a, 3, 1)}", &["(100.00)"]),
+            Ok("-33.33".into())
+        );
+        assert_eq!(
+            split("%{split(%a, 2, 2)}", &["EUR 333.33"]),
+            Ok("EUR 166.67".into())
+        );
+        assert_eq!(split("%{split(%a, 2, 2)}", &["7 h"]), Ok("4 h".into()));
+        assert_eq!(split("%{split(%a, 2, 1)}", &["10 / 3"]), Ok("1".into()));
+        assert_eq!(
+            split("%{split(%a, 2, 1)}", &["x"]),
+            Err("split's first argument \"x\" is not an amount".into())
+        );
+        // a let's expression value is substituted in parentheses
+        let lets = vec![fa("let:x", "%a + 1"), fa("comment", "%{x} * 2")];
+        assert_eq!(value(lets, &["2"]), Ok("(2 + 1) * 2".into()));
+        let lets = vec![fa("let:x", "%a"), fa("comment", "%{x} * 2")];
+        assert_eq!(value(lets, &["-2"]), Ok("-2 * 2".into()));
     }
 }

@@ -1,0 +1,4 @@
+skip 1
+fields date,description,amount
+account1 assets:card
+account2 expenses:misc
