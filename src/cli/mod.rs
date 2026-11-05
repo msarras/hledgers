@@ -131,6 +131,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "codes" => commands::codes::codes,
         "commodities" => |o, j| commands::commodities::commodities(o, &j),
         "descriptions" => commands::descriptions::descriptions,
+        "diff" => |o, j| commands::diff::diff(o, &j),
         "notes" => commands::notes::notes,
         "payees" => |o, j| commands::payees::payees(o, &j),
         "print" => commands::print::print,

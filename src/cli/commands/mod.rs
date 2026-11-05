@@ -10,6 +10,7 @@ pub mod codes;
 pub mod commodities;
 pub mod compound;
 pub mod descriptions;
+pub mod diff;
 pub mod files;
 pub mod notes;
 pub mod payees;
@@ -43,7 +44,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &codes::MODE,
     &commodities::MODE,
     &descriptions::MODE,
-    &command("diff", &[]),
+    &diff::MODE,
     &files::MODE,
     &command("get", &[]),
     &command("help", &[]),
