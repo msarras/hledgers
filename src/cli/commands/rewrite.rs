@@ -221,7 +221,8 @@ fn unified_diff(file: &str, old: &[&str], new: &[&str]) -> String {
                 .collect()
         };
         let range = |ns: Vec<usize>| match ns.as_slice() {
-            [] => "0,0".to_string(),
+            // the Diff package writes an empty range this way (formatRun)
+            [] => "-0,0".to_string(),
             [n] => n.to_string(),
             [n, ..] => format!("{n},{}", ns.len()),
         };
