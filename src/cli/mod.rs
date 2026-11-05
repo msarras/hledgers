@@ -1,5 +1,6 @@
 //! The command-line interface: argument processing and command dispatch (Hledger.Cli).
 
+pub mod anchor;
 pub mod args;
 pub mod commands;
 pub mod io;

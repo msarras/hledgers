@@ -1,10 +1,11 @@
 //! The print command (Hledger.Cli.Commands.Print): transactions shown as
 //! journal entries, or with --export, the whole journal.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::amount::render::{AmountFormat, show_amount_b};
 use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
+use crate::cli::anchor::set_account_anchor;
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::commands::not_yet;
 use crate::cli::io::with_title;
@@ -17,6 +18,8 @@ use crate::model::{
 use crate::reports::entries::{entries_report, entries_report_unsorted};
 use crate::text::{is_space, strip};
 use crate::write::csv::{print_csv, print_tsv};
+use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::html::titled_table_html;
 use crate::write::journal::{
     ItemRenderer, PostingLayout, journal_items_as_text, show_account_name, show_transaction,
 };
@@ -250,12 +253,32 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
         }
         "csv" | "tsv" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
-            let rows =
-                raw_table_content(entries_report_as_spreadsheet(&AmountFormat::MACHINE, &txns));
+            let rows = raw_table_content(entries_report_as_spreadsheet(
+                &AmountFormat::MACHINE,
+                None,
+                &[],
+                &txns,
+            ));
             Ok(if fmt == "csv" {
                 print_csv(&rows)
             } else {
                 print_tsv(&rows)
+            })
+        }
+        "html" | "fods" => {
+            let txns = style_all(entries_report(&opts.spec, j)?, &styles);
+            let ropts = &opts.spec.opts;
+            let rows = entries_report_as_spreadsheet(
+                &AmountFormat::ONE_LINE_NO_COST,
+                ropts.balance_base_url.as_deref(),
+                &ropts.query_string,
+                &txns,
+            );
+            Ok(if fmt == "html" {
+                titled_table_html("", &rows) + "\n"
+            } else {
+                let tables = BTreeMap::from([("Print".to_string(), ((1, 0), rows))]);
+                print_fods(locale_encoding_name(), &tables)
             })
         }
         "json" => Ok(to_json_text(&style_all(
@@ -263,7 +286,6 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             &styles,
         ))),
         "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
-        "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
         _ => Err(unsupported_output_format_error(&fmt)),
     }
 }
@@ -271,9 +293,12 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
 /// Transactions as a table with a row for each posting amount, its
 /// transaction's fields repeated (merged down) on each, and a heading row
 /// (entriesReportAsSpreadsheet). The transaction index groups the rows
-/// back into transactions.
+/// back into transactions. With a base url, account names link to their
+/// registers, restricted to the query.
 pub fn entries_report_as_spreadsheet(
     fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
     txns: &[Transaction],
 ) -> Vec<Vec<Cell<String>>> {
     const HEADINGS: [&str; 14] = [
@@ -296,14 +321,19 @@ pub fn entries_report_as_spreadsheet(
         HEADINGS.iter().map(|h| Cell::header(h)).collect(),
     )];
     for t in txns {
-        rows.extend(transaction_to_spreadsheet(fmt, t));
+        rows.extend(transaction_to_spreadsheet(fmt, base_url, query, t));
     }
     rows
 }
 
 /// A transaction's rows: its postings', each after the transaction's
 /// fields (transactionToSpreadsheet).
-fn transaction_to_spreadsheet(fmt: &AmountFormat, t: &Transaction) -> Vec<Vec<Cell<String>>> {
+fn transaction_to_spreadsheet(
+    fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
+    t: &Transaction,
+) -> Vec<Vec<Cell<String>>> {
     let date_cell = |d: Day| Cell {
         typ: CellType::Date,
         ..Cell::new(d.to_string())
@@ -318,7 +348,7 @@ fn transaction_to_spreadsheet(fmt: &AmountFormat, t: &Transaction) -> Vec<Vec<Ce
         Cell::new(strip(&t.comment).to_string()),
     ];
     let postings = (t.postings.iter())
-        .flat_map(|p| posting_to_spreadsheet(fmt, p))
+        .flat_map(|p| posting_to_spreadsheet(fmt, base_url, query, p))
         .collect();
     add_row_span_header(&common, postings)
 }
@@ -327,7 +357,12 @@ fn transaction_to_spreadsheet(fmt: &AmountFormat, t: &Transaction) -> Vec<Vec<Ce
 /// commodity, digit group marks or cost, the commodity, the amount again
 /// as a debit or (positive) credit, the status and the comment
 /// (postingToSpreadsheet).
-fn posting_to_spreadsheet(fmt: &AmountFormat, p: &Posting) -> Vec<Vec<Cell<String>>> {
+fn posting_to_spreadsheet(
+    fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
+    p: &Posting,
+) -> Vec<Vec<Cell<String>>> {
     let amount_cell = |a: Amount| {
         let text = show_amount_b(&AmountFormat::MACHINE, &a).s;
         cell_from_amount(fmt, "amount", text, a)
@@ -350,7 +385,7 @@ fn posting_to_spreadsheet(fmt: &AmountFormat, p: &Posting) -> Vec<Vec<Cell<Strin
                 (amount_cell(bare.clone()), Cell::empty())
             };
             vec![
-                Cell::new(account.clone()),
+                set_account_anchor(base_url, query, &p.account, Cell::new(account.clone())),
                 amount_cell(bare),
                 Cell::new(commodity),
                 debit,

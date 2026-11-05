@@ -2,17 +2,23 @@
 //! Hledger.Cli.Commands.Balance.Internal): accounts with their balance
 //! changes or balances, in one column (a Ledger-style list or tree, lines
 //! laid out by a --format line format), or with a report interval, in a
-//! table with a column per period; or a budget report. Text, csv, tsv and
-//! json output; the other output formats and charts come later in
-//! hledgers milestone 5c.
+//! table with a column per period; or a budget report. Text, csv, tsv,
+//! json, html and fods output; charts come later in hledgers milestone 5c.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::account::{UNBUDGETED_ACCOUNT_NAME, account_name_drop, account_name_level};
+use crate::account::{
+    UNBUDGETED_ACCOUNT_NAME, account_name_drop, account_name_level, parent_account_names,
+};
 use crate::amount::render::{
     AmountFormat, show_mixed_amount_b, show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
 };
 use crate::amount::{MixedAmount, Sym};
+use crate::cli::anchor::{
+    LinkOpts, amount_phrase, compose_anchor_with, date_span_cell_with, date_term,
+    header_date_span_cell, link_params, remove_dates, remove_inacct, render_period_heading,
+    set_account_anchor, set_account_anchor_with, total_date_span_cell, value_param, with_link,
+};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::commands::not_yet;
 use crate::cli::commands::print::unsupported_output_format_error;
@@ -20,13 +26,13 @@ use crate::cli::io::{warn_if_large_multi_period_report, with_title};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
-use crate::dates::{DateSpan, Day, Interval, prevday};
+use crate::dates::{DateSpan, Day, Interval, Period, prevday, spans_span};
 use crate::decimal::Decimal;
 use crate::model::Journal;
 use crate::reports::budget::{BudgetCell, BudgetReport, budget_report};
 use crate::reports::opts::{
-    AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, PeriodTitles, ReportOpts,
-    ReportSpec,
+    AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, PeriodTitles,
+    ReportOpts, ReportSpec,
 };
 use crate::reports::periodic::{
     BalanceReport, DisplayName, MultiBalanceReport, PeriodicReportRow, balance_report,
@@ -35,6 +41,8 @@ use crate::reports::periodic::{
 use crate::text::{Wide, format_text};
 use crate::valuation::{ConversionOp, ValuationType};
 use crate::write::csv::{print_csv, print_tsv};
+use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::html::titled_table_html;
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
     self as spr, Border, CellType, Emphasis, Lines, Style, add_header_borders, add_row_span_header,
@@ -131,10 +139,6 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let multiperiod =
         ropts.interval != Interval::NoInterval || (layout == Layout::Tidy && delimited);
     let styles = balance_report_styles(&ropts, j);
-    let other_format = |fmt: &str| match fmt {
-        "html" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
-        _ => unsupported_output_format_error(fmt),
-    };
     // json shows every value of the report
     let spec = ReportSpec {
         opts: ReportOpts {
@@ -143,6 +147,10 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         },
         ..opts.spec.clone()
     };
+    let known = matches!(
+        fmt.as_str(),
+        "txt" | "csv" | "tsv" | "json" | "html" | "fods"
+    );
     let delimited_text = |records: Vec<Vec<String>>| {
         if fmt == "csv" {
             print_csv(&records)
@@ -150,10 +158,17 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             print_tsv(&records)
         }
     };
+    let fods = |name: &str, sheet: spr::Sheet| {
+        print_fods(
+            locale_encoding_name(),
+            &BTreeMap::from([(name.to_string(), sheet)]),
+        )
+    };
+    let one_line = AmountFormat::ONE_LINE_NO_COST;
     if budget {
         warn_if_large_multi_period_report(opts, j);
-        if !matches!(fmt.as_str(), "txt" | "csv" | "tsv" | "json") {
-            return Err(other_format(&fmt));
+        if !known {
+            return Err(unsupported_output_format_error(&fmt));
         }
         let (span, _) = spec.report_span(j);
         let mut report = budget_report(&spec, &opts.input.balancing, span, j)?;
@@ -161,6 +176,15 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         match fmt.as_str() {
             "txt" => budget_report_as_text(&ropts, layout, &report),
             "json" => Ok(to_json_text(&report) + "\n"),
+            "html" => {
+                let (_, rows) = budget_report_as_spreadsheet(&one_line, &ropts, layout, &report)?;
+                let title = budget_report_title(&ropts, &report);
+                Ok(titled_table_html(&title, &rows) + "\n")
+            }
+            "fods" => {
+                let sheet = budget_report_as_spreadsheet(&one_line, &ropts, layout, &report)?;
+                Ok(fods("Budget Report", sheet))
+            }
             _ => {
                 let fmt = AmountFormat::MACHINE;
                 let (_, rows) = budget_report_as_spreadsheet(&fmt, &ropts, layout, &report)?;
@@ -169,32 +193,53 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         }
     } else if multiperiod {
         warn_if_large_multi_period_report(opts, j);
+        if !known {
+            return Err(unsupported_output_format_error(&fmt));
+        }
         let mut report = multi_balance_report(&spec, j)?;
         report.style_amounts(&styles);
-        match fmt.as_str() {
-            "txt" => Ok(multi_balance_report_as_text(&ropts, layout, &report)),
-            "json" => Ok(to_json_text(&report) + "\n"),
-            "csv" | "tsv" => Ok(delimited_text(multi_balance_report_as_csv(
-                &ropts, layout, &report,
-            ))),
-            f => Err(other_format(f)),
-        }
+        Ok(match fmt.as_str() {
+            "txt" => multi_balance_report_as_text(&ropts, layout, &report),
+            "json" => to_json_text(&report) + "\n",
+            "csv" | "tsv" => delimited_text(multi_balance_report_as_csv(&ropts, layout, &report)),
+            "html" => {
+                let (_, rows) = multi_balance_report_as_spreadsheet(&ropts, layout, &report);
+                let title = multi_balance_report_title(&ropts, &report);
+                titled_table_html(&title, &rows) + "\n"
+            }
+            _ => fods(
+                "Multi-period Balance Report",
+                multi_balance_report_as_spreadsheet(&ropts, layout, &report),
+            ),
+        })
     } else {
+        if !known {
+            return Err(unsupported_output_format_error(&fmt));
+        }
         let mut report = balance_report(&spec, j)?;
         report.style_amounts(&styles);
-        match fmt.as_str() {
-            "txt" => Ok(with_title(
-                opts,
-                balance_report_as_text(&ropts, layout, &report)?,
-            )),
-            "json" => Ok(to_json_text(&report) + "\n"),
+        Ok(match fmt.as_str() {
+            "txt" => with_title(opts, balance_report_as_text(&ropts, layout, &report)?),
+            "json" => to_json_text(&report) + "\n",
             "csv" | "tsv" => {
-                let rows =
-                    balance_report_as_spreadsheet(&AmountFormat::MACHINE, &ropts, layout, &report);
-                Ok(delimited_text(raw_table_content(rows)))
+                let fmt = AmountFormat::MACHINE;
+                delimited_text(raw_table_content(balance_report_as_spreadsheet(
+                    &fmt, &ropts, layout, &report,
+                )))
             }
-            f => Err(other_format(f)),
-        }
+            "html" => {
+                // this report has no default title, so one is shown only with --title
+                let rows = balance_report_as_spreadsheet(&one_line, &ropts, layout, &report);
+                titled_table_html(ropts.effective_title(""), &rows) + "\n"
+            }
+            _ => fods(
+                "Balance Report",
+                (
+                    (1, 0),
+                    balance_report_as_spreadsheet(&one_line, &ropts, layout, &report),
+                ),
+            ),
+        })
     }
 }
 
@@ -762,16 +807,38 @@ pub fn multi_balance_row_as_cell_builders<N>(
 ) -> Vec<Vec<spr::Cell<Wide>>> {
     let classified: Vec<(&str, &MixedAmount)> =
         row.amounts.iter().map(|m| (amount_class(rc), m)).collect();
-    let mut clsamts: Vec<(&str, &MixedAmount)> = Vec::new();
+    // each figure with the span it covers: a column's, the whole report's
+    // for a row total, none for an average (or for text, which has none)
+    let mut spanclsamts: Vec<(Option<DateSpan>, (&str, &MixedAmount))> = Vec::new();
     if !ropts.summary_only {
-        clsamts.extend(&classified);
+        let spans = colspans
+            .iter()
+            .map(|s| Some(*s))
+            .chain(std::iter::repeat(None));
+        spanclsamts.extend(spans.zip(classified.iter().copied()));
     }
     if ropts.has_totals_column() && !row.amounts.is_empty() {
-        clsamts.push((row_total_class(rc), &row.total));
+        let span = (!colspans.is_empty()).then(|| spans_span(colspans));
+        spanclsamts.push((span, (row_total_class(rc), &row.total)));
     }
     if ropts.average && !row.amounts.is_empty() {
-        clsamts.push((row_average_class(rc), &row.average));
+        spanclsamts.push((None, (row_average_class(rc), &row.average)));
     }
+    let clsamts: Vec<(&str, &MixedAmount)> = spanclsamts.iter().map(|(_, c)| *c).collect();
+    // in the wide layout a figure links to the register it is derived from,
+    // through its row's cell for the span it covers, unless it looks zero
+    // or is not a sum of postings; a totals row's span cell has its title
+    let link_figure = |span: &Option<DateSpan>, m: &MixedAmount, c: spr::Cell<Wide>| match span {
+        Some(span) if figures_link(ropts) && !m.looks_zero() => {
+            let ds = date_span_cell(span);
+            let title = match rc {
+                RowClass::Total => ds.title,
+                RowClass::Value => amount_phrase(&report_link_opts(ropts, colspans), false),
+            };
+            with_link(ds.anchor, &title, c)
+        }
+        _ => c,
+    };
     let wb_cell = |s: &str| spr::Cell::new(Wide::new(s));
     let cs: Vec<Sym> = if clsamts.iter().all(|(_, m)| m.looks_zero()) {
         vec![Sym::from("")]
@@ -789,8 +856,10 @@ pub fn multi_balance_row_as_cell_builders<N>(
                 ..fmt.clone()
             };
             vec![
-                (clsamts.iter())
-                    .map(|(cls, m)| cell_from_mixed_amount(&fmt, cls, m))
+                (spanclsamts.iter())
+                    .map(|(span, (cls, m))| {
+                        link_figure(span, m, cell_from_mixed_amount(&fmt, cls, m))
+                    })
                     .collect(),
             ]
         }
@@ -980,6 +1049,54 @@ pub fn tree_account_class(ropts: &ReportOpts, indent: usize, account: &str) -> S
     }
 }
 
+/// Whether a report's figures link to registers: only sums of postings,
+/// which is what a register shows (figuresLink).
+fn figures_link(ropts: &ReportOpts) -> bool {
+    ropts.balance_calc == BalanceCalculation::Change && !ropts.percent
+}
+
+/// The register link options of a report's rows: its accumulation, the
+/// span its columns cover, whether it shows figures with the sign opposite
+/// to the register's (as the compound reports' negated sections do), and
+/// how it converts amounts (reportLinkOpts).
+pub fn report_link_opts(ropts: &ReportOpts, colspans: &[DateSpan]) -> LinkOpts {
+    LinkOpts {
+        accum: ropts.balance_accum,
+        span: spans_span(colspans),
+        date2: ropts.date2,
+        includes_subs: true,
+        negated: ropts.normal_balance == Some(NormalSign::NormallyNegative),
+        value: value_param(ropts.conversion_op, ropts.value.as_ref()),
+    }
+}
+
+/// The link options of an account's row: whether its figures include the
+/// subaccounts, which in tree mode they always do, and in list mode unless
+/// some subaccount has a row of its own (rowLinkOpts).
+fn row_link_opts(
+    ropts: &ReportOpts,
+    colspans: &[DateSpan],
+    shown_parents: &BTreeSet<String>,
+    account: &str,
+) -> LinkOpts {
+    LinkOpts {
+        includes_subs: ropts.account_list_mode == AccountListMode::Tree
+            || !shown_parents.contains(account),
+        ..report_link_opts(ropts, colspans)
+    }
+}
+
+/// The accounts that have a subaccount among these (shownParentsOf).
+fn shown_parents_of<'a>(names: impl Iterator<Item = &'a str>) -> BTreeSet<String> {
+    names
+        .flat_map(|n| {
+            parent_account_names(n)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 /// The class of a figure (amountClass).
 fn amount_class(rc: RowClass) -> &'static str {
     match rc {
@@ -1025,15 +1142,6 @@ fn budget_average_class(rc: RowClass) -> &'static str {
     match rc {
         RowClass::Value => "budget rowaverage",
         RowClass::Total => "budget colaverage",
-    }
-}
-
-/// A period's heading: its compact name, or with --period-titles=dates its
-/// dates (renderPeriodHeading).
-pub fn render_period_heading(titles: PeriodTitles, span: &DateSpan) -> String {
-    match titles {
-        PeriodTitles::Dates => span.show_full(),
-        PeriodTitles::Compact => span.to_string(),
     }
 }
 
@@ -1098,11 +1206,40 @@ pub fn balance_report_as_spreadsheet(
         };
         cell_from_mixed_amount(&fmt, amount_class(rc), m).into_text()
     };
+    let base = ropts.balance_base_url.as_deref();
+    let shown_parents = shown_parents_of(report.items.iter().map(|(n, _)| &*n.full));
+    // the report's period, from -b/-e/-p (a date: query term is in the
+    // query string already, and the report intersected the two)
+    let period_terms = if ropts.period == Period::PeriodAll {
+        Vec::new()
+    } else {
+        date_term(ropts.date2, &ropts.period.as_date_span())
+    };
+    let link_query = [period_terms.clone(), ropts.query_string.clone()].concat();
     let rows = |rc: RowClass, name: &DisplayName, m: &MixedAmount| -> Vec<Vec<spr::Cell<String>>> {
+        let lo = row_link_opts(ropts, &[], &shown_parents, &name.full);
         let account_cell = match rc {
+            // the total row's heading as it is: --drop etc. don't apply
             RowClass::Total => spr::Cell::new(name.name.to_string()).with_class(ACCOUNT_CLASS),
             RowClass::Value => spr::Cell::new(render_balance_acct(ropts, NBSP, name))
                 .with_class(&tree_account_class(ropts, name.indent, &name.full)),
+        };
+        let account_base = if rc == RowClass::Value { base } else { None };
+        let account_cell =
+            set_account_anchor_with(&lo, account_base, &link_query, &name.full, account_cell);
+        // the figure links where the account name does, or in the total row
+        // to the register of everything in the report; not if it looks
+        // zero, which has an empty register
+        let link_figure = |c: spr::Cell<String>| {
+            if !figures_link(ropts) || m.looks_zero() {
+                c
+            } else if rc == RowClass::Value {
+                with_link(account_cell.anchor.clone(), &amount_phrase(&lo, false), c)
+            } else {
+                let q = [period_terms.clone(), remove_inacct(&ropts.query_string)].concat();
+                let anchor = compose_anchor_with(&link_params(&lo), base, &q);
+                with_link(anchor, &amount_phrase(&lo, true), c)
+            }
         };
         let lines = match layout {
             Layout::BareWide => {
@@ -1125,7 +1262,7 @@ pub fn balance_report_as_spreadsheet(
                     ]
                 })
                 .collect(),
-            _ => vec![vec![render_amount(rc, m)]],
+            _ => vec![vec![link_figure(render_amount(rc, m))]],
         };
         add_row_span_header(&[account_cell], lines)
     };
@@ -1160,11 +1297,15 @@ pub fn balance_sub_report_as_spreadsheet_parts(
     report: &MultiBalanceReport,
 ) -> SpreadsheetParts {
     let colspans = &report.dates;
+    let base = ropts.balance_base_url.as_deref();
+    let query = &ropts.query_string;
     let h_cell = |cls: &str, label: &str| spr::Cell::header(label).with_class(cls);
+    // the headings over figures are marked as such, so that a stylesheet
+    // can align them with the figures
     let mut date_headers: Vec<spr::Cell<String>> = Vec::new();
     if !ropts.summary_only {
         date_headers.extend(colspans.iter().map(|s| {
-            spr::Cell::header(&render_period_heading(ropts.period_titles, s))
+            header_date_span_cell(ropts.date2, ropts.period_titles, base, query, s)
                 .with_class(amount_class(RowClass::Value))
         }));
     }
@@ -1205,12 +1346,26 @@ pub fn balance_sub_report_as_spreadsheet_parts(
         }
         _ => vec![headers],
     };
-    let date_span_cell =
-        |s: &DateSpan| spr::Cell::new(render_period_heading(ropts.period_titles, s));
+    let shown_parents = shown_parents_of(report.rows.iter().map(|r| &*r.name.full));
+    // an account's link covers the span its row sums, the columns', which
+    // can be wider than the span asked for; when none was asked for, the
+    // register is unrestricted, as the report is
+    let requested_span = ropts.period != Period::PeriodAll
+        || (query.iter()).any(|t| t.starts_with("date:") || t.starts_with("date2:"));
+    let mut row_query = Vec::new();
+    if requested_span {
+        row_query.extend(date_term(ropts.date2, &spans_span(colspans)));
+    }
+    row_query.extend(remove_dates(query));
     let mut body = Vec::new();
     for row in &report.rows {
+        let account = &*row.name.full;
+        let lo = row_link_opts(ropts, colspans, &shown_parents, account);
         let account_cell = spr::Cell::new(render_balance_acct(ropts, NBSP, &row.name))
-            .with_class(&tree_account_class(ropts, row.name.indent, &row.name.full));
+            .with_class(&tree_account_class(ropts, row.name.indent, account));
+        let account_cell = set_account_anchor_with(&lo, base, &row_query, account, account_cell);
+        let date_span_cell =
+            |s: &DateSpan| date_span_cell_with(&lo, ropts.period_titles, base, query, account, s);
         let lines = multi_balance_row_as_cell_builders(
             fmt,
             ropts,
@@ -1233,6 +1388,8 @@ pub fn balance_sub_report_as_spreadsheet_parts(
             fmt,
             ropts,
             layout,
+            &report_link_opts(ropts, colspans),
+            &[],
             all_commodities,
             colspans,
             TOTAL_ROW_HEADING_SPREADSHEET,
@@ -1246,18 +1403,32 @@ pub fn balance_sub_report_as_spreadsheet_parts(
 pub type SpreadsheetParts = (spr::Rows, spr::Rows, spr::Rows);
 
 /// The totals row of a multi-period report as spreadsheet rows: the label,
-/// then a total per column (multiBalanceTotalsRows).
+/// then a total per column, each linking to the register of everything in
+/// the report's query plus these terms, for that column
+/// (multiBalanceTotalsRows).
+#[allow(clippy::too_many_arguments)]
 pub fn multi_balance_totals_rows<N>(
     fmt: &AmountFormat,
     ropts: &ReportOpts,
     layout: Layout,
+    lo: &LinkOpts,
+    extra_query: &[String],
     all_commodities: &[Sym],
     colspans: &[DateSpan],
     label: &str,
     row: &PeriodicReportRow<N, MixedAmount>,
 ) -> Vec<Vec<spr::Cell<String>>> {
-    let date_span_cell =
-        |s: &DateSpan| spr::Cell::new(render_period_heading(ropts.period_titles, s));
+    let base = ropts.balance_base_url.as_deref();
+    let date_span_cell = |s: &DateSpan| {
+        total_date_span_cell(
+            lo,
+            ropts.period_titles,
+            base,
+            extra_query,
+            &ropts.query_string,
+            s,
+        )
+    };
     let lines = multi_balance_row_as_cell_builders(
         fmt,
         ropts,
@@ -1313,6 +1484,32 @@ pub fn multi_balance_report_as_csv(
         transpose(&records)
     } else {
         records
+    }
+}
+
+/// A multi-period balance report as a spreadsheet, with the numbers of its
+/// heading rows and columns, transposed with --transpose
+/// (multiBalanceReportAsSpreadsheet).
+pub fn multi_balance_report_as_spreadsheet(
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &MultiBalanceReport,
+) -> spr::Sheet {
+    let commodities = all_commodities_from_periodic_report(&report.rows);
+    let (mut rows, body, totals) = balance_sub_report_as_spreadsheet_parts(
+        &AmountFormat::ONE_LINE_NO_COST,
+        ropts,
+        layout,
+        &commodities,
+        report,
+    );
+    let fixed = (rows.len(), multi_balance_report_num_header_columns(layout));
+    rows.extend(body);
+    rows.extend(totals);
+    if ropts.transpose {
+        ((fixed.1, fixed.0), spr::transpose(rows))
+    } else {
+        (fixed, rows)
     }
 }
 
@@ -1378,7 +1575,12 @@ pub fn budget_report_as_spreadsheet(
     let mut rows = all_headers;
     let fixed = (rows.len(), leading_headers.len());
     for row in &report.rows {
-        let account_cell = spr::Cell::new(render_balance_acct(ropts, NBSP, &row.name));
+        let account_cell = set_account_anchor(
+            ropts.balance_base_url.as_deref(),
+            &ropts.query_string,
+            &row.name.full,
+            spr::Cell::new(render_balance_acct(ropts, NBSP, &row.name)),
+        );
         rows.extend(budget_row_as_texts(
             fmt,
             ropts,
@@ -1488,12 +1690,7 @@ pub fn budget_report_as_text(
     layout: Layout,
     report: &BudgetReport,
 ) -> Result<String, String> {
-    let default = format!(
-        "Budget performance in {}{}:",
-        report.span(),
-        valuation_description(ropts, false)
-    );
-    let title = ropts.effective_title(&default);
+    let title = budget_report_title(ropts, report);
     let mut out = if title.is_empty() {
         String::new()
     } else {
@@ -1502,6 +1699,17 @@ pub fn budget_report_as_text(
     let table = budget_report_as_table(ropts, layout, report)?;
     out.push_str(&multi_balance_report_table_as_text(ropts, layout, &table));
     Ok(out)
+}
+
+/// A budget report's heading: what it shows, over which dates, valued
+/// how; or --title's (budgetReportTitle).
+fn budget_report_title(ropts: &ReportOpts, report: &BudgetReport) -> String {
+    let default = format!(
+        "Budget performance in {}{}:",
+        report.span(),
+        valuation_description(ropts, false)
+    );
+    ropts.effective_title(&default).to_string()
 }
 
 /// A budget report as a table of text (budgetReportAsTable): a line for

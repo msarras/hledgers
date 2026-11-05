@@ -2,21 +2,21 @@
 //! Hledger.Cli.Commands.Balancesheet, Balancesheetequity, Incomestatement
 //! and Cashflow): a multi-period balance report in sections (assets and
 //! liabilities, revenues and expenses, ...), each with its own totals, and
-//! the net totals, all amounts normally positive. Text, csv, tsv and json
-//! output; the other output formats and charts come later in hledgers
-//! milestone 5c.
+//! the net totals, all amounts normally positive. Text, csv, tsv, json,
+//! html and fods output; charts come later in hledgers milestone 5c.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::account::AccountType;
 use crate::amount::render::AmountFormat;
 use crate::amount::{MixedAmount, Sym};
+use crate::cli::anchor::{LinkOpts, header_date_span_cell};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::commands::balance::{
-    ACCOUNT_CLASS, CHART_WIDTH_FLAG, TIDY_COLUMN_LABELS, TOTAL_ROW_HEADING_SPREADSHEET,
+    ACCOUNT_CLASS, CHART_WIDTH_FLAG, NBSP, TIDY_COLUMN_LABELS, TOTAL_ROW_HEADING_SPREADSHEET,
     balance_sub_report_as_spreadsheet_parts, multi_balance_report_as_part_table,
     multi_balance_report_num_header_columns, multi_balance_report_table_as_text,
-    multi_balance_row_as_text, multi_balance_totals_rows, report_period_name,
+    multi_balance_row_as_text, multi_balance_totals_rows, report_link_opts, report_period_name,
     valuation_description,
 };
 use crate::cli::commands::not_yet;
@@ -37,8 +37,12 @@ use crate::reports::periodic::{
 };
 use crate::text::Wide;
 use crate::write::csv::{print_csv, print_tsv};
+use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::html::{table_html, table_style};
 use crate::write::json::to_json_text;
-use crate::write::spreadsheet::{self as spr, Emphasis, Style, horizontal_span, raw_table_content};
+use crate::write::spreadsheet::{
+    self as spr, Border, Emphasis, Style, horizontal_span, raw_table_content,
+};
 use crate::write::table::{Header, Line, Table, concat_tables};
 
 /// A compound balance command: its mode, its report's name (which the
@@ -207,10 +211,7 @@ pub fn compound_balance_command(
         return Err(not_yet(&format!("{command} --chart"), "5c"));
     }
     match fmt.as_str() {
-        "txt" | "csv" | "tsv" | "json" => {}
-        "html" | "fods" => {
-            return Err(not_yet(&format!("{command} -O {fmt}"), "5c"));
-        }
+        "txt" | "csv" | "tsv" | "json" | "html" | "fods" => {}
         f => return Err(unsupported_output_format_error(f)),
     }
     let ropts = &opts.spec.opts;
@@ -232,9 +233,32 @@ pub fn compound_balance_command(
     apply_subreport_titles(&ropts1, &mut cbr);
     cbr.style_amounts(&balance_report_styles(ropts, j));
     Ok(match fmt.as_str() {
-        "csv" => print_csv(&compound_balance_report_as_csv(&ropts1, layout, &cbr)),
-        "tsv" => print_tsv(&compound_balance_report_as_csv(&ropts1, layout, &cbr)),
+        "csv" => print_csv(&compound_balance_report_as_csv(
+            &ropts1,
+            layout,
+            cbc.sections,
+            &cbr,
+        )),
+        "tsv" => print_tsv(&compound_balance_report_as_csv(
+            &ropts1,
+            layout,
+            cbc.sections,
+            &cbr,
+        )),
         "json" => to_json_text(&cbr),
+        "html" => compound_balance_report_as_html(&ropts1, layout, cbc.sections, &cbr) + "\n",
+        "fods" => {
+            let (title, sheet) = compound_balance_report_as_spreadsheet(
+                &AmountFormat::ONE_LINE_NO_COST,
+                "Account",
+                Some(""),
+                &ropts1,
+                layout,
+                cbc.sections,
+                &cbr,
+            );
+            print_fods(locale_encoding_name(), &BTreeMap::from([(title, sheet)]))
+        }
         _ => compound_balance_report_as_text(&ropts1, layout, &cbr),
     })
 }
@@ -398,6 +422,7 @@ fn compound_balance_report_as_text(
 fn compound_balance_report_as_csv(
     ropts: &ReportOpts,
     layout: Layout,
+    sections: &[SubreportSpec],
     cbr: &CompoundPeriodicReport<DisplayName, MixedAmount>,
 ) -> Vec<Vec<String>> {
     let (title, (_, rows)) = compound_balance_report_as_spreadsheet(
@@ -406,6 +431,7 @@ fn compound_balance_report_as_csv(
         None,
         ropts,
         layout,
+        sections,
         cbr,
     );
     let mut records = Vec::new();
@@ -414,6 +440,34 @@ fn compound_balance_report_as_csv(
     }
     records.extend(rows);
     raw_table_content(records)
+}
+
+/// A compound balance report as html: the table styles with the account
+/// column unwrapped and alternate rows shaded, the title, and one table
+/// with a row of no-break space after each section
+/// (compoundBalanceReportAsHtml).
+fn compound_balance_report_as_html(
+    ropts: &ReportOpts,
+    layout: Layout,
+    sections: &[SubreportSpec],
+    cbr: &CompoundPeriodicReport<DisplayName, MixedAmount>,
+) -> String {
+    let (title, (_, rows)) = compound_balance_report_as_spreadsheet(
+        &AmountFormat::ONE_LINE_NO_COST,
+        "",
+        Some(NBSP),
+        ropts,
+        layout,
+        sections,
+        cbr,
+    );
+    let mut rules = table_style();
+    rules.push(("td:nth-child(1)".into(), "white-space:nowrap".into()));
+    rules.push((
+        "tr:nth-child(odd) td".into(),
+        "background-color:#eee".into(),
+    ));
+    table_html(&rules, &title, &rows)
 }
 
 /// A compound balance report as a spreadsheet, with its title and the
@@ -430,9 +484,11 @@ fn compound_balance_report_as_spreadsheet(
     blank: Option<&str>,
     ropts: &ReportOpts,
     layout: Layout,
+    sections: &[SubreportSpec],
     cbr: &CompoundPeriodicReport<DisplayName, MixedAmount>,
 ) -> (String, spr::Sheet) {
     let colspans = &cbr.dates;
+    let base = ropts.balance_base_url.as_deref();
     let all_commodities = all_commodities_from_subreports(&cbr.subreports);
     let mut leading_headers = vec![spr::Cell::header(account_label)];
     match layout {
@@ -444,11 +500,20 @@ fn compound_balance_report_as_spreadsheet(
     }
     let mut data_headers: Vec<spr::Cell<String>> = Vec::new();
     if layout != Layout::Tidy {
+        // a period's heading links to the register for that period; it
+        // shows the period's end date in a historical report
         if !ropts.summary_only {
-            data_headers.extend(
-                (colspans.iter())
-                    .map(|s| spr::Cell::header(&report_period_name(ropts, colspans, s))),
-            );
+            data_headers.extend(colspans.iter().map(|s| spr::Cell {
+                border: Border::default(),
+                content: report_period_name(ropts, colspans, s),
+                ..header_date_span_cell(
+                    ropts.date2,
+                    ropts.period_titles,
+                    base,
+                    &ropts.query_string,
+                    s,
+                )
+            }));
         }
         if ropts.has_totals_column() {
             data_headers.push(spr::Cell::header("Total"));
@@ -466,8 +531,18 @@ fn compound_balance_report_as_spreadsheet(
         header_row.extend(horizontal_span(sub_columns, h.clone()));
     }
     let blank_row = blank.map(|b| horizontal_span(header_row.len(), spr::Cell::new(b.to_string())));
+    // a section's rows link with its account type term as well, so that
+    // their registers exclude a subaccount of another type, as the figures
+    // do; a section is rendered with its own options, so that its links say
+    // when its figures are negated
+    let type_term = |s: &SubreportSpec| format!("type:{}", s.account_type);
     let mut rows = vec![header_row.clone()];
-    for (title, report, _) in &cbr.subreports {
+    for (spec, (title, report, _)) in sections.iter().zip(&cbr.subreports) {
+        let section_term = vec![type_term(spec)];
+        let sropts = ReportOpts {
+            normal_balance: Some(spec.normal_sign),
+            ..ropts.clone()
+        };
         if !title.is_empty() {
             let account_cell = spr::Cell {
                 style: Style::Body(Emphasis::Total),
@@ -484,18 +559,26 @@ fn compound_balance_report_as_spreadsheet(
                 _ => horizontal_span(header_row.len(), account_cell),
             });
         }
-        let sropts = ReportOpts {
+        let body_opts = ReportOpts {
             no_total: true,
-            ..ropts.clone()
+            query_string: [section_term.clone(), sropts.query_string.clone()].concat(),
+            ..sropts.clone()
         };
-        let (_, body, _) =
-            balance_sub_report_as_spreadsheet_parts(fmt, &sropts, layout, &all_commodities, report);
+        let (_, body, _) = balance_sub_report_as_spreadsheet_parts(
+            fmt,
+            &body_opts,
+            layout,
+            &all_commodities,
+            report,
+        );
         rows.extend(body);
         if !ropts.no_total {
             rows.extend(multi_balance_totals_rows(
                 fmt,
-                ropts,
+                &sropts,
                 layout,
+                &report_link_opts(&sropts, &report.dates),
+                &section_term,
                 &all_commodities,
                 &report.dates,
                 TOTAL_ROW_HEADING_SPREADSHEET,
@@ -504,11 +587,29 @@ fn compound_balance_report_as_spreadsheet(
         }
         rows.extend(blank_row.clone());
     }
+    // the net total's register is that of all the sections' account
+    // types; it shows the net with the opposite sign when a section's
+    // negation is not undone by subtracting it, as an income statement's
+    // revenues are added negated
     if !(ropts.no_total || cbr.subreports.len() == 1) {
+        let net_term = format!(
+            "type:{}",
+            (sections.iter())
+                .map(|s| s.account_type.to_string())
+                .collect::<String>()
+        );
+        let net_negated = (sections.iter())
+            .any(|s| (s.normal_sign == NormalSign::NormallyNegative) != !s.increases_total);
+        let lo = LinkOpts {
+            negated: net_negated,
+            ..report_link_opts(ropts, colspans)
+        };
         rows.extend(multi_balance_totals_rows(
             fmt,
             ropts,
             layout,
+            &lo,
+            &[net_term],
             &all_commodities,
             colspans,
             "Net:",
