@@ -146,6 +146,7 @@ struct Totals {
 enum HLine {
     Heading {
         indent: usize,
+        account: AccountName,
         display: String,
         totals: Totals,
     },
@@ -1061,6 +1062,7 @@ fn tree_lines(
         }
         let mut out = vec![HLine::Heading {
             indent: d,
+            account: AccountName::from(acct),
             display,
             totals: totals(acct),
         }];
@@ -1686,8 +1688,9 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
                     HLine::Position {
                         indent, display, ..
                     } if tree => " ".repeat(indent * 2) + display,
-                    HLine::Heading { display, .. } => display.clone(),
-                    HLine::Position { account, .. } => account_name_drop(ropts.drop, account),
+                    HLine::Heading { account, .. } | HLine::Position { account, .. } => {
+                        account_name_drop(ropts.drop, account)
+                    }
                 })
                 .collect();
             let rows = rpt
