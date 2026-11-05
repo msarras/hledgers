@@ -6,12 +6,16 @@ use crate::account::DepthSpec;
 use crate::amount::Sym;
 use crate::cli::args::RawOpts;
 use crate::dates::{
-    DateSpan, Day, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr, parsedate,
+    DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
+    parsedate, split_span,
 };
-use crate::model::{Posting, Status, Transaction};
+use crate::model::{Journal, Posting, Status, Transaction};
 use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
 use crate::text::strip_quotes;
-use crate::valuation::{ConversionOp, ValuationType};
+use crate::valuation::{
+    ConversionOp, PriceOracle, ValuationType, journal_to_cost, mixed_amount_apply_gain,
+    mixed_amount_apply_valuation,
+};
 
 /// What to calculate in each balance report cell (BalanceCalculation).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -347,6 +351,146 @@ impl ReportSpec {
     pub fn with_default_conversion_op(mut self, op: ConversionOp) -> ReportSpec {
         self.opts.conversion_op.get_or_insert(op);
         self
+    }
+
+    /// The report's span: the requested one, its open ends filled with the
+    /// journal's first and last dates (for an end value report, the last
+    /// being at least the day after the latest P directive not after
+    /// today), enlarged to whole report intervals; and the report periods,
+    /// if any (reportSpan).
+    pub fn report_span(&self, j: &Journal) -> (DateSpan, Option<DayPartition>) {
+        self.report_span_helper(false, j)
+    }
+
+    /// Like [`report_span`](ReportSpec::report_span), with both primary
+    /// and secondary dates (reportSpanBothDates).
+    pub fn report_span_both_dates(&self, j: &Journal) -> (DateSpan, Option<DayPartition>) {
+        self.report_span_helper(true, j)
+    }
+
+    fn report_span_helper(
+        &self,
+        both_dates: bool,
+        j: &Journal,
+    ) -> (DateSpan, Option<DayPartition>) {
+        let (span, adjust) = self.report_span_and_adjust(both_dates, j);
+        let periods = split_span(adjust, &self.opts.interval, span);
+        let enlarged = periods.as_ref().map_or(DateSpan::default(), |p| {
+            let (s, e) = p.start_end();
+            DateSpan::exact(Some(s), Some(e.add_days(1)))
+        });
+        (enlarged, periods)
+    }
+
+    /// The requested span with its open ends filled from the journal, and
+    /// whether report periods should start at an interval boundary (when no
+    /// start date was requested) (reportSpanAndAdjust).
+    fn report_span_and_adjust(&self, both_dates: bool, j: &Journal) -> (DateSpan, bool) {
+        let ropts = &self.opts;
+        let requested = if both_dates {
+            self.query.date_span_either()
+        } else {
+            self.query.date_span(ropts.date2)
+        };
+        let DateSpan(first, last) = if both_dates {
+            j.date_span_both_dates()
+        } else {
+            j.date_span(ropts.date2)
+        };
+        let last = match ropts.value {
+            Some(ValuationType::AtEnd(_)) => {
+                let latest_price = j
+                    .price_directives
+                    .iter()
+                    .map(|p| p.date)
+                    .filter(|d| *d <= self.today)
+                    .max()
+                    .map(|d| EfDay::exact(d.add_days(1)));
+                last.max(latest_price)
+            }
+            _ => last,
+        };
+        (
+            requested.valid_defaults_from(DateSpan(first, last)),
+            requested.start().is_none(),
+        )
+    }
+
+    /// The journal with its posting amounts converted to cost and/or to
+    /// value as the options say (-B, -V, -X, --value), using its own market
+    /// prices (journalApplyValuationFromOpts).
+    pub fn journal_apply_valuation(&self, j: Journal) -> Result<Journal, String> {
+        let oracle = PriceOracle::new(self.opts.infer_prices, &j);
+        self.journal_apply_valuation_with(j, &oracle)
+    }
+
+    /// Like [`journal_apply_valuation`](ReportSpec::journal_apply_valuation),
+    /// with this price oracle. Amounts are converted to cost first, then
+    /// valued; with --gain, not converted, and their gain is calculated
+    /// instead of their value. An end value is the value on the last day of
+    /// the report period, or with a report interval, of the subperiod
+    /// containing the posting (journalApplyValuationFromOptsWith).
+    pub fn journal_apply_valuation_with(
+        &self,
+        mut j: Journal,
+        oracle: &PriceOracle,
+    ) -> Result<Journal, String> {
+        let ropts = &self.opts;
+        let gain = ropts.balance_calc == BalanceCalculation::Gain;
+        let periods = match (&ropts.value, &ropts.interval) {
+            (Some(ValuationType::AtEnd(_)), Interval::NoInterval) => self.report_span(&j).1,
+            (Some(ValuationType::AtEnd(_)), _) => self.report_span_both_dates(&j).1,
+            _ => None,
+        };
+        let styles = j.commodity_styles();
+        if !gain {
+            let op = ropts.conversion_op.unwrap_or(ConversionOp::NoConversionOp);
+            journal_to_cost(op, &mut j);
+        }
+        let Some(v) = &ropts.value else {
+            return Ok(j);
+        };
+        for t in &mut j.txns {
+            for i in 0..t.postings.len() {
+                let p = &t.postings[i];
+                // the period's last day (postingperiodend)
+                let period_last = || {
+                    let d = ropts.posting_date(p, Some(t));
+                    let last = match ropts.interval {
+                        Interval::NoInterval => periods.as_ref().map(|ps| ps.start_end().1),
+                        _ => periods.as_ref().map(|ps| ps.find(d).1),
+                    };
+                    last.ok_or_else(|| {
+                        "journalApplyValuationFromOpts: expected all spans to have an end date"
+                            .to_string()
+                    })
+                };
+                let (today, date) = (self.today, p.date_in(Some(t)));
+                let amount = if gain {
+                    mixed_amount_apply_gain(
+                        oracle,
+                        &styles,
+                        period_last,
+                        today,
+                        date,
+                        v,
+                        &p.amount,
+                    )?
+                } else {
+                    mixed_amount_apply_valuation(
+                        oracle,
+                        &styles,
+                        period_last,
+                        today,
+                        date,
+                        v,
+                        &p.amount,
+                    )?
+                };
+                t.postings[i].amount = amount;
+            }
+        }
+        Ok(j)
     }
 }
 

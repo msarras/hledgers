@@ -6,7 +6,7 @@
 //! iterates them as pairs, or as [`PostingRef`]s; `Posting::txn` records the
 //! position of a journal posting's transaction in `Journal::txns`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -634,6 +634,43 @@ pub enum JournalItem {
     Blank,
 }
 
+/// A posting's value of a field: code, desc or description, payee, note,
+/// status, acct or account, cur or comm (its one commodity), amt (its one
+/// quantity), cost (its one amount's cost); or else of a tag, its own or
+/// its transaction's, a `type` tag's value shortened to its one-letter
+/// code; or else nothing (pivotComponent).
+fn pivot_component(name: &str, t: &Transaction, p: &Posting) -> String {
+    let one_amount = || match p.amount.amounts().as_slice() {
+        [a] => Some(a.clone()),
+        _ => None,
+    };
+    match name {
+        "code" => t.code.clone(),
+        "desc" | "description" => t.description.clone(),
+        "payee" => t.payee().to_string(),
+        "note" => t.note().to_string(),
+        "status" => t.status.to_string(),
+        "acct" | "account" => p.account.to_string(),
+        "cur" | "comm" => one_amount().map_or_else(String::new, |a| a.commodity.to_string()),
+        "amt" => one_amount().map_or_else(String::new, |a| a.quantity.to_string()),
+        "cost" => match one_amount() {
+            Some(a) if a.cost.is_some() => {
+                let fmt = &crate::amount::render::AmountFormat::DEFAULT;
+                let cost = crate::amount::render::show_amount_cost_b(fmt, &a).s;
+                cost.trim_start().to_string()
+            }
+            _ => String::new(),
+        },
+        _ => match p.tags.iter().chain(&t.tags).find(|(n, _)| n == name) {
+            Some((_, v)) if name == "type" => {
+                AccountType::parse(true, v).map_or_else(|_| v.clone(), |at| at.letter().to_string())
+            }
+            Some((_, v)) => v.clone(),
+            None => String::new(),
+        },
+    }
+}
+
 /// Each commodity alias, with its commodity, the number of alias units in
 /// one unit of the commodity, and the commodity's style if known
 /// (CommodityAliases).
@@ -754,6 +791,87 @@ impl Journal {
             )
         });
         DateSpan::exact(min, max.map(|d| d.add_days(1)))
+    }
+
+    /// The posting amounts and their cost amounts
+    /// (journalPostingAndCostAmounts).
+    pub fn posting_and_cost_amounts(&self) -> impl Iterator<Item = &Amount> {
+        self.txns
+            .iter()
+            .flat_map(|t| &t.postings)
+            .flat_map(|p| p.amount.amounts_raw())
+            .flat_map(Amount::and_cost)
+    }
+
+    /// The commodities of the P directives, priced and pricing
+    /// (journalCommoditiesFromPriceDirectives).
+    pub fn commodities_from_price_directives(&self) -> BTreeSet<Sym> {
+        self.price_directives
+            .iter()
+            .flat_map(|pd| [pd.commodity.clone(), pd.amount.commodity.clone()])
+            .collect()
+    }
+
+    /// The commodities of the posting amounts and their costs
+    /// (journalCommoditiesFromTransactions).
+    pub fn commodities_from_transactions(&self) -> BTreeSet<Sym> {
+        self.posting_and_cost_amounts()
+            .map(|a| a.commodity.clone())
+            .collect()
+    }
+
+    /// The commodities used: in P directives, the last D directive, and
+    /// posting and cost amounts (journalCommoditiesUsed).
+    pub fn commodities_used(&self) -> BTreeSet<Sym> {
+        let mut cs = self.commodities_from_price_directives();
+        cs.extend(self.default_commodity.iter().map(|(c, _)| c.clone()));
+        cs.extend(self.commodities_from_transactions());
+        cs
+    }
+
+    /// The commodities mentioned anywhere: declared, or used
+    /// (journalCommodities).
+    pub fn commodities(&self) -> BTreeSet<Sym> {
+        let mut cs: BTreeSet<Sym> = self.declared_commodities.keys().cloned().collect();
+        cs.extend(self.commodities_used());
+        cs
+    }
+
+    /// Replace the postings' account names with their values of a field or
+    /// tag, or of several joined by `:` (`acct:kind:project`), keeping the
+    /// postings as they were as their originals (journalPivot,
+    /// transactionPivot, postingPivot, pivotAccount).
+    pub fn pivot(&mut self, field_or_tag: &str) {
+        for t in &mut self.txns {
+            let accounts: Vec<String> = t
+                .postings
+                .iter()
+                .map(|p| {
+                    field_or_tag
+                        .split(':')
+                        .map(|name| pivot_component(name, t, p))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                })
+                .collect();
+            for (p, a) in t.postings.iter_mut().zip(accounts) {
+                p.original = Some(Box::new(p.original().clone()));
+                p.account = a.into();
+            }
+        }
+    }
+
+    /// The span of all the transactions' and postings' dates, primary and
+    /// secondary, from the earliest to the day after the latest
+    /// (journalDateSpanBothDates).
+    pub fn date_span_both_dates(&self) -> DateSpan {
+        crate::dates::days_span(self.txns.iter().flat_map(|t| {
+            let pdates = t
+                .postings
+                .iter()
+                .flat_map(|p| p.date.into_iter().chain(p.date2));
+            std::iter::once(t.date).chain(t.date2).chain(pdates)
+        }))
     }
 
     /// The tags declared for an account and its parents, its own first

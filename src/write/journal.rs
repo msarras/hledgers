@@ -11,8 +11,19 @@ use crate::amount::render::{
 };
 use crate::amount::{Amount, Precision, Side};
 use crate::decimal::Decimal;
-use crate::model::{BalanceAssertion, JournalItem, Posting, Status, Transaction};
+use crate::model::{BalanceAssertion, JournalItem, Posting, PriceDirective, Status, Transaction};
 use crate::text::{Wide, display_width, fit_text};
+
+/// A price directive as a P directive line, a zero price with its
+/// commodity (showPriceDirective).
+pub fn show_price_directive(pd: &PriceDirective) -> String {
+    format!(
+        "P {} {} {}",
+        pd.date,
+        quote_commodity_symbol_if_needed(&pd.commodity),
+        show_amount_b(&AmountFormat::FULL_ZERO, &pd.amount).s
+    )
+}
 
 /// How posting amounts are aligned (PostingLayout): right-aligned as in
 /// hledger 1, or with their decimal marks at a column, moved right where

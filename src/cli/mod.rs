@@ -8,8 +8,10 @@ pub mod version;
 
 use std::ffi::OsString;
 
+use crate::amount::currency::to_currency_code;
 use crate::dates::Day;
 use crate::model::Journal;
+use crate::valuation::{ConversionOp, journal_to_cost};
 use opts::CliOpts;
 
 /// Run with these command-line arguments, program name first, and return the
@@ -114,6 +116,8 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "print" => commands::print::print,
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
+        "prices" => |o, j| commands::prices::prices(o, &j),
+        "rewrite" => commands::rewrite::rewrite,
         name => return Err(format!("the {name} command is not implemented yet")),
     };
     let j = with_journal(&opts)?;
@@ -122,7 +126,9 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
 }
 
 /// The journal the options say to read, read and transformed for the
-/// command (withJournal, journalTransform).
+/// command (withJournal, journalTransform), after a warning if the
+/// valuation commodity can not be reached
+/// (maybeWarnUnknownValuationCommodity).
 fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
     let mut iopts = opts.input.clone();
@@ -133,11 +139,51 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
             .map(|d| d.display().to_string())
             .unwrap_or_default()
     });
-    if !iopts.pivot.is_empty() {
-        return Err("--pivot is not supported yet (hledgers milestone 5)".to_string());
-    }
     if iopts.anon {
         return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());
     }
-    crate::read::read_journal_files(&iopts, &paths)
+    let mut j = crate::read::read_journal_files(&iopts, &paths)?;
+    // with --pivot, even an empty one (maybePivot)
+    if let Some(name) = opts.raw.string("pivot") {
+        j.pivot(name);
+    }
+    // -B converts to cost basis now, before lot detail is collapsed
+    // (journalPrepareLotDetail; collapsing arrives with milestone 6)
+    if opts.spec.opts.conversion_op == Some(ConversionOp::ToCost) {
+        journal_to_cost(ConversionOp::ToCost, &mut j);
+    }
+    maybe_warn_unknown_valuation_commodity(opts, &j);
+    Ok(j)
+}
+
+/// Warn if -X or --value asks for a commodity which valuation can not
+/// reach: one in no P directive or cost, in which no amount is
+/// denominated, and which is no commodity alias; suggesting a journal
+/// commodity with the same ISO 4217 currency code, if any
+/// (maybeWarnUnknownValuationCommodity).
+fn maybe_warn_unknown_valuation_commodity(opts: &CliOpts, j: &Journal) {
+    let Some(c) = opts.spec.opts.value.as_ref().and_then(|v| v.commodity()) else {
+        return;
+    };
+    let is_alias = j
+        .declared_commodities
+        .values()
+        .any(|d| d.aliases.iter().any(|(a, _)| &a.commodity == c));
+    if j.commodities_from_price_directives().contains(c)
+        || j.commodities_from_transactions().contains(c)
+        || is_alias
+    {
+        return;
+    }
+    let code = to_currency_code(c);
+    let suggestion = j
+        .commodities()
+        .into_iter()
+        .find(|s| s != c && to_currency_code(s) == code)
+        .map(|s| format!(" Did you mean \"{s}\" ?"))
+        .unwrap_or_default();
+    crate::console::warn(
+        &opts.input.prog_args,
+        &format!("no conversion prices to \"{c}\" can be found.{suggestion}"),
+    );
 }

@@ -2,8 +2,10 @@
 
 pub mod check;
 pub mod files;
+pub mod prices;
 pub mod print;
 pub mod quickref;
+pub mod rewrite;
 
 use super::args::Mode;
 
@@ -35,10 +37,10 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("incomestatement", &["is"]),
     &command("notes", &[]),
     &command("payees", &[]),
-    &command("prices", &[]),
+    &prices::MODE,
     &print::MODE,
     &command("register", &["reg"]),
-    &command("rewrite", &[]),
+    &rewrite::MODE,
     &command("roi", &[]),
     &command("run", &[]),
     &command("repl", &[]),

@@ -73,6 +73,36 @@ pub fn parse_journal(
     Ok((j, st))
 }
 
+/// An auto posting rule's posting written alone, `ACCOUNT  AMOUNT` or
+/// `ACCOUNT  *N`, parsed as upstream parses rewrite's --add-posting values:
+/// after a space, with no journal state, to the end of the text
+/// (tmpostingrulep). Errors are complete messages.
+pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule, String> {
+    let text = format!(" {s}\n");
+    let (mut st, mut stack, mut j) = (ParseState::default(), Vec::new(), Journal::default());
+    let mut p = JournalParser {
+        c: Cursor::new(&text),
+        file: Arc::from(""),
+        st: &mut st,
+        stack: &mut stack,
+        j: &mut j,
+        iopts,
+        anchor: (0, 1, 0),
+    };
+    let rule = match p.postingp(true, None) {
+        Ok(Some((posting, is_multiplier))) if p.c.at_end() => Ok(TmPostingRule {
+            posting: posting_round_calculated_amounts(posting),
+            is_multiplier,
+        }),
+        Ok(_) => Err(Failure::Here(p.c.unexpected(&[Item::EndOfInput]))),
+        Err(e) => Err(e),
+    };
+    rule.map_err(|e| match e {
+        Failure::Here(e) => e.pretty("", &text),
+        Failure::Included(msg) => msg,
+    })
+}
+
 /// The account aliases of the --alias options; a bad one is an error
 /// (aliasesFromOpts).
 pub fn aliases_from_opts(iopts: &InputOpts) -> Result<Vec<AccountAlias>, String> {

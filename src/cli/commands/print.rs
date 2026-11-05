@@ -5,12 +5,14 @@ use std::collections::BTreeSet;
 
 use crate::amount::{CommodityStyles, Rounding, styles_with_rounding};
 use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::io::with_title;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
 };
 use crate::text::is_space;
+use crate::valuation::ConversionOp;
 use crate::write::journal::{ItemRenderer, PostingLayout, journal_items_as_text, show_transaction};
 
 const NONE: Arity = Arity::None;
@@ -72,12 +74,7 @@ pub static MODE: Mode = Mode {
             "TYPE",
             "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
         ),
-        Flag::new(
-            &["layout"],
-            REQ,
-            "hledger1|COL",
-            "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
-        ),
+        LAYOUT_FLAG,
         Flag::new(
             &["base-url"],
             REQ,
@@ -92,6 +89,14 @@ pub static MODE: Mode = Mode {
     ],
 };
 
+/// The --layout flag (layoutFlag).
+pub const LAYOUT_FLAG: Flag = Flag::new(
+    &["layout"],
+    REQ,
+    "hledger1|COL",
+    "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
+);
+
 /// What a milestone not yet done would provide.
 fn not_yet(what: &str, milestone: &str) -> String {
     format!("{what} is not supported yet (hledgers milestone {milestone})")
@@ -102,13 +107,6 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
     if raw.bool("new") {
         return Err(not_yet("print --new", "8"));
-    }
-    let ropts = &opts.spec.opts;
-    if ropts.value.is_some() || ropts.conversion_op.is_some() {
-        return Err(not_yet(
-            "valuation and cost conversion (-B, -V, -X, --value)",
-            "5",
-        ));
     }
     // show amounts with all their decimal digits, except generated gain postings
     for t in &mut j.txns {
@@ -135,7 +133,7 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
             }
         }
     }
-    print_entries(opts, &j)
+    print_entries(opts, j)
 }
 
 /// The --round option's rounding, if given (roundFromRawOpts).
@@ -158,7 +156,7 @@ fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
 }
 
 /// The posting layout of --layout (layoutFromRawOpts).
-fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
+pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
     match opts.raw.string("layout") {
         None => Ok(PostingLayout::default()),
         Some("hledger1") => Ok(PostingLayout::Hledger1),
@@ -170,7 +168,7 @@ fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
 
 /// Render the selected transactions, or with --export, the journal
 /// (printEntries).
-fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
+fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
     let ropts = &opts.spec.opts;
     let styles = match round_from_raw_opts(opts)? {
@@ -191,10 +189,11 @@ fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             .collect()
     };
     if raw.bool("export") {
-        let txns = entries_report_unsorted(opts, j);
         return match fmt.as_str() {
             "journal" => {
-                let txns: Vec<Transaction> = txns
+                let j = entries_report_unsorted(opts, j)?;
+                let txns: Vec<Transaction> = j
+                    .txns
                     .into_iter()
                     .map(|t| maybe_original_amounts(opts, false, t))
                     .collect();
@@ -223,10 +222,10 @@ fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             ),
         };
     }
-    let mut txns = entries_report_unsorted(opts, j);
-    txns.sort_by_key(|t| ropts.transaction_date(t));
     match fmt.as_str() {
         "journal" => {
+            let mut txns = entries_report_unsorted(opts, j)?.txns;
+            txns.sort_by_key(|t| ropts.transaction_date(t));
             let txns: Vec<Transaction> = txns
                 .into_iter()
                 .map(|t| maybe_original_amounts(opts, true, t))
@@ -241,17 +240,6 @@ fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
         "csv" | "tsv" | "json" | "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
         _ => Err(unsupported_output_format_error(&fmt)),
-    }
-}
-
-/// The report's title, if --title gives one, and a blank line, before the
-/// output (withTitle).
-fn with_title(opts: &CliOpts, body: String) -> String {
-    let title = opts.spec.opts.effective_title("");
-    if title.is_empty() {
-        body
-    } else {
-        format!("{title}\n\n{body}")
     }
 }
 
@@ -284,21 +272,28 @@ pub fn unsupported_output_format_error(fmt: &str) -> String {
     msg
 }
 
-/// The transactions the query selects (but not by depth), in journal
-/// order, with --invert's signs (entriesReportUnsorted).
-fn entries_report_unsorted(opts: &CliOpts, j: &Journal) -> Vec<Transaction> {
+/// The journal with just the transactions the query selects (but not by
+/// depth), in journal order, converted to cost or value as the options say
+/// (to no cost by default), with --invert's signs (entriesReportUnsorted).
+fn entries_report_unsorted(opts: &CliOpts, mut j: Journal) -> Result<Journal, String> {
     let q = opts.spec.query.clone().filter(|q| !q.is_depth());
-    j.txns
-        .iter()
-        .filter(|t| q.matches_transaction(t))
-        .cloned()
-        .map(|mut t| {
-            if opts.spec.opts.invert {
-                t.negate();
-            }
-            t
-        })
-        .collect()
+    // account type terms match through the journal's account types (filterJournalTransactions)
+    let txns = std::mem::take(&mut j.txns);
+    j.txns = txns
+        .into_iter()
+        .filter(|t| q.matches_transaction_extra(&|a| j.account_type(a), t))
+        .collect();
+    let mut j = opts
+        .spec
+        .clone()
+        .with_default_conversion_op(ConversionOp::NoConversionOp)
+        .journal_apply_valuation(j)?;
+    if opts.spec.opts.invert {
+        for t in &mut j.txns {
+            t.negate();
+        }
+    }
+    Ok(j)
 }
 
 /// The transaction with its postings shown as written, unless explicit
