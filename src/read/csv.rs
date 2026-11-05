@@ -758,11 +758,27 @@ pub fn read_journal_from_csv(
     let zoned = rules
         .directive("date-format")
         .is_some_and(|f| ["%Z", "%z", "%EZ", "%Ez"].iter().any(|z| f.contains(z)));
+    // a posting can be made only if a rule assigns its account, amount or balance
+    let postings: Vec<usize> = (1..=MAX_POSTINGS)
+        .filter(|n| {
+            let numbered = ["account", "amount", "amount", "amount", "balance"]
+                .iter()
+                .zip(["", "", "-in", "-out", ""])
+                .any(|(f, s)| rules.assigns(&format!("{f}{n}{s}")));
+            let unnumbered = (*n <= 2
+                && ["amount", "amount-in", "amount-out"]
+                    .iter()
+                    .any(|f| rules.assigns(f)))
+                || (*n == 1 && rules.assigns("balance"));
+            numbered || unnumbered
+        })
+        .collect();
     let conv = Converter {
         rules,
         zoned,
         tz_in,
         tz_out,
+        postings,
     };
     let file: Arc<str> = Arc::from(name);
     let mut txns = Vec::with_capacity(groups.len());
@@ -935,6 +951,8 @@ struct Converter<'a> {
     zoned: bool,
     tz_in: Option<i64>,
     tz_out: i64,
+    /// The numbers of the postings that rules could make.
+    postings: Vec<usize>,
 }
 
 /// The default unknown accounts, to which unassigned accounts of postings
@@ -986,7 +1004,7 @@ impl Converter<'_> {
         let p1_virtual =
             field("account1").is_some_and(|a| account_name_posting_type(&a) == Realness::Virtual);
         let mut postings = Vec::new();
-        for n in 1..=MAX_POSTINGS {
+        for &n in &self.postings {
             let comment =
                 field(&format!("comment{n}")).map_or(String::new(), |s| unescape_newlines(&s));
             let (ptags, pdate) = posting_comment_tags_and_date(&comment);

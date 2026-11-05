@@ -1563,6 +1563,11 @@ impl CsvRules {
         found
     }
 
+    /// Whether any rule assigns this hledger field.
+    pub fn assigns(&self, f: &str) -> bool {
+        self.by_field.contains_key(f)
+    }
+
     /// The assignment in effect for a hledger field (hledgerFieldAssignment).
     pub fn field_assignment(&self, record: &[CsvRecord], f: &str) -> Option<&FieldAssignment> {
         self.field_assignments(record, f).pop().map(|(a, _)| a)
