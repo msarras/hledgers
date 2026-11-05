@@ -124,6 +124,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "files" => |o, j| commands::files::files(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,
+        "stats" => commands::stats::stats,
         "tags" => commands::tags::tags,
         name => return Err(format!("the {name} command is not implemented yet")),
     };

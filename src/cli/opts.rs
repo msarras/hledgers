@@ -233,6 +233,9 @@ pub struct CliOpts {
     pub no_new_accounts: bool,
     pub width: Option<String>,
     pub available_width: usize,
+    /// When the program started, nearly: when its options were made
+    /// (progstarttime_).
+    pub start_time: std::time::Instant,
 }
 
 impl CliOpts {
@@ -278,6 +281,7 @@ impl CliOpts {
             no_new_accounts: raw.bool("no-new-accounts"),
             width: raw.string("width").map(str::to_string),
             available_width: 80,
+            start_time: std::time::Instant::now(),
             raw,
         })
     }

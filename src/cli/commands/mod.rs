@@ -12,6 +12,7 @@ pub mod prices;
 pub mod print;
 pub mod quickref;
 pub mod rewrite;
+pub mod stats;
 pub mod tags;
 
 use super::args::Mode;
@@ -52,7 +53,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("run", &[]),
     &command("repl", &[]),
     &command("setup", &[]),
-    &command("stats", &[]),
+    &stats::MODE,
     &tags::MODE,
     &command("transactions", &["tx"]),
 ];
