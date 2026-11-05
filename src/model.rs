@@ -6,7 +6,7 @@
 //! iterates them as pairs, or as [`PostingRef`]s; `Posting::txn` records the
 //! position of a journal posting's transaction in `Journal::txns`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -754,6 +754,50 @@ impl Journal {
             )
         });
         DateSpan::exact(min, max.map(|d| d.add_days(1)))
+    }
+
+    /// The posting amounts and their cost amounts
+    /// (journalPostingAndCostAmounts).
+    pub fn posting_and_cost_amounts(&self) -> impl Iterator<Item = &Amount> {
+        self.txns
+            .iter()
+            .flat_map(|t| &t.postings)
+            .flat_map(|p| p.amount.amounts_raw())
+            .flat_map(Amount::and_cost)
+    }
+
+    /// The commodities of the P directives, priced and pricing
+    /// (journalCommoditiesFromPriceDirectives).
+    pub fn commodities_from_price_directives(&self) -> BTreeSet<Sym> {
+        self.price_directives
+            .iter()
+            .flat_map(|pd| [pd.commodity.clone(), pd.amount.commodity.clone()])
+            .collect()
+    }
+
+    /// The commodities of the posting amounts and their costs
+    /// (journalCommoditiesFromTransactions).
+    pub fn commodities_from_transactions(&self) -> BTreeSet<Sym> {
+        self.posting_and_cost_amounts()
+            .map(|a| a.commodity.clone())
+            .collect()
+    }
+
+    /// The commodities used: in P directives, the last D directive, and
+    /// posting and cost amounts (journalCommoditiesUsed).
+    pub fn commodities_used(&self) -> BTreeSet<Sym> {
+        let mut cs = self.commodities_from_price_directives();
+        cs.extend(self.default_commodity.iter().map(|(c, _)| c.clone()));
+        cs.extend(self.commodities_from_transactions());
+        cs
+    }
+
+    /// The commodities mentioned anywhere: declared, or used
+    /// (journalCommodities).
+    pub fn commodities(&self) -> BTreeSet<Sym> {
+        let mut cs: BTreeSet<Sym> = self.declared_commodities.keys().cloned().collect();
+        cs.extend(self.commodities_used());
+        cs
     }
 
     /// The span of all the transactions' and postings' dates, primary and

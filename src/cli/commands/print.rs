@@ -11,6 +11,7 @@ use crate::model::{
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
 };
 use crate::text::is_space;
+use crate::valuation::ConversionOp;
 use crate::write::journal::{ItemRenderer, PostingLayout, journal_items_as_text, show_transaction};
 
 const NONE: Arity = Arity::None;
@@ -103,13 +104,6 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
     if raw.bool("new") {
         return Err(not_yet("print --new", "8"));
     }
-    let ropts = &opts.spec.opts;
-    if ropts.value.is_some() || ropts.conversion_op.is_some() {
-        return Err(not_yet(
-            "valuation and cost conversion (-B, -V, -X, --value)",
-            "5",
-        ));
-    }
     // show amounts with all their decimal digits, except generated gain postings
     for t in &mut j.txns {
         for p in &mut t.postings {
@@ -135,7 +129,7 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
             }
         }
     }
-    print_entries(opts, &j)
+    print_entries(opts, j)
 }
 
 /// The --round option's rounding, if given (roundFromRawOpts).
@@ -170,7 +164,7 @@ fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
 
 /// Render the selected transactions, or with --export, the journal
 /// (printEntries).
-fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
+fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
     let ropts = &opts.spec.opts;
     let styles = match round_from_raw_opts(opts)? {
@@ -191,10 +185,11 @@ fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             .collect()
     };
     if raw.bool("export") {
-        let txns = entries_report_unsorted(opts, j);
         return match fmt.as_str() {
             "journal" => {
-                let txns: Vec<Transaction> = txns
+                let j = entries_report_unsorted(opts, j)?;
+                let txns: Vec<Transaction> = j
+                    .txns
                     .into_iter()
                     .map(|t| maybe_original_amounts(opts, false, t))
                     .collect();
@@ -223,10 +218,10 @@ fn print_entries(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             ),
         };
     }
-    let mut txns = entries_report_unsorted(opts, j);
-    txns.sort_by_key(|t| ropts.transaction_date(t));
     match fmt.as_str() {
         "journal" => {
+            let mut txns = entries_report_unsorted(opts, j)?.txns;
+            txns.sort_by_key(|t| ropts.transaction_date(t));
             let txns: Vec<Transaction> = txns
                 .into_iter()
                 .map(|t| maybe_original_amounts(opts, true, t))
@@ -284,21 +279,23 @@ pub fn unsupported_output_format_error(fmt: &str) -> String {
     msg
 }
 
-/// The transactions the query selects (but not by depth), in journal
-/// order, with --invert's signs (entriesReportUnsorted).
-fn entries_report_unsorted(opts: &CliOpts, j: &Journal) -> Vec<Transaction> {
+/// The journal with just the transactions the query selects (but not by
+/// depth), in journal order, converted to cost or value as the options say
+/// (to no cost by default), with --invert's signs (entriesReportUnsorted).
+fn entries_report_unsorted(opts: &CliOpts, mut j: Journal) -> Result<Journal, String> {
     let q = opts.spec.query.clone().filter(|q| !q.is_depth());
-    j.txns
-        .iter()
-        .filter(|t| q.matches_transaction(t))
-        .cloned()
-        .map(|mut t| {
-            if opts.spec.opts.invert {
-                t.negate();
-            }
-            t
-        })
-        .collect()
+    j.txns.retain(|t| q.matches_transaction(t));
+    let mut j = opts
+        .spec
+        .clone()
+        .with_default_conversion_op(ConversionOp::NoConversionOp)
+        .journal_apply_valuation(j)?;
+    if opts.spec.opts.invert {
+        for t in &mut j.txns {
+            t.negate();
+        }
+    }
+    Ok(j)
 }
 
 /// The transaction with its postings shown as written, unless explicit
