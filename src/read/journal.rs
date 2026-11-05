@@ -379,10 +379,63 @@ impl<'a> JournalParser<'a, '_> {
             return Ok(true);
         }
         if prefixed {
-            return Err(self.c.unexpected(&[Item::label("directive")]).into());
+            return Err(self.no_directive_error().into());
         }
         self.c.pos = before;
         Ok(false)
+    }
+
+    /// The error when no directive follows a `!` or `@`: every directive's
+    /// first word or description expected, and as much input unexpected as
+    /// the longest of those words.
+    fn no_directive_error(&self) -> ParseError {
+        const WORDS: [&str; 20] = [
+            "--",
+            "A ",
+            "account",
+            "alias",
+            "apply fixed",
+            "apply tag",
+            "assert",
+            "bucket ",
+            "capture",
+            "check",
+            "commodity",
+            "define",
+            "end apply fixed",
+            "end apply tag",
+            "end apply year",
+            "eval",
+            "expr",
+            "include",
+            "python",
+            "value",
+        ];
+        const LABELS: [&str; 11] = [
+            "apply account directive",
+            "commodity conversion",
+            "decimal mark",
+            "default commodity",
+            "default year",
+            "end aliases directive",
+            "end apply account directive",
+            "end tag or end apply tag directive",
+            "ignored-price commodity",
+            "payee directive",
+            "tag directive",
+        ];
+        let expected: Vec<Item> = WORDS
+            .iter()
+            .map(|w| Item::tokens(w))
+            .chain(LABELS.iter().map(|l| Item::label(l)))
+            .collect();
+        let found: String = self.c.rest().chars().take(15).collect();
+        let found = if found.is_empty() {
+            Item::EndOfInput
+        } else {
+            Item::Tokens(found)
+        };
+        ParseError::trivial(self.c.pos, Some(found), &expected)
     }
 
     /// A directive line whose content is ignored (the Ledger directives

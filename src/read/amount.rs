@@ -1066,7 +1066,9 @@ fn lot_datep(c: &mut Cursor, ctx: &AmountCtx) -> PResult<crate::dates::Day> {
     let d = datep(c, ctx.year)?;
     c.skip_spaces();
     if !c.eat(']') {
-        return Err(c.unexpected(&[Item::tokens("]")]));
+        let mut expected = vec![Item::tokens("]")];
+        expected.extend(super::common::digit_hint(c));
+        return Err(c.unexpected(&expected));
     }
     Ok(d)
 }

@@ -422,7 +422,7 @@ fn comment_tags_and_dates(c: &mut Cursor, year: Option<i64>) -> PResult<(Vec<Tag
         if name.is_empty() {
         } else if is_date && !matches!(c.peek(), None | Some(',' | '\n')) {
             let d = datep(c, year).map_err(|e| {
-                if e.offset() == value_start {
+                if c.pos == value_start {
                     c.unexpected(&[Item::label("full or partial date"), Item::EndOfInput])
                 } else {
                     e
@@ -500,7 +500,9 @@ fn bracketed_date_tagsp(
         found.push(("date2", datep(c, year2)?));
     }
     if !c.eat(']') {
-        return Err(c.unexpected(&[Item::tokens("]")]));
+        let mut expected = vec![Item::tokens("]")];
+        expected.extend(digit_hint(c));
+        return Err(c.unexpected(&expected));
     }
     Ok(Some(found))
 }
