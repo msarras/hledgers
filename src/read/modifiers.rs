@@ -1,12 +1,15 @@
 //! Transactions changed or made by rules: auto posting rules
 //! (Hledger.Data.TransactionModifier), which add postings to the
-//! transactions they match.
+//! transactions they match, and periodic transaction rules
+//! (Hledger.Data.PeriodicTransaction), which generate transactions when
+//! forecasting.
 
 use crate::amount::Amount;
-use crate::dates::Day;
+use crate::dates::{DateSpan, Day, split_span_to_date_spans};
 use crate::model::{
-    GENERATED_POSTING_TAG, Journal, MODIFIED_TRANSACTION_TAG, Posting, PostingRef, TmPostingRule,
-    comment_add_tag, comment_join,
+    GENERATED_POSTING_TAG, GENERATED_TRANSACTION_TAG, Journal, MODIFIED_TRANSACTION_TAG,
+    PeriodicTransaction, Posting, PostingRef, TmPostingRule, Transaction, comment_add_tag,
+    comment_join,
 };
 use crate::query::{Query, parse_query};
 
@@ -132,11 +135,53 @@ fn render_posting_comment_dates(p: &mut Posting) {
     }
 }
 
+/// The dates in a span on which a periodic transaction rule generates
+/// transactions: the starts of its periods, within the rule's own dates,
+/// which default to the span's; without a start date, periods are aligned
+/// to the interval (periodicTransactionDates).
+pub fn periodic_transaction_dates(
+    pt: &PeriodicTransaction,
+    requested: DateSpan,
+) -> impl Iterator<Item = Day> {
+    let span = pt.span.valid_defaults_from(requested);
+    split_span_to_date_spans(span.start().is_none(), &pt.interval, span)
+        .filter_map(|s| s.start())
+        .filter(move |d| requested.contains(*d))
+}
+
+/// The transactions a periodic transaction rule generates in a span,
+/// tagged with its period expression (visibly too, with `verbose_tags`)
+/// (runPeriodicTransaction).
+pub fn run_periodic_transaction(
+    verbose_tags: bool,
+    pt: &PeriodicTransaction,
+    requested: DateSpan,
+) -> Vec<Transaction> {
+    let mut t = Transaction {
+        pos: pt.pos.clone(),
+        status: pt.status,
+        code: pt.code.clone(),
+        description: pt.description.clone(),
+        comment: pt.comment.clone(),
+        tags: pt.tags.clone(),
+        postings: pt.postings.clone(),
+        ..Transaction::default()
+    };
+    let tag = (
+        GENERATED_TRANSACTION_TAG.to_string(),
+        format!("~ {}", pt.period_expr),
+    );
+    t.add_hidden_and_maybe_visible_tag(verbose_tags, tag);
+    periodic_transaction_dates(pt, requested)
+        .map(|date| Transaction { date, ..t.clone() })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::amount::{MixedAmount, num, usd};
-    use crate::model::{Transaction, TransactionModifier};
+    use crate::model::TransactionModifier;
     use crate::write::journal::{PostingLayout, show_transaction};
 
     fn rule(account: &str, amount: Amount, is_multiplier: bool) -> TmPostingRule {
@@ -174,6 +219,115 @@ mod tests {
         let t = &mut j.txns[0];
         t.comment.clear();
         show_transaction(t, PostingLayout::default(), false)
+    }
+
+    /// The runPeriodicTransaction doctests: the transactions a rule with
+    /// posting `a $1` generates in a span, shown.
+    fn ptgen(expr: &str, span: DateSpan) -> String {
+        let (interval, pspan) =
+            crate::dates::parse_period_expr(crate::dates::null_date(), expr).unwrap();
+        let pt = PeriodicTransaction {
+            period_expr: expr.to_string(),
+            interval,
+            span: pspan,
+            pos: Transaction::default().pos,
+            status: Default::default(),
+            code: String::new(),
+            description: String::new(),
+            comment: String::new(),
+            tags: Vec::new(),
+            postings: vec![Posting::new("a", usd(d("1")))],
+        };
+        run_periodic_transaction(true, &pt, span)
+            .iter()
+            .map(|t| show_transaction(t, PostingLayout::default(), false))
+            .collect()
+    }
+
+    fn flex(y: i64, m: u32, dd: u32) -> Option<crate::dates::EfDay> {
+        Some(crate::dates::EfDay {
+            day: crate::dates::Day::from_ymd(y, m, dd).unwrap(),
+            exact: false,
+        })
+    }
+
+    #[test]
+    fn periodic_transactions() {
+        let gen_dates = |expr: &str, span: DateSpan| -> Vec<String> {
+            ptgen(expr, span)
+                .split("\n\n")
+                .filter(|t| !t.is_empty())
+                .map(|t| t[..10].to_string())
+                .collect()
+        };
+        let all = DateSpan::default();
+        assert_eq!(
+            ptgen("monthly from 2017/1 to 2017/4", all)
+                .split("\n\n")
+                .next()
+                .unwrap(),
+            "2017-01-01\n    ; generated-transaction: ~ monthly from 2017/1 to 2017/4\n    a                                             $1.00"
+        );
+        assert_eq!(
+            gen_dates("monthly from 2017/1 to 2017/4", all),
+            ["2017-01-01", "2017-02-01", "2017-03-01"]
+        );
+        assert_eq!(
+            gen_dates("monthly from 2017/1 to 2017/5", all),
+            ["2017-01-01", "2017-02-01", "2017-03-01", "2017-04-01"]
+        );
+        assert_eq!(
+            gen_dates("every 2nd day of month from 2017/02 to 2017/04", all),
+            ["2017-02-02", "2017-03-02"]
+        );
+        assert_eq!(
+            gen_dates("every 30th day of month from 2017/1 to 2017/5", all),
+            ["2017-01-30", "2017-02-28", "2017-03-30", "2017-04-30"]
+        );
+        assert_eq!(
+            gen_dates("every 2nd Thursday of month from 2017/1 to 2017/4", all),
+            ["2017-01-12", "2017-02-09", "2017-03-09"]
+        );
+        assert_eq!(
+            gen_dates("every nov 29th from 2017 to 2019", all),
+            ["2017-11-29", "2018-11-29"]
+        );
+        assert_eq!(gen_dates("2017/1", all), ["2017-01-01"]);
+        assert!(
+            gen_dates(
+                "daily from 2018/01/03",
+                DateSpan(flex(2018, 1, 1), flex(2018, 1, 3))
+            )
+            .is_empty()
+        );
+        assert!(
+            gen_dates(
+                "every 3 months from 2019-05",
+                DateSpan(flex(2020, 1, 1), flex(2020, 2, 1))
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            gen_dates(
+                "every 3 months from 2019-05",
+                DateSpan(flex(2020, 2, 1), flex(2020, 3, 1))
+            ),
+            ["2020-02-01"]
+        );
+        assert_eq!(
+            gen_dates(
+                "every 3 days from 2018",
+                DateSpan(flex(2018, 1, 1), flex(2018, 1, 5))
+            ),
+            ["2018-01-01", "2018-01-04"]
+        );
+        assert_eq!(
+            gen_dates(
+                "every 3 days from 2018",
+                DateSpan(flex(2018, 1, 2), flex(2018, 1, 5))
+            ),
+            ["2018-01-04"]
+        );
     }
 
     #[test]

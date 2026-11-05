@@ -728,6 +728,34 @@ impl Journal {
         self.declared_accounts.iter().map(|(a, _)| a)
     }
 
+    /// The span of the transactions' and postings' dates, primary or
+    /// secondary, from the earliest to the day after the latest
+    /// (journalDateSpan).
+    pub fn date_span(&self, secondary: bool) -> DateSpan {
+        let dates = self.txns.iter().flat_map(|t| {
+            let tdate = if secondary {
+                t.date2.unwrap_or(t.date)
+            } else {
+                t.date
+            };
+            let pdates = t.postings.iter().filter_map(move |p| {
+                if secondary {
+                    p.date2.or(p.date)
+                } else {
+                    p.date
+                }
+            });
+            std::iter::once(tdate).chain(pdates)
+        });
+        let (min, max) = dates.fold((None, None), |(lo, hi): (Option<Day>, Option<Day>), d| {
+            (
+                Some(lo.map_or(d, |l| l.min(d))),
+                Some(hi.map_or(d, |h| h.max(d))),
+            )
+        });
+        DateSpan::exact(min, max.map(|d| d.add_days(1)))
+    }
+
     /// The tags declared for an account and its parents, its own first
     /// (journalInheritedAccountTags).
     pub fn inherited_account_tags(&self, a: &str) -> Vec<Tag> {
@@ -852,6 +880,37 @@ mod tests {
         let pair = (SourcePos::new(&f, 3, 1), SourcePos::new(&f, 4, 7));
         assert_eq!(source_pos_pair_pretty(&pair), "f.j:3-4");
         assert_eq!(SourcePos::new(&f, 3, 2).to_string(), "f.j:3:2");
+    }
+
+    // tests_Journal "journalDateSpan".
+    #[test]
+    fn journal_date_span() {
+        let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
+        let j = Journal {
+            txns: vec![
+                Transaction {
+                    date: day(2014, 2, 1),
+                    postings: vec![Posting {
+                        date: Some(day(2014, 1, 10)),
+                        ..Posting::default()
+                    }],
+                    ..Transaction::default()
+                },
+                Transaction {
+                    date: day(2014, 9, 1),
+                    postings: vec![Posting {
+                        date2: Some(day(2014, 10, 10)),
+                        ..Posting::default()
+                    }],
+                    ..Transaction::default()
+                },
+            ],
+            ..Journal::default()
+        };
+        assert_eq!(
+            j.date_span(true),
+            DateSpan::exact(Some(day(2014, 1, 10)), Some(day(2014, 10, 11)))
+        );
     }
 
     #[test]

@@ -16,8 +16,9 @@ use crate::amount::{
     Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, Precision,
     Rounding, Sym, add_amount_style, styles_with_rounding,
 };
+use crate::dates::DateSpan;
 use crate::decimal::Decimal;
-use crate::model::{Commodity, CommodityAliases, Journal, Posting, Tag};
+use crate::model::{Commodity, CommodityAliases, Journal, Posting, Tag, Transaction};
 
 /// Finalise a journal parsed from this file and text (journalFinalise).
 pub fn journal_finalise(
@@ -29,6 +30,7 @@ pub fn journal_finalise(
 ) -> Result<Journal, String> {
     j.global_commodity_styles = iopts.balancing.commodity_styles.clone().unwrap_or_default();
     j.default_commodity = st.default_commodity;
+    warn_if_many_forecast_transactions(iopts, &j);
     // setup
     journal_set_last_read_time(&mut j);
     journal_add_file(&mut j, file, text);
@@ -415,10 +417,70 @@ impl AliasConverter<'_> {
     }
 }
 
-/// Add forecast transactions, if --forecast is given (journalAddForecast).
-// M2c: periodic transactions and forecasting; the journal is unchanged until then.
-fn journal_add_forecast(_iopts: &InputOpts, j: Journal) -> Journal {
+/// With `--forecast`, add the transactions the periodic transaction rules
+/// generate in the forecast period, styled (journalAddForecast).
+fn journal_add_forecast(iopts: &InputOpts, mut j: Journal) -> Journal {
+    let Some(span) = forecast_period(iopts, &j) else {
+        return j;
+    };
+    let styles = j.commodity_styles();
+    let generated: Vec<Transaction> = j
+        .periodic_txns
+        .iter()
+        .flat_map(|pt| super::modifiers::run_periodic_transaction(iopts.verbose_tags, pt, span))
+        .filter(|t| span.contains(t.date))
+        .map(|mut t| {
+            t.style_amounts(&styles);
+            t
+        })
+        .collect();
+    j.txns.extend(generated);
     j
+}
+
+/// The span to generate forecast transactions in, with `--forecast`: its
+/// argument's dates, or else from after the journal's last transaction (or
+/// the report's start, if later) or today, until the report's end or 180
+/// days from today (forecastPeriod).
+fn forecast_period(iopts: &InputOpts, j: &Journal) -> Option<DateSpan> {
+    let requested = iopts.forecast?;
+    let report = iopts.report_span;
+    let journal_end = j.date_span(false).end();
+    let start = requested
+        .start()
+        .or(journal_end.max(report.start()))
+        .unwrap_or(iopts.today);
+    let end = requested
+        .end()
+        .or(report.end())
+        .unwrap_or_else(|| iopts.today.add_days(180));
+    Some(DateSpan::exact(Some(start), Some(end)))
+}
+
+/// More forecast transactions than this probably come from a mistyped date
+/// (maxExpectedForecastTxns).
+const MAX_EXPECTED_FORECAST_TXNS: usize = 100_000;
+
+/// Warn before generating an implausible number of forecast transactions,
+/// counting them without generating them (#1683).
+fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) {
+    let Some(span) = forecast_period(iopts, j) else {
+        return;
+    };
+    let n: usize = j
+        .periodic_txns
+        .iter()
+        .map(|pt| super::modifiers::periodic_transaction_dates(pt, span).count())
+        .sum();
+    if n > MAX_EXPECTED_FORECAST_TXNS {
+        crate::cli::io::warn(
+            &iopts.prog_args,
+            &format!(
+                "--forecast would generate {n} transactions (forecast period {span}),\n\
+                 using a lot of memory. If not intended, press control-C now, and check for a mistyped date."
+            ),
+        );
+    }
 }
 
 /// Add to each posting the tags of its account and its account's parents,

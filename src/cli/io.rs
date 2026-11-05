@@ -44,6 +44,19 @@ pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
     eprintln!("{text}");
 }
 
+/// Print a warning on stderr, after `Warning: `, its first line in bright
+/// bold yellow if colour is on for stderr (warnIO, formatWarning). The
+/// command-line arguments can turn colour on or off.
+pub fn warn(args: &[String], msg: &str) {
+    let mut text = format!("Warning: {msg}");
+    if use_color_on_stderr(color_option(args)) {
+        let first_end = text.find('\n').unwrap_or(text.len());
+        text.insert_str(first_end, "\x1b[0m");
+        text.insert_str(0, "\x1b[93m\x1b[1m");
+    }
+    eprintln!("{text}");
+}
+
 /// Whether to colour stderr: yes if --color says so, otherwise if it is a
 /// terminal supporting colour and NO_COLOR is not set (useColorOnStderr).
 fn use_color_on_stderr(color_option: Option<&str>) -> bool {
