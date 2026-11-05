@@ -1,4 +1,5 @@
-//! A command's output (writeOutputLazyText in Hledger.Cli.Utils).
+//! A command's output (writeOutputLazyText and withTitle in
+//! Hledger.Cli.Utils).
 
 use std::io::Write;
 
@@ -20,5 +21,16 @@ pub fn write_output(opts: &CliOpts, text: &str) -> Result<(), String> {
             let path = crate::read::journal::expand_home_path(f)?;
             std::fs::write(&path, text).map_err(|e| format!("{path}: withFile: {e}"))
         }
+    }
+}
+
+/// The report's title, if --title gives one, and a blank line, before the
+/// output (withTitle).
+pub fn with_title(opts: &CliOpts, body: String) -> String {
+    let title = opts.spec.opts.effective_title("");
+    if title.is_empty() {
+        body
+    } else {
+        format!("{title}\n\n{body}")
     }
 }

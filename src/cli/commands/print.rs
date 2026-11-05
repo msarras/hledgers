@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use crate::amount::{CommodityStyles, Rounding, styles_with_rounding};
 use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::io::with_title;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
@@ -236,17 +237,6 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
         "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
         "csv" | "tsv" | "json" | "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
         _ => Err(unsupported_output_format_error(&fmt)),
-    }
-}
-
-/// The report's title, if --title gives one, and a blank line, before the
-/// output (withTitle).
-fn with_title(opts: &CliOpts, body: String) -> String {
-    let title = opts.spec.opts.effective_title("");
-    if title.is_empty() {
-        body
-    } else {
-        format!("{title}\n\n{body}")
     }
 }
 

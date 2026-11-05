@@ -116,6 +116,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "print" => commands::print::print,
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
+        "prices" => |o, j| commands::prices::prices(o, &j),
         name => return Err(format!("the {name} command is not implemented yet")),
     };
     let j = with_journal(&opts)?;
