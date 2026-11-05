@@ -82,12 +82,7 @@ pub static MODE: Mode = Mode {
             "",
             "show only newer-dated transactions added in each file since last run",
         ),
-        Flag::new(
-            &["round"],
-            REQ,
-            "TYPE",
-            "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
-        ),
+        ROUND_FLAG,
         LAYOUT_FLAG,
         Flag::new(
             &["base-url"],
@@ -102,6 +97,14 @@ pub static MODE: Mode = Mode {
         OUTPUT_VIEW_FLAG,
     ],
 };
+
+/// The --round flag (roundFlag).
+pub const ROUND_FLAG: Flag = Flag::new(
+    &["round"],
+    REQ,
+    "TYPE",
+    "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
+);
 
 /// The --layout flag (layoutFlag).
 pub const LAYOUT_FLAG: Flag = Flag::new(
@@ -154,7 +157,7 @@ pub fn journal_apply_match_opt(opts: &CliOpts, mut j: Journal) -> Result<Journal
 }
 
 /// The --round option's rounding, if given (roundFromRawOpts).
-fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
+pub fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
     let mut r = None;
     for v in opts.raw.list("round") {
         r = Some(match v {

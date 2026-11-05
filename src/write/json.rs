@@ -11,12 +11,14 @@ use crate::account::Realness;
 use crate::amount::{
     Amount, AmountCost, AmountStyle, CostBasis, MixedAmount, Precision, Rounding, Side,
 };
-use crate::dates::{DateSpan, EfDay};
+use crate::dates::{DateSpan, EfDay, Period};
 use crate::decimal::Decimal;
 use crate::model::{BalanceAssertion, Posting, SourcePos, Status, Transaction};
+use crate::reports::account_txns::AccountTransactionsReportItem;
 use crate::reports::periodic::{
     BalanceReport, CompoundPeriodicReport, DisplayName, PeriodicReport, PeriodicReportRow,
 };
+use crate::reports::postings::PostingsReportItem;
 
 /// A value as hledger's JSON output shows it (ToJSON).
 pub trait ToJson {
@@ -301,9 +303,10 @@ impl ToJson for BalanceAssertion {
     }
 }
 
-/// A posting in this transaction (postingKV): the transaction as its index
-/// in a dummy field, to avoid a cycle, and no original posting.
-fn posting_json(p: &Posting, t: &Transaction) -> Value {
+/// A posting in this transaction, if it has one (postingKV): the
+/// transaction as its index in a dummy field, to avoid a cycle, and no
+/// original posting.
+fn posting_json(p: &Posting, t: Option<&Transaction>) -> Value {
     json!({
         "pdate": p.date.map(|d| d.to_string()),
         "pdate2": p.date2.map(|d| d.to_string()),
@@ -318,7 +321,7 @@ fn posting_json(p: &Posting, t: &Transaction) -> Value {
         },
         "ptags": p.tags,
         "pbalanceassertion": p.assertion.as_deref().map(BalanceAssertion::to_json),
-        "ptransaction_": t.index.to_string(),
+        "ptransaction_": t.map_or(String::new(), |t| t.index.to_string()),
         "poriginal": null,
     })
 }
@@ -336,8 +339,60 @@ impl ToJson for Transaction {
             "tdescription": self.description,
             "tcomment": self.comment,
             "ttags": self.tags,
-            "tpostings": self.postings.iter().map(|p| posting_json(p, self)).collect::<Vec<_>>(),
+            "tpostings": self.postings.iter().map(|p| posting_json(p, Some(self))).collect::<Vec<_>>(),
         })
+    }
+}
+
+/// Generic encoding: the constructor as the tag, its fields as the
+/// contents.
+impl ToJson for Period {
+    fn to_json(&self) -> Value {
+        use Period::*;
+        match *self {
+            DayPeriod(d) => tagged("DayPeriod", json!(d.to_string())),
+            WeekPeriod(d) => tagged("WeekPeriod", json!(d.to_string())),
+            MonthPeriod(y, m) => tagged("MonthPeriod", json!([y, m])),
+            QuarterPeriod(y, q) => tagged("QuarterPeriod", json!([y, q])),
+            YearPeriod(y) => tagged("YearPeriod", json!(y)),
+            PeriodBetween(b, e) => tagged("PeriodBetween", json!([b.to_string(), e.to_string()])),
+            PeriodFrom(b) => tagged("PeriodFrom", json!(b.to_string())),
+            PeriodTo(e) => tagged("PeriodTo", json!(e.to_string())),
+            PeriodAll => json!({"tag": "PeriodAll"}),
+        }
+    }
+}
+
+/// A postings report line as a tuple: the date, period and description
+/// if shown, the posting, the running total.
+impl ToJson for PostingsReportItem<'_> {
+    fn to_json(&self) -> Value {
+        json!([
+            self.date.map(|d| d.to_string()),
+            self.period.to_json(),
+            self.description,
+            posting_json(&self.posting, self.txn),
+            self.total.to_json(),
+        ])
+    }
+}
+
+/// An account transactions report line as a tuple: the transaction, the
+/// transaction as seen from the account, whether it is a split, the other
+/// accounts, the change, the balance.
+impl ToJson for AccountTransactionsReportItem {
+    fn to_json(&self) -> Value {
+        json!([
+            self.txn.to_json(),
+            self.acct_txn.to_json(),
+            self.split,
+            self.other_accounts
+                .iter()
+                .map(|a| &**a)
+                .collect::<Vec<&str>>(),
+            self.amount.to_json(),
+            self.balance.to_json(),
+        ])
     }
 }
 

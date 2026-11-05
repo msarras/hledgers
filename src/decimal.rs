@@ -102,6 +102,40 @@ impl Decimal {
         Decimal::new(mantissa, places)
     }
 
+    /// The double's exact value, rounded half-even to 255 places if it has
+    /// more, with the fewest places that show it (realToFrac from a Double:
+    /// fromRational). Zero for infinities and NaN.
+    pub fn from_f64(x: f64) -> Decimal {
+        if x == 0.0 || !x.is_finite() {
+            return Decimal::ZERO;
+        }
+        let bits = x.to_bits();
+        let exponent = ((bits >> 52) & 0x7ff) as i64;
+        let fraction = bits & ((1 << 52) - 1);
+        // the value is mantissa * 2^power
+        let (mantissa, power) = if exponent == 0 {
+            (fraction, -1074)
+        } else {
+            (fraction | (1 << 52), exponent - 1075)
+        };
+        let mut m = IBig::from(mantissa);
+        if x < 0.0 {
+            m = -m;
+        }
+        if power >= 0 {
+            return Decimal::new(m << power as usize, 0).normalize();
+        }
+        // mantissa * 5^k / 10^k
+        let k = (-power) as usize;
+        let scaled = m * IBig::from(5).pow(k);
+        if k <= MAX_PLACES as usize {
+            Decimal::new(scaled, k as u8).normalize()
+        } else {
+            let excess = IBig::from(10).pow(k - MAX_PLACES as usize);
+            Decimal::new(div_round(&scaled, &excess), u8::MAX).normalize()
+        }
+    }
+
     /// The nearest double (what Haskell's realToFrac gives).
     pub fn to_f64(&self) -> f64 {
         // Rust's float parser rounds correctly, whatever the length of the input.
@@ -439,6 +473,22 @@ mod tests {
         ] {
             assert!(bad.parse::<Decimal>().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn from_doubles() {
+        let d = |x: f64| Decimal::from_f64(x).to_string();
+        assert_eq!(d(0.5), "0.5");
+        assert_eq!(d(-2.0), "-2");
+        assert_eq!(d(1e20), "100000000000000000000");
+        assert_eq!(
+            d(0.1),
+            "0.1000000000000000055511151231257827021181583404541015625"
+        );
+        // more than 255 places are rounded
+        assert_eq!(Decimal::from_f64(1e-78).places(), 255);
+        assert!(Decimal::from_f64(1e-300).is_zero());
+        assert_eq!(Decimal::from_f64(0.1).to_f64(), 0.1);
     }
 
     #[test]

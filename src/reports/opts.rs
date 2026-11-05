@@ -9,7 +9,7 @@ use crate::dates::{
     DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
     parsedate, split_span,
 };
-use crate::model::{Journal, Posting, Status, Transaction};
+use crate::model::{Journal, Posting, PostingRef, Status, Transaction};
 use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
 use crate::text::strip_quotes;
 use crate::valuation::{
@@ -478,6 +478,50 @@ impl ReportSpec {
         )
     }
 
+    /// The journal with just the postings, and parts of amounts, the query
+    /// matches (or with --related, their sibling postings), converted to
+    /// cost and/or to value as the options say, using its own market
+    /// prices (journalValueAndFilterPostings).
+    pub fn journal_value_and_filter_postings(&self, j: &Journal) -> Result<Journal, String> {
+        let oracle = PriceOracle::new(self.opts.infer_prices, j);
+        self.journal_value_and_filter_postings_with(j, &oracle)
+    }
+
+    /// Like
+    /// [`journal_value_and_filter_postings`](ReportSpec::journal_value_and_filter_postings),
+    /// with this price oracle. All filtering happens before valuation
+    /// (journalValueAndFilterPostingsWith).
+    pub fn journal_value_and_filter_postings_with(
+        &self,
+        j: &Journal,
+        oracle: &PriceOracle,
+    ) -> Result<Journal, String> {
+        let q = &self.query;
+        let mut filtered = j.clone();
+        let types = |a: &str| j.account_type(a);
+        for t in &mut filtered.txns {
+            if self.opts.related {
+                filter_transaction_related_postings(q, t);
+            } else {
+                let keep: Vec<bool> = (t.postings.iter())
+                    .map(|p| q.matches_posting_extra(&types, PostingRef::new(t, p)))
+                    .collect();
+                let mut keep = keep.into_iter();
+                t.postings.retain(|_| keep.next().unwrap_or(false));
+            }
+        }
+        let amtq = q.clone().filter(Query::is_amt_or_cur);
+        if !amtq.is_null() {
+            for t in &mut filtered.txns {
+                t.postings.retain_mut(|p| {
+                    p.amount = std::mem::take(&mut p.amount).filter(|a| amtq.matches_amount(a));
+                    !p.amount.amounts_raw().is_empty()
+                });
+            }
+        }
+        self.journal_apply_valuation_with(filtered, oracle)
+    }
+
     /// The journal with its posting amounts converted to cost and/or to
     /// value as the options say (-B, -V, -X, --value), using its own market
     /// prices (journalApplyValuationFromOpts).
@@ -554,6 +598,29 @@ impl ReportSpec {
         }
         Ok(j)
     }
+}
+
+/// The transaction with just the postings that the query does not match,
+/// if it matches any, otherwise none (filterTransactionRelatedPostings,
+/// whose list difference removes one equal posting per match).
+fn filter_transaction_related_postings(q: &Query, t: &mut Transaction) {
+    let matched: Vec<usize> = (0..t.postings.len())
+        .filter(|&i| q.matches_posting(PostingRef::new(t, &t.postings[i])))
+        .collect();
+    if matched.is_empty() {
+        t.postings.clear();
+        return;
+    }
+    let mut removed = vec![false; t.postings.len()];
+    for m in matched {
+        if let Some(i) =
+            (0..t.postings.len()).find(|&i| !removed[i] && t.postings[i] == t.postings[m])
+        {
+            removed[i] = true;
+        }
+    }
+    let mut removed = removed.into_iter();
+    t.postings.retain(|_| !removed.next().unwrap_or(false));
 }
 
 /// The report period from the begin, end and period options, the last of

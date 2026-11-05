@@ -1,19 +1,25 @@
 //! The builtin commands (Hledger.Cli.Commands), found by name or alias.
 
 pub mod accounts;
+pub mod activity;
+pub mod aregister;
 pub mod balance;
 pub mod check;
+pub mod close;
 pub mod codes;
 pub mod commodities;
 pub mod compound;
 pub mod descriptions;
+pub mod diff;
 pub mod files;
 pub mod notes;
 pub mod payees;
 pub mod prices;
 pub mod print;
 pub mod quickref;
+pub mod register;
 pub mod rewrite;
+pub mod roi;
 pub mod stats;
 pub mod tags;
 pub mod transactions;
@@ -27,19 +33,19 @@ pub static MAIN_MODE: Mode = command("hledger", &[]);
 /// Command-specific flags and actions arrive with the milestones that implement them.
 pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
-    &command("activity", &[]),
+    &activity::MODE,
     &command("add", &[]),
-    &command("aregister", &["areg"]),
+    &aregister::MODE,
     &balance::MODE,
     &compound::BALANCESHEETEQUITY.mode,
     &compound::BALANCESHEET.mode,
     &compound::CASHFLOW.mode,
     &check::MODE,
-    &command("close", &["equity"]),
+    &close::MODE,
     &codes::MODE,
     &commodities::MODE,
     &descriptions::MODE,
-    &command("diff", &[]),
+    &diff::MODE,
     &files::MODE,
     &command("get", &[]),
     &command("help", &[]),
@@ -50,9 +56,9 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &payees::MODE,
     &prices::MODE,
     &print::MODE,
-    &command("register", &["reg"]),
+    &register::MODE,
     &rewrite::MODE,
-    &command("roi", &[]),
+    &roi::MODE,
     &command("run", &[]),
     &command("repl", &[]),
     &command("setup", &[]),

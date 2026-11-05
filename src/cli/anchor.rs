@@ -3,7 +3,7 @@
 //! register that derives it, an account name to the account's register, a
 //! period heading to the register for that period.
 
-use crate::dates::DateSpan;
+use crate::dates::{DateSpan, Day};
 use crate::reports::opts::{BalanceAccumulation, PeriodTitles};
 use crate::text::quote_if_spaced;
 use crate::valuation::{ConversionOp, ValuationType};
@@ -295,6 +295,18 @@ pub fn date_span_cell_with(
         compose_anchor_with(&params, base, &q),
         "Show transactions affecting this account in this period",
         Cell::new(render_period_heading(titles, span)),
+    )
+}
+
+/// A cell showing a date in an account's row, linking to the account's
+/// register for that day (dateCell).
+pub fn date_cell(base: Option<&str>, query: &[String], account: &str, d: Day) -> Cell<String> {
+    let mut q = vec![format!("date:{d}")];
+    q.extend(remove_dates(&remove_inacct(query)));
+    with_link(
+        compose_anchor_with(&account_params(true, account), base, &q),
+        "Show transactions affecting this account on this date",
+        Cell::new(d.to_string()),
     )
 }
 
