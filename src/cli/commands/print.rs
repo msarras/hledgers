@@ -122,7 +122,15 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
             t.comment = comment_add_tag_next_line(&t.comment, &tag);
         }
     }
-    if let Some(desc) = raw.string("match") {
+    let j = journal_apply_match_opt(opts, j)?;
+    print_entries(opts, j)
+}
+
+/// With --match, the journal with just the recent transaction whose
+/// description is most like its value, or an error if there is none
+/// (journalApplyMatchOpt).
+pub fn journal_apply_match_opt(opts: &CliOpts, mut j: Journal) -> Result<Journal, String> {
+    if let Some(desc) = opts.raw.string("match") {
         match journal_similar_transaction(opts, &j, desc) {
             Some(t) => j.txns = vec![t],
             None => {
@@ -133,7 +141,7 @@ pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
             }
         }
     }
-    print_entries(opts, j)
+    Ok(j)
 }
 
 /// The --round option's rounding, if given (roundFromRawOpts).
