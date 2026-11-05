@@ -11,6 +11,7 @@ pub mod errors;
 pub mod finalise;
 pub mod journal;
 pub mod modifiers;
+pub mod rules;
 
 use crate::amount::CommodityStyles;
 use crate::dates::{DateSpan, Day};

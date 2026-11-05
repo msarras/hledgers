@@ -55,7 +55,9 @@ impl Item {
 /// messages with the caret line spanning the text from `offset` to `end` (a
 /// FancyError, such as hledger's ErrorFailAt). Several messages arise when
 /// alternatives fail with different messages at the same place; they are
-/// kept sorted.
+/// kept sorted. A fancy error is shown where its region starts, but it was
+/// raised at `raised`, which is where megaparsec considers it to be when
+/// errors are merged (hledger's ErrorFailAt, relocated only when shown).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseError {
     Trivial {
@@ -67,6 +69,7 @@ pub enum ParseError {
         offset: usize,
         end: usize,
         msgs: Vec<String>,
+        raised: usize,
     },
 }
 
@@ -89,6 +92,41 @@ impl ParseError {
             offset,
             end,
             msgs: vec![msg.into()],
+            raised: offset,
+        }
+    }
+
+    /// Like [`fail_at`](ParseError::fail_at), but raised at `raised`, after
+    /// the text it is about (customFailure of a parseErrorAt).
+    pub fn fail_at_raised(
+        src: &str,
+        offset: usize,
+        raised: usize,
+        msg: impl Into<String>,
+    ) -> ParseError {
+        match ParseError::fail_at(src, offset, msg) {
+            ParseError::Fancy {
+                offset, end, msgs, ..
+            } => ParseError::Fancy {
+                offset,
+                end,
+                msgs,
+                raised,
+            },
+            e => e,
+        }
+    }
+
+    /// A trivial error made fancy, its message the text it would show, so
+    /// that alternatives tried after it do not replace it (hledger's
+    /// templateexprp `region asFancy`).
+    pub fn into_fancy(self, src: &str) -> ParseError {
+        match self {
+            e @ ParseError::Trivial { .. } => {
+                let text = e.text();
+                ParseError::fail_at(src, e.offset(), text.trim_end())
+            }
+            e => e,
         }
     }
 
@@ -104,6 +142,7 @@ impl ParseError {
             offset: start,
             end,
             msgs: vec![format!("\n{msg}")],
+            raised: start,
         }
     }
 
@@ -120,17 +159,32 @@ impl ParseError {
                 unexpected,
                 expected,
             },
-            ParseError::Fancy { offset, end, msgs } => ParseError::Fancy {
+            ParseError::Fancy {
+                offset,
+                end,
+                msgs,
+                raised,
+            } => ParseError::Fancy {
                 offset: offset + delta,
                 end: end + delta,
                 msgs,
+                raised: raised + delta,
             },
         }
     }
 
+    /// Where the error is shown.
     pub fn offset(&self) -> usize {
         match self {
             ParseError::Trivial { offset, .. } | ParseError::Fancy { offset, .. } => *offset,
+        }
+    }
+
+    /// Where megaparsec considers the error to be, when merging errors.
+    fn raised(&self) -> usize {
+        match self {
+            ParseError::Trivial { offset, .. } => *offset,
+            ParseError::Fancy { raised, .. } => *raised,
         }
     }
 
@@ -141,7 +195,7 @@ impl ParseError {
     /// wins over a trivial one.
     pub fn merge(self, other: ParseError) -> ParseError {
         use std::cmp::Ordering::*;
-        match self.offset().cmp(&other.offset()) {
+        match self.raised().cmp(&other.raised()) {
             Less => other,
             Greater => self,
             Equal => match (self, other) {
@@ -169,6 +223,7 @@ impl ParseError {
                         offset,
                         end: e1,
                         msgs: mut m1,
+                        raised,
                     },
                     ParseError::Fancy {
                         end: e2, msgs: m2, ..
@@ -181,6 +236,7 @@ impl ParseError {
                         offset,
                         end: e1.max(e2),
                         msgs: m1,
+                        raised,
                     }
                 }
                 (e @ ParseError::Fancy { .. }, _) => e,
@@ -260,6 +316,15 @@ impl ParseError {
         let offset = self.offset().min(src.len());
         let line_start = src[..offset].rfind('\n').map_or(0, |i| i + 1);
         let line_no = src[..line_start].matches('\n').count() + 1;
+        self.pretty_as_line(name, line_no, src)
+    }
+
+    /// Like [`pretty`](ParseError::pretty), but showing the error's line as
+    /// line `line_no` of the file `name`, for text parsed after other text
+    /// was inlined into it.
+    pub fn pretty_as_line(&self, name: &str, line_no: usize, src: &str) -> String {
+        let offset = self.offset().min(src.len());
+        let line_start = src[..offset].rfind('\n').map_or(0, |i| i + 1);
         let line_end = src[line_start..]
             .find('\n')
             .map_or(src.len(), |i| line_start + i);
