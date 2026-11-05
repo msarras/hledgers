@@ -11,7 +11,7 @@ print/query-not-acct.test
 print/export.test:1-5,8
 print/beancount.test:7
 journal/parse-errors.test
-journal/amount-expressions.test:1-3,5-14,17-32,34,36
+journal/amount-expressions.test:1-3,5-14,17-34,36
 journal/assertions.test
 journal/auto-postings.test:1,5-14,16-22
 forecast.test:2,6-7,9,11
@@ -21,7 +21,7 @@ journal/infer-cost.test:1
 journal/infer-imbalance.test:1-2,5-7,9-10,13
 commodity-aliases.test:2-3,5,7-8,10-11,18-19,21-24,26-29,32-33,35,37,39,46-48
 journal/include/include.test:1,3-21
-journal/fastpath.test:1-3,5,10,12,14-15
+journal/fastpath.test:1-3,5,8,10,12,14-15
 journal/numbers.test:4,8,13,15-17,19
 journal/virtual-postings.test:1-4,6
 journal/posting-dates.test:5
@@ -58,3 +58,4 @@ payees.test
 codes.test
 notes.test
 descriptions.test
+tags.test
