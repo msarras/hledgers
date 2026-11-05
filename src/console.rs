@@ -1,6 +1,6 @@
 //! Messages on stderr and whether to colour them (the parts of
 //! Hledger.Utils.IO that both the reader and the commands use: printError,
-//! warnIO, useColorOnStderr and colorOption).
+//! warnIO, useColorOnStderr, useColorOnStdout and colorOption).
 
 use std::io::IsTerminal;
 
@@ -40,6 +40,17 @@ pub fn warn(args: &[String], msg: &str) {
 /// Whether to colour stderr: yes if --color says so, otherwise if it is a
 /// terminal supporting colour and NO_COLOR is not set (useColorOnStderr).
 fn use_color_on_stderr(color_option: Option<&str>) -> bool {
+    use_color_on(std::io::stderr().is_terminal(), color_option)
+}
+
+/// Whether to colour stdout, as for stderr (useColorOnStdout, without its
+/// check for an output file).
+pub fn use_color_on_stdout(color_option: Option<&str>) -> bool {
+    use_color_on(std::io::stdout().is_terminal(), color_option)
+}
+
+/// Whether to colour output to a terminal or not (useColorOnHandle).
+fn use_color_on(terminal: bool, color_option: Option<&str>) -> bool {
     match color_option.map(str::to_lowercase).as_deref() {
         Some("y" | "yes" | "always") => return true,
         Some("n" | "no" | "never") => return false,
@@ -47,7 +58,7 @@ fn use_color_on_stderr(color_option: Option<&str>) -> bool {
     }
     let no_color = std::env::var_os("NO_COLOR").is_some();
     let dumb = std::env::var("TERM").is_ok_and(|t| t.to_lowercase() == "dumb");
-    !no_color && !dumb && std::io::stderr().is_terminal()
+    !no_color && !dumb && terminal
 }
 
 /// The value of the last --color or --colour option in some arguments

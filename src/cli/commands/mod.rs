@@ -1,6 +1,7 @@
 //! The builtin commands (Hledger.Cli.Commands), found by name or alias.
 
 pub mod accounts;
+pub mod balance;
 pub mod check;
 pub mod codes;
 pub mod commodities;
@@ -28,7 +29,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("activity", &[]),
     &command("add", &[]),
     &command("aregister", &["areg"]),
-    &command("balance", &["bal"]),
+    &balance::MODE,
     &command("balancesheetequity", &["bse"]),
     &command("balancesheet", &["bs"]),
     &command("cashflow", &["cf"]),
@@ -65,6 +66,11 @@ const fn command(name: &'static str, aliases: &'static [&'static str]) -> Mode {
         aliases,
         flags: &[],
     }
+}
+
+/// The error for something a later milestone provides.
+pub fn not_yet(what: &str, milestone: &str) -> String {
+    format!("{what} is not supported yet (hledgers milestone {milestone})")
 }
 
 /// The builtin command with this exact name or alias.

@@ -100,7 +100,11 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         raw.0
             .insert(0, ("command".to_string(), mode.name.to_string()));
     }
-    let mut opts = CliOpts::from_raw_opts(raw, current_day(), false)?;
+    // colour on stdout, unless writing to a file (useColorOnStdout)
+    let to_file = raw.string("output-file").is_some_and(|f| f != "-");
+    let color =
+        !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
+    let mut opts = CliOpts::from_raw_opts(raw, current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
     if opts.raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
@@ -114,6 +118,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
+        "balance" => |o, j| commands::balance::balance(o, &j),
         "codes" => commands::codes::codes,
         "commodities" => |o, j| commands::commodities::commodities(o, &j),
         "descriptions" => commands::descriptions::descriptions,

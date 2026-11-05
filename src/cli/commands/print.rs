@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use crate::amount::{CommodityStyles, Rounding, styles_with_rounding};
 use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::commands::not_yet;
 use crate::cli::io::with_title;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::model::{
@@ -96,11 +97,6 @@ pub const LAYOUT_FLAG: Flag = Flag::new(
     "hledger1|COL",
     "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
 );
-
-/// What a milestone not yet done would provide.
-fn not_yet(what: &str, milestone: &str) -> String {
-    format!("{what} is not supported yet (hledgers milestone {milestone})")
-}
 
 /// Run the print command (print').
 pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
