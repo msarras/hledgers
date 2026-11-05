@@ -618,13 +618,22 @@ impl<'a> JournalParser<'a, '_> {
                 _ => "journal",
             })
         });
-        if let Some(f @ ("csv" | "tsv" | "ssv" | "timeclock" | "timedot" | "rules")) = format {
+        if let Some(f @ ("timeclock" | "timedot")) = format {
             let msg =
                 format!("reading {f} files is not supported yet (hledgers milestone 7): {file}");
             return Err(Failure::Here(ParseError::fail_at(self.c.src, off, msg)));
         }
+        let sep = match format {
+            Some("csv") => Some(','),
+            Some("ssv") => Some(';'),
+            Some("tsv") => Some('\t'),
+            _ => None,
+        };
+        if sep.is_some() || format == Some("rules") {
+            return self.include_converted_file(file, sep);
+        }
         let text = super::read_file_portably(file).map_err(|e| {
-            let msg = format!("failed to read a file:\n{file}: openFile: {e}");
+            let msg = format!("failed to read a file:\n{e}");
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
         self.j.files.push((file.to_string(), text.clone()));
@@ -633,6 +642,31 @@ impl<'a> JournalParser<'a, '_> {
         let r = parse_file(self.iopts, &mut st, self.stack, self.j, file, &text);
         self.stack.pop();
         r
+    }
+
+    /// An included CSV, SSV or TSV file (`sep` its separator), converted by
+    /// its rules file, or a rules file, converted from its data: its
+    /// transactions added here, unfinalised, with the account aliases in
+    /// effect applied (alias directives, then --alias options), but not
+    /// other directives' effects (includeFileParser). Errors in it are shown
+    /// after the include file stack.
+    fn include_converted_file(&mut self, file: &str, sep: Option<char>) -> R<()> {
+        let read = match sep {
+            Some(sep) => super::csv::read_included_csv(self.iopts, file, sep),
+            None => super::csv::read_rules_data(self.iopts, file).map(|(j, _)| j),
+        };
+        let cj = read.map_err(Failure::Included)?;
+        let opt_aliases = self
+            .st
+            .opt_aliases
+            .as_ref()
+            .map_err(|e| Failure::Unlocated(e.clone()))?;
+        let aliases: Vec<AccountAlias> =
+            self.st.aliases.iter().chain(opt_aliases).cloned().collect();
+        let cj = super::csv::journal_apply_aliases(&aliases, cj).map_err(Failure::Included)?;
+        self.j.files.push((file.to_string(), String::new()));
+        self.j.txns.extend(cj.txns);
+        Ok(())
     }
 
     /// `account NAME`, with a comment, tags (including `type:` and
@@ -1475,16 +1509,10 @@ fn posting_round_calculated_amounts(mut p: Posting) -> Posting {
 }
 
 /// A file path's reader prefix, if any, and the rest (splitReaderPrefix).
+/// The rules reader has no prefix: `rules:` stays part of the path, as
+/// upstream leaves it.
 pub fn split_reader_prefix(f: &str) -> (Option<&str>, &str) {
-    for r in [
-        "journal",
-        "timeclock",
-        "timedot",
-        "csv",
-        "rules",
-        "ssv",
-        "tsv",
-    ] {
+    for r in ["journal", "timeclock", "timedot", "csv", "ssv", "tsv"] {
         if let Some(rest) = f.strip_prefix(r).and_then(|s| s.strip_prefix(':')) {
             return (Some(r), rest);
         }

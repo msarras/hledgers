@@ -67,17 +67,10 @@ fn current_day() -> Day {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
-    let offset = local_utc_offset_seconds(secs);
+    let offset = crate::dates::local_utc_offset_seconds(secs);
     Day::from_ymd(1970, 1, 1)
         .expect("a valid date")
         .add_days((secs + offset).div_euclid(86400))
-}
-
-/// The local time zone's offset from UTC at this time, in seconds, from the
-/// TZ variable's simple forms or /etc/localtime; UTC if unknown.
-fn local_utc_offset_seconds(_utc_secs: i64) -> i64 {
-    // M8: local time zones (tz-rs, per the plan); the tests run with explicit dates or in UTC.
-    0
 }
 
 fn dispatch(prog_args: &[String]) -> Result<(), String> {
@@ -164,11 +157,7 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
     let mut iopts = opts.input.clone();
     iopts.journal_dir = paths.first().map(|p| {
-        let f = crate::read::journal::split_reader_prefix(p).1;
-        std::path::Path::new(f)
-            .parent()
-            .map(|d| d.display().to_string())
-            .unwrap_or_default()
+        crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
     });
     if iopts.anon {
         return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());

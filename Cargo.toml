@@ -12,6 +12,7 @@ publish = false
 
 [dependencies]
 dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
+encoding_rs = "0.8.35"
 regex = "1.13"
 serde_json = { version = "1.0.151", features = ["arbitrary_precision"] }
 unicode-width = { version = "0.2.3", default-features = false }

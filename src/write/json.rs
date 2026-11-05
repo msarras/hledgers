@@ -131,10 +131,14 @@ fn integer(n: &IBig) -> Value {
 /// fromNumber's Generic): its shortest digits that read back the same; in
 /// exponent notation if its magnitude exceeds 10^19; in full if it is a
 /// whole number; otherwise in decimal notation from 0.1 to 10^7 and
-/// exponent notation outside that range.
+/// exponent notation outside that range. An infinite one (a decimal too
+/// large for a double) is the string `+inf` or `-inf`.
 pub fn double(x: f64) -> Value {
     if x == 0.0 {
         return number("0");
+    }
+    if x.is_infinite() {
+        return Value::String(if x > 0.0 { "+inf" } else { "-inf" }.to_string());
     }
     // Rust shows a float's shortest round-tripping digits: d.ddde-N or dde N
     let shown = format!("{:e}", x.abs());
@@ -496,6 +500,8 @@ mod tests {
         assert_eq!(d(12345678901234567890.5), "1.2345678901234567e19");
         assert_eq!(d(1.2345678901234568e29), "1.2345678901234568e29");
         assert_eq!(d(12345678.0), "12345678");
+        assert_eq!(d(f64::INFINITY), "\"+inf\"");
+        assert_eq!(d(f64::NEG_INFINITY), "\"-inf\"");
         let i = |s: &str| shown(integer(&s.parse().unwrap()));
         assert_eq!(i("10"), "10");
         assert_eq!(i("10000000000000000000"), "10000000000000000000");
