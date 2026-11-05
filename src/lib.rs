@@ -10,5 +10,7 @@ pub mod parse;
 pub mod query;
 pub mod read;
 pub mod regex;
+pub mod reports;
 pub mod text;
+pub mod valuation;
 pub mod write;

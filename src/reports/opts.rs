@@ -1,0 +1,703 @@
+//! Report options (Hledger.Reports.ReportOptions): what the standard
+//! command-line options and query arguments ask a report to show, and the
+//! query they make.
+
+use crate::account::DepthSpec;
+use crate::amount::Sym;
+use crate::cli::args::RawOpts;
+use crate::dates::{
+    DateSpan, Day, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr, parsedate,
+};
+use crate::model::{Posting, Status, Transaction};
+use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
+use crate::text::strip_quotes;
+use crate::valuation::{ConversionOp, ValuationType};
+
+/// What to calculate in each balance report cell (BalanceCalculation).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BalanceCalculation {
+    #[default]
+    Change,
+    Budget,
+    ValueChange,
+    Gain,
+    PostingsCount,
+    TransactionsCount,
+}
+
+/// How balance report values accumulate across periods
+/// (BalanceAccumulation).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BalanceAccumulation {
+    #[default]
+    PerPeriod,
+    Cumulative,
+    Historical,
+}
+
+/// Show accounts as a flat list or a tree (AccountListMode).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccountListMode {
+    #[default]
+    Flat,
+    Tree,
+}
+
+/// How multi-commodity balance reports are laid out (Layout).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    Wide(Option<usize>),
+    Tall,
+    Bare,
+    BareWide,
+    Tidy,
+}
+
+/// How period column headings are shown (PeriodTitles).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PeriodTitles {
+    #[default]
+    Compact,
+    Dates,
+}
+
+/// Whether accounts normally have positive or negative balances
+/// (NormalSign).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NormalSign {
+    NormallyPositive,
+    NormallyNegative,
+}
+
+/// A report sort key, and whether it is reversed (SortField).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortField {
+    AbsAmount(bool),
+    Account(bool),
+    Amount(bool),
+    Date(bool),
+    Description(bool),
+}
+
+/// Options for customising reports (ReportOpts). Some options' errors
+/// surface only when a report uses them, as upstream's lazy fields do:
+/// those fields hold a Result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportOpts {
+    pub period: Period,
+    pub interval: Interval,
+    /// Zero, one or two statuses to match.
+    pub statuses: Vec<Status>,
+    pub conversion_op: Option<ConversionOp>,
+    pub value: Option<ValuationType>,
+    /// Infer market prices from transactions (`--infer-market-prices`).
+    pub infer_prices: bool,
+    pub depth: DepthSpec,
+    /// A folding UI's default fold depth (hledger-web).
+    pub fold_depth: Option<usize>,
+    pub no_elide: bool,
+    pub date2: bool,
+    pub empty: bool,
+    pub full_names: bool,
+    pub real: bool,
+    /// The `--format` string, parsed by the reports that use it (M5).
+    pub format: Option<String>,
+    pub balance_base_url: Option<String>,
+    pub pretty: bool,
+    /// The query arguments.
+    pub query_string: Vec<String>,
+    pub average: bool,
+    pub related: bool,
+    pub sort_spec: Vec<SortField>,
+    pub txn_dates: bool,
+    pub balance_calc: BalanceCalculation,
+    pub balance_accum: BalanceAccumulation,
+    /// A description substring selecting periodic transactions for budgets.
+    pub budget_pattern: Option<String>,
+    pub account_list_mode: AccountListMode,
+    pub drop: usize,
+    pub declared: bool,
+    pub row_total: bool,
+    pub no_total: bool,
+    pub summary_only: bool,
+    pub show_costs: bool,
+    pub sort_amount: bool,
+    pub percent: bool,
+    pub invert: bool,
+    pub normal_balance: Option<NormalSign>,
+    pub color: bool,
+    pub transpose: bool,
+    pub layout: Result<Layout, String>,
+    pub period_titles: PeriodTitles,
+    /// An explicit `--title`, perhaps empty to suppress the report's own.
+    pub title: Option<String>,
+    pub subreport_titles: Option<String>,
+}
+
+impl Default for ReportOpts {
+    /// defreportopts.
+    fn default() -> ReportOpts {
+        ReportOpts {
+            period: Period::PeriodAll,
+            interval: Interval::NoInterval,
+            statuses: Vec::new(),
+            conversion_op: None,
+            value: None,
+            infer_prices: false,
+            depth: DepthSpec::default(),
+            fold_depth: None,
+            no_elide: false,
+            date2: false,
+            empty: false,
+            full_names: false,
+            real: false,
+            format: None,
+            balance_base_url: None,
+            pretty: false,
+            query_string: Vec::new(),
+            average: false,
+            related: false,
+            sort_spec: vec![SortField::Date(false)],
+            txn_dates: false,
+            balance_calc: BalanceCalculation::Change,
+            balance_accum: BalanceAccumulation::PerPeriod,
+            budget_pattern: None,
+            account_list_mode: AccountListMode::Flat,
+            drop: 0,
+            declared: false,
+            row_total: false,
+            no_total: false,
+            summary_only: false,
+            show_costs: false,
+            sort_amount: false,
+            percent: false,
+            invert: false,
+            normal_balance: None,
+            color: false,
+            transpose: false,
+            layout: Ok(Layout::Wide(None)),
+            period_titles: PeriodTitles::Compact,
+            title: None,
+            subreport_titles: None,
+        }
+    }
+}
+
+/// An error about a command-line option, with the hint upstream adds
+/// (usageError).
+pub fn usage_error(msg: &str) -> String {
+    let msg = msg.trim_end_matches('\n');
+    let sep = if msg.contains('\n') { "\n" } else { " " };
+    format!("{msg}{sep}(use -h to see usage)")
+}
+
+impl ReportOpts {
+    /// Report options from the parsed command line, today's date, and
+    /// whether stdout gets colour (rawOptsToReportOpts).
+    pub fn from_raw_opts(today: Day, color: bool, raw: &RawOpts) -> Result<ReportOpts, String> {
+        let pretty = match raw.string("pretty") {
+            None => false,
+            Some("always" | "yes" | "y") => true,
+            Some("never" | "no" | "n") => false,
+            Some(_) => return Err(usage_error("this argument should be one of y, yes, n, no")),
+        };
+        let balance_calc = balance_calc_opt(raw);
+        Ok(ReportOpts {
+            period: period_from_raw_opts(today, raw)?,
+            interval: interval_from_raw_opts(raw)?,
+            statuses: statuses_from_raw_opts(raw),
+            conversion_op: conversion_op_from_raw_opts(raw, balance_calc)?,
+            value: valuation_type_from_raw_opts(raw, balance_calc)?,
+            infer_prices: raw.bool("infer-market-prices"),
+            depth: depth_from_raw_opts(raw)?,
+            no_elide: raw.bool("no-elide"),
+            date2: raw.bool("date2"),
+            empty: raw.bool("empty"),
+            full_names: raw.bool("full-names"),
+            real: raw.bool("real"),
+            format: raw.string("format").map(str::to_string),
+            balance_base_url: raw.string("base-url").map(str::to_string),
+            query_string: raw.args().map(str::to_string).collect(),
+            average: raw.bool("average"),
+            related: raw.bool("related"),
+            sort_spec: sort_spec_from_raw_opts(raw)?,
+            txn_dates: raw.bool("txn-dates"),
+            balance_calc,
+            balance_accum: balance_accumulation_override(raw, balance_calc)
+                .unwrap_or(BalanceAccumulation::PerPeriod),
+            budget_pattern: raw.string("budget").map(str::to_string),
+            account_list_mode: raw
+                .choice(|n| match n {
+                    "tree" => Some(AccountListMode::Tree),
+                    "flat" => Some(AccountListMode::Flat),
+                    _ => None,
+                })
+                .unwrap_or(AccountListMode::Flat),
+            drop: raw.posint("drop")?.unwrap_or(0),
+            declared: raw.bool("declared"),
+            row_total: raw.bool("row-total"),
+            no_total: raw.bool("no-total"),
+            summary_only: raw.bool("summary-only"),
+            show_costs: raw.bool("show-costs"),
+            sort_amount: raw.bool("sort-amount"),
+            percent: raw.bool("percent"),
+            invert: raw.bool("invert"),
+            pretty,
+            color,
+            transpose: raw.toggle("transpose"),
+            layout: layout_opt(raw),
+            period_titles: match raw.string("period-titles") {
+                None | Some("compact") => PeriodTitles::Compact,
+                Some("dates") => PeriodTitles::Dates,
+                Some(s) => {
+                    return Err(usage_error(&format!(
+                        "--period-titles's argument should be \"compact\" or \"dates\", not {}",
+                        crate::text::show_string(s)
+                    )));
+                }
+            },
+            title: raw.string("title").map(|t| t.replace("\\n", "\n")),
+            subreport_titles: raw
+                .string("subreport-titles")
+                .map(|t| t.replace("\\n", "\n")),
+            ..ReportOpts::default()
+        })
+    }
+
+    /// Transactions' dates for this report: secondary with `--date2`
+    /// (transactionDateFn).
+    pub fn transaction_date(&self, t: &Transaction) -> Day {
+        t.date_of(self.date2)
+    }
+
+    /// Postings' dates for this report (postingDateFn).
+    pub fn posting_date(&self, p: &Posting, t: Option<&Transaction>) -> Day {
+        if self.date2 {
+            p.date2_in(t)
+        } else {
+            p.date_in(t)
+        }
+    }
+
+    /// The query the date, status, depth and real flags make
+    /// (queryFromFlags).
+    pub fn query_from_flags(&self) -> Query {
+        let mut qs = Vec::new();
+        if self.real {
+            qs.push(Query::Real(true));
+        }
+        if let Some(d) = self.depth.flat {
+            qs.push(Query::Depth(d));
+        }
+        for (r, d) in &self.depth.regexps {
+            qs.push(Query::DepthAcct(r.clone(), *d));
+        }
+        let span = self.period.as_date_span();
+        qs.push(if self.date2 {
+            Query::Date2(span)
+        } else {
+            Query::Date(span)
+        });
+        qs.push(Query::Or(
+            self.statuses.iter().map(|s| Query::StatusQ(*s)).collect(),
+        ));
+        Query::And(qs).simplify()
+    }
+
+    /// The report's title: `--title`'s, or the given default
+    /// (effectiveTitle).
+    pub fn effective_title<'a>(&'a self, default: &'a str) -> &'a str {
+        self.title.as_deref().unwrap_or(default)
+    }
+}
+
+/// Report options with today's date, their query, and the query's options
+/// (ReportSpec).
+#[derive(Clone, Debug)]
+pub struct ReportSpec {
+    pub opts: ReportOpts,
+    pub today: Day,
+    pub query: Query,
+    pub query_opts: Vec<QueryOpt>,
+}
+
+impl ReportSpec {
+    /// The report spec of these options: the query arguments parsed and
+    /// combined with the flags' query, an interval given by a query
+    /// argument replacing the flags' (reportOptsToSpec).
+    pub fn new(today: Day, mut opts: ReportOpts) -> Result<ReportSpec, String> {
+        let (args_query, query_opts) = parse_query_list(today, &opts.query_string)?;
+        if let Some(i) = query_opts.iter().rev().find_map(|o| match o {
+            QueryOpt::Interval(i) => Some(i.clone()),
+            _ => None,
+        }) {
+            opts.interval = i;
+        }
+        let query = Query::And(vec![opts.query_from_flags(), args_query]).simplify();
+        Ok(ReportSpec {
+            opts,
+            today,
+            query,
+            query_opts,
+        })
+    }
+
+    /// With the conversion operation set, unless it is already
+    /// (setDefaultConversionOp).
+    pub fn with_default_conversion_op(mut self, op: ConversionOp) -> ReportSpec {
+        self.opts.conversion_op.get_or_insert(op);
+        self
+    }
+}
+
+/// The report period from the begin, end and period options, the last of
+/// each kind winning (periodFromRawOpts).
+fn period_from_raw_opts(today: Day, raw: &RawOpts) -> Result<Period, String> {
+    let begin = begin_dates_from_raw_opts(today, raw)?.last().map(|d| d.day);
+    let end = end_dates_from_raw_opts(today, raw)?.last().map(|d| d.day);
+    Ok(match (begin, end) {
+        (None, None) => Period::PeriodAll,
+        (Some(b), None) => Period::PeriodFrom(b),
+        (None, Some(e)) => Period::PeriodTo(e),
+        (Some(b), Some(e)) => Period::PeriodBetween(b, e).simplify(),
+    })
+}
+
+/// The span of a period option, or a usage error.
+fn period_option_span(today: Day, v: &str) -> Result<(Interval, DateSpan), String> {
+    parse_period_expr(today, strip_quotes(v))
+        .map_err(|e| usage_error(&format!("could not parse period option: {e}")))
+}
+
+/// The start dates from the begin and period options, in order
+/// (beginDatesFromRawOpts).
+fn begin_dates_from_raw_opts(today: Day, raw: &RawOpts) -> Result<Vec<EfDay>, String> {
+    let mut out = Vec::new();
+    for (n, v) in &raw.0 {
+        match n.as_str() {
+            "begin" => out.push(
+                fix_smart_date_str_ef(today, v)
+                    .map_err(|e| usage_error(&format!("could not parse begin date: {e}")))?,
+            ),
+            "period" => out.extend(period_option_span(today, v)?.1.0),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The end dates from the end and period options, in order
+/// (endDatesFromRawOpts).
+fn end_dates_from_raw_opts(today: Day, raw: &RawOpts) -> Result<Vec<EfDay>, String> {
+    let mut out = Vec::new();
+    for (n, v) in &raw.0 {
+        match n.as_str() {
+            "end" => out.push(
+                fix_smart_date_str_ef(today, v)
+                    .map_err(|e| usage_error(&format!("could not parse end date: {e}")))?,
+            ),
+            "period" => out.extend(period_option_span(today, v)?.1.1),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The report interval from the period and interval flags, the last
+/// winning (intervalFromRawOpts).
+fn interval_from_raw_opts(raw: &RawOpts) -> Result<Interval, String> {
+    let mut interval = Interval::NoInterval;
+    for (n, v) in &raw.0 {
+        let i = match n.as_str() {
+            // the interval does not depend on the reference date
+            "period" => match period_option_span(crate::dates::null_date(), v)?.0 {
+                Interval::NoInterval => None,
+                i => Some(i),
+            },
+            "daily" => Some(Interval::Days(1)),
+            "weekly" => Some(Interval::Weeks(1)),
+            "monthly" => Some(Interval::Months(1)),
+            "quarterly" => Some(Interval::Quarters(1)),
+            "yearly" => Some(Interval::Years(1)),
+            _ => None,
+        };
+        if let Some(i) = i {
+            interval = i;
+        }
+    }
+    Ok(interval)
+}
+
+/// The statuses selected by the status flags; all three select none
+/// (statusesFromRawOpts).
+fn statuses_from_raw_opts(raw: &RawOpts) -> Vec<Status> {
+    let mut ss: Vec<Status> = raw
+        .0
+        .iter()
+        .filter_map(|(n, _)| match n.as_str() {
+            "unmarked" => Some(Status::Unmarked),
+            "pending" => Some(Status::Pending),
+            "cleared" => Some(Status::Cleared),
+            _ => None,
+        })
+        .collect();
+    ss.sort();
+    ss.dedup();
+    if ss.len() >= 3 { Vec::new() } else { ss }
+}
+
+/// The balance calculation selected (balancecalcopt).
+fn balance_calc_opt(raw: &RawOpts) -> BalanceCalculation {
+    raw.choice(|n| match n {
+        "sum" => Some(BalanceCalculation::Change),
+        "valuechange" => Some(BalanceCalculation::ValueChange),
+        "gain" => Some(BalanceCalculation::Gain),
+        "budget" => Some(BalanceCalculation::Budget),
+        "count" => Some(BalanceCalculation::PostingsCount),
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+/// The balance accumulation selected, or implied by --valuechange
+/// (balanceAccumulationOverride).
+pub fn balance_accumulation_override(
+    raw: &RawOpts,
+    calc: BalanceCalculation,
+) -> Option<BalanceAccumulation> {
+    raw.choice(|n| match n {
+        "historical" => Some(BalanceAccumulation::Historical),
+        "cumulative" => Some(BalanceAccumulation::Cumulative),
+        "change" => Some(BalanceAccumulation::PerPeriod),
+        _ => None,
+    })
+    .or((calc == BalanceCalculation::ValueChange).then_some(BalanceAccumulation::PerPeriod))
+}
+
+/// The valuation selected by -V, -X and --value, or implied by --valuechange
+/// or --gain (valuationTypeFromRawOpts).
+fn valuation_type_from_raw_opts(
+    raw: &RawOpts,
+    calc: BalanceCalculation,
+) -> Result<Option<ValuationType>, String> {
+    let commodity = |s: &str| -> Sym {
+        Sym::from(
+            s.strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(s),
+        )
+    };
+    let mut direct = None;
+    for (n, v) in &raw.0 {
+        let vt = match n.as_str() {
+            "V" => Some(ValuationType::AtEnd(None)),
+            "X" => Some(ValuationType::AtEnd(Some(commodity(v)))),
+            "value" => {
+                let (t, c) = match v.split_once(',') {
+                    Some((t, c)) => (t, Some(commodity(c))),
+                    None => (v.as_str(), None),
+                };
+                Some(match t {
+                    "cost" | "c" | "transacted" => match c {
+                        Some(c) => ValuationType::AtEnd(Some(c)),
+                        None => continue,
+                    },
+                    "then" | "t" => ValuationType::AtThen(c),
+                    "end" | "e" => ValuationType::AtEnd(c),
+                    "now" | "n" => ValuationType::AtNow(c),
+                    _ => match parsedate(t) {
+                        Some(d) => ValuationType::AtDate(d, c),
+                        None => {
+                            return Err(usage_error(&format!(
+                                "could not parse \"{t}\" as valuation type, should be: cost|transacted|then|end|now|c|t|e|n|YYYY-MM-DD"
+                            )));
+                        }
+                    },
+                })
+            }
+            _ => None,
+        };
+        if vt.is_some() {
+            direct = vt;
+        }
+    }
+    Ok(match (calc, direct) {
+        (BalanceCalculation::ValueChange, None) => Some(ValuationType::AtEnd(None)),
+        (BalanceCalculation::ValueChange, d @ Some(ValuationType::AtEnd(_))) => d,
+        (BalanceCalculation::ValueChange, _) => {
+            return Err(usage_error(
+                "--valuechange only produces sensible results with --value=end",
+            ));
+        }
+        (BalanceCalculation::Gain, None) => Some(ValuationType::AtEnd(None)),
+        (_, d) => d,
+    })
+}
+
+/// The conversion selected by -B or --value=cost/transacted
+/// (conversionOpFromRawOpts).
+fn conversion_op_from_raw_opts(
+    raw: &RawOpts,
+    calc: BalanceCalculation,
+) -> Result<Option<ConversionOp>, String> {
+    let op = raw
+        .0
+        .iter()
+        .filter_map(|(n, v)| {
+            let kind = v.split(',').next().unwrap_or("");
+            match n.as_str() {
+                "B" => Some(ConversionOp::ToCost),
+                "value" if kind == "cost" || kind == "c" => Some(ConversionOp::ToCost),
+                "value" if kind == "transacted" => Some(ConversionOp::ToTransactedCost),
+                _ => None,
+            }
+        })
+        .next_back();
+    if op.is_some() && calc == BalanceCalculation::Gain {
+        return Err(usage_error("--gain cannot be combined with --cost"));
+    }
+    Ok(op)
+}
+
+/// The depth limits of the --depth options: the last overall one, and all
+/// the per-account ones (depthFromRawOpts).
+fn depth_from_raw_opts(raw: &RawOpts) -> Result<DepthSpec, String> {
+    let mut flat = None;
+    let mut regexps = DepthSpec::default();
+    for d in raw.list("depth") {
+        let spec = parse_depth_spec(d).map_err(|e| usage_error(&e))?;
+        if spec.flat.is_some() && spec.regexps.is_empty() {
+            flat = Some(spec);
+        } else {
+            regexps = regexps.combine(spec);
+        }
+    }
+    Ok(flat.unwrap_or_default().combine(regexps))
+}
+
+/// The sort keys of --sort, or by date (getSortSpec).
+fn sort_spec_from_raw_opts(raw: &RawOpts) -> Result<Vec<SortField>, String> {
+    let Some(s) = raw.string("sort") else {
+        return Ok(vec![SortField::Date(false)]);
+    };
+    s.split(',')
+        .map(|t| {
+            let t = crate::text::strip(t);
+            let (negated, key) = match t.strip_prefix('-') {
+                Some(k) => (true, k),
+                None => (false, t),
+            };
+            Ok(match key {
+                "date" => SortField::Date(negated),
+                "desc" | "description" => SortField::Description(negated),
+                "account" => SortField::Account(negated),
+                "amount" => SortField::Amount(negated),
+                "absamount" => SortField::AbsAmount(negated),
+                _ => {
+                    return Err(format!(
+                        "unknown --sort key {t}. Supported keys are: date, desc, account, amount, absamount."
+                    ));
+                }
+            })
+        })
+        .collect()
+}
+
+/// The balance report layout of --layout or --commodity-column (layoutopt).
+fn layout_opt(raw: &RawOpts) -> Result<Layout, String> {
+    if let Some(opt) = raw.string("layout") {
+        let lower = opt.to_lowercase();
+        let (s, n) = lower.split_at(lower.find(',').unwrap_or(lower.len()));
+        let width = match n.get(1..).unwrap_or("") {
+            "" => None,
+            w => Some(
+                w.parse::<usize>()
+                    .map_err(|_| usage_error("width in --layout=wide,WIDTH must be an integer"))?,
+            ),
+        };
+        let names = [
+            ("wide", Layout::Wide(width)),
+            ("tall", Layout::Tall),
+            ("bare", Layout::Bare),
+            ("tidy", Layout::Tidy),
+            ("barewide", Layout::BareWide),
+        ];
+        return names
+            .into_iter()
+            .find(|(name, _)| !s.is_empty() && name.starts_with(s))
+            .map(|(_, l)| l)
+            .ok_or_else(|| {
+                usage_error(
+                    "--layout's argument should be \"wide[,WIDTH]\", \"tall\", \"bare\", \"barewide\", or \"tidy\"",
+                )
+            });
+    }
+    Ok(if raw.bool("commodity-column") {
+        Layout::Bare
+    } else {
+        Layout::Wide(None)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw(pairs: &[(&str, &str)]) -> RawOpts {
+        RawOpts(
+            pairs
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+        )
+    }
+
+    fn day(y: i64, m: u32, d: u32) -> Day {
+        Day::from_ymd(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn options_from_the_command_line() {
+        let today = day(2024, 6, 15);
+        let opts = |pairs: &[(&str, &str)]| ReportOpts::from_raw_opts(today, false, &raw(pairs));
+        let o = opts(&[("begin", "2024"), ("end", "2024-03"), ("monthly", "")]).unwrap();
+        assert_eq!(
+            o.period,
+            Period::PeriodBetween(day(2024, 1, 1), day(2024, 3, 1)).simplify()
+        );
+        assert_eq!(o.interval, Interval::Months(1));
+        let o = opts(&[
+            ("period", "weekly from 2024-01-01"),
+            ("begin", "2024-02-01"),
+        ])
+        .unwrap();
+        assert_eq!(
+            (o.period.start(), o.interval),
+            (Some(day(2024, 2, 1)), Interval::Weeks(1))
+        );
+        let o = opts(&[("cleared", ""), ("pending", ""), ("cleared", "")]).unwrap();
+        assert_eq!(o.statuses, [Status::Pending, Status::Cleared]);
+        let o = opts(&[("cleared", ""), ("pending", ""), ("unmarked", "")]).unwrap();
+        assert!(o.statuses.is_empty());
+        let o = opts(&[("B", ""), ("V", "")]).unwrap();
+        assert_eq!(
+            (o.conversion_op, o.value),
+            (Some(ConversionOp::ToCost), Some(ValuationType::AtEnd(None)))
+        );
+        let o = opts(&[("depth", "3"), ("depth", "1")]).unwrap();
+        assert_eq!(o.depth.flat, Some(1));
+        assert!(
+            opts(&[("value", "x")])
+                .unwrap_err()
+                .ends_with("(use -h to see usage)")
+        );
+        // a bad --layout is reported only by the reports that use it
+        assert!(opts(&[("layout", "20")]).unwrap().layout.is_err());
+        let spec = ReportSpec::new(
+            today,
+            opts(&[("args", "a"), ("args", "date:2024"), ("real", "")]).unwrap(),
+        )
+        .unwrap();
+        assert!(spec.query.is_acct() || matches!(spec.query, Query::And(_)));
+    }
+}
