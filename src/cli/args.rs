@@ -298,9 +298,15 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
                 }
                 (Arity::None | Arity::Opt, None) => flag.default,
                 (_, Some(v)) => v,
-                (Arity::Req, None) => rest
-                    .next()
-                    .ok_or_else(|| format!("--{name} needs a value, none provided"))?,
+                (Arity::Req, None) => {
+                    let v = rest
+                        .next()
+                        .ok_or_else(|| format!("--{name} needs a value, none provided"))?;
+                    if flag.longs.contains(&name) {
+                        check_value_is_not_a_flag(&format!("--{name}"), v)?;
+                    }
+                    v
+                }
             };
             opts.set_all(flag, value)?;
         } else if let Some(shorts) = a.strip_prefix('-').filter(|s| !s.is_empty()) {
@@ -328,6 +334,9 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
                         let v = rest
                             .next()
                             .ok_or_else(|| format!("-{c} needs a value, none provided"))?;
+                        if shorts.len() == c.len_utf8() {
+                            check_value_is_not_a_flag(a, v)?;
+                        }
                         opts.set_all(flag, v)?;
                     }
                 }
@@ -337,6 +346,47 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
         }
     }
     Ok(opts)
+}
+
+/// An error if a required-value flag, written in full, is followed by what
+/// looks like another of hledger's flags instead of its value
+/// (checkReqValFlagArgsHaveValues). --debug is not checked, nor are flags
+/// that need a value in some commands and none in others.
+fn check_value_is_not_a_flag(written: &str, next: &str) -> Result<(), String> {
+    let has_arity =
+        |arity| all_flags().any(|f| f.arity == arity && flag_args(f).any(|x| x == written));
+    let ambiguous = has_arity(Arity::Req) && has_arity(Arity::None);
+    let next_is_flag = next.starts_with("--debug=")
+        || all_flags().any(|f| {
+            flag_args(f).any(|x| {
+                x == next
+                    || (f.arity != Arity::None
+                        && x.starts_with("--")
+                        && next
+                            .strip_prefix(x.as_str())
+                            .is_some_and(|r| r.starts_with('=')))
+            })
+        });
+    if written == "--debug" || ambiguous || !next_is_flag {
+        return Ok(());
+    }
+    Err(format!(
+        "{written} needs a value, but the next argument is another flag: {next}"
+    ))
+}
+
+/// The general flags and every builtin command's flags.
+fn all_flags() -> impl Iterator<Item = &'static Flag> {
+    general_flags().chain(
+        super::commands::BUILTIN_COMMANDS
+            .iter()
+            .flat_map(|m| m.flags.iter()),
+    )
+}
+
+/// A flag's names as written in full: `--NAME`, `-C` (toFlagArg).
+fn flag_args(f: &Flag) -> impl Iterator<Item = String> + '_ {
+    (f.longs.iter().map(|l| format!("--{l}"))).chain(f.shorts.iter().map(|c| format!("-{c}")))
 }
 
 #[cfg(test)]
@@ -387,5 +437,13 @@ mod tests {
             "Ambiguous flag '--ex', could be any of: exchange examples"
         );
         assert_eq!(err(&["-f"]), "-f needs a value, none provided");
+        assert_eq!(
+            err(&["-f", "--pretty"]),
+            "-f needs a value, but the next argument is another flag: --pretty"
+        );
+        assert_eq!(
+            err(&["--file", "--begin=2020"]),
+            "--file needs a value, but the next argument is another flag: --begin=2020"
+        );
     }
 }
