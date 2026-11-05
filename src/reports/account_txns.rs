@@ -46,11 +46,13 @@ impl AccountTransactionsReportItem {
 /// query, the sum of the account's postings before that date (with
 /// --average, their average per transaction). A depth limit is ignored;
 /// cur: and amt: terms select parts of amounts before valuation
-/// (accountTransactionsReportWithStart).
+/// (accountTransactionsReportWithStart). The account query may instead be
+/// the error of finding no account, which is returned only if a posting
+/// needs it to be matched against, as upstream's lazy one would be.
 pub fn account_transactions_report(
     spec: &ReportSpec,
     j: &Journal,
-    thisacctq: &Query,
+    thisacctq: Result<&Query, &str>,
 ) -> Result<(MixedAmount, Vec<AccountTransactionsReportItem>), String> {
     let ropts = &spec.opts;
     let types = |a: &str| j.account_type(a);
@@ -70,10 +72,26 @@ pub fn account_transactions_report(
     let relevantq = (!realq.is_null() || !statusq.is_null())
         .then(|| Query::And(vec![realq, statusq]).simplify());
     let mut aj = j.clone();
-    aj.txns.retain(|t| match &relevantq {
-        None => thisacctq.matches_transaction(t),
-        Some(q) => thisacctq.matches_transaction(&filter_transaction_postings(q, t)),
+    let mut needed = false;
+    aj.txns.retain(|t| {
+        let relevant = match &relevantq {
+            None => t.clone(),
+            Some(q) => filter_transaction_postings(q, t),
+        };
+        match thisacctq {
+            Ok(q) => q.matches_transaction(&relevant),
+            Err(_) => {
+                needed |= !relevant.postings.is_empty();
+                false
+            }
+        }
     });
+    let thisacctq = match thisacctq {
+        Ok(q) => q,
+        Err(e) if needed => return Err(e.to_string()),
+        // no transactions are left to match it
+        Err(_) => &Query::None,
+    };
     if !amtq.is_null() {
         for t in &mut aj.txns {
             t.postings.retain_mut(|p| {
@@ -298,17 +316,17 @@ mod tests {
         };
         // with historical balances, the running balance starts from the postings before the start date
         let historical = spec(BalanceAccumulation::Historical, Query::Date(from_june));
-        let (start, items) = account_transactions_report(&historical, &j, &checking).unwrap();
+        let (start, items) = account_transactions_report(&historical, &j, Ok(&checking)).unwrap();
         assert_eq!(show_mixed_amount(&start), "$1");
         assert_eq!(shown(&items), ["$1", "$2", "$1", "$2"]);
         // otherwise from zero
         let per_period = spec(BalanceAccumulation::PerPeriod, Query::Date(from_june));
-        let (start, items) = account_transactions_report(&per_period, &j, &checking).unwrap();
+        let (start, items) = account_transactions_report(&per_period, &j, Ok(&checking)).unwrap();
         assert_eq!(show_mixed_amount(&start), "0");
         assert_eq!(shown(&items), ["0", "$1", "0", "$1"]);
         // a date2: start date counts too, by secondary date (here the same days)
         let historical2 = spec(BalanceAccumulation::Historical, Query::Date2(from_june));
-        let (start, _) = account_transactions_report(&historical2, &j, &checking).unwrap();
+        let (start, _) = account_transactions_report(&historical2, &j, Ok(&checking)).unwrap();
         assert_eq!(show_mixed_amount(&start), "$1");
     }
 

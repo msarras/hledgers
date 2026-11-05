@@ -99,15 +99,14 @@ pub fn aregister(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             .is_none_or(|h| !matches!(h.to_lowercase().as_str(), "n" | "no" | "never"))
         && (matches!(fmt.as_str(), "txt" | "html")
             || (chart_requested(opts) && !matches!(fmt.as_str(), "csv" | "tsv")));
+    let not_found = format!(
+        "{help}, but {} did not match any account.",
+        crate::text::show_string(apat)
+    );
     let (acct, thisacctq) = match acct {
         Some(a) => (a.as_ref(), Query::Acct(account_name_to_account_regex(a))),
-        None if j.txns.is_empty() && !shows_default_title => ("", Query::None),
-        None => {
-            return Err(format!(
-                "{help}, but {} did not match any account.",
-                crate::text::show_string(apat)
-            ));
-        }
+        None if !shows_default_title => ("", Query::None),
+        None => return Err(not_found),
     };
     let ropts = &opts.spec.opts;
     let ropts2 = ReportOpts {
@@ -122,7 +121,12 @@ pub fn aregister(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         ..ropts.clone()
     };
     let spec = ReportSpec::new(opts.spec.today, ropts2)?;
-    let (_, items) = account_transactions_report(&spec, j, &thisacctq)?;
+    let found = if acct.is_empty() {
+        Err(not_found.as_str())
+    } else {
+        Ok(&thisacctq)
+    };
+    let (_, items) = account_transactions_report(&spec, j, found)?;
     let styles = styles_with_rounding(Rounding::Hard, &j.commodity_styles());
     let mut items: Vec<AccountTransactionsReportItem> = (items.into_iter().rev())
         .filter(|i| spec.opts.empty || !i.amount.looks_zero())
