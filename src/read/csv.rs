@@ -166,8 +166,9 @@ pub fn read_csv_file(iopts: &InputOpts, f: &str, sep: char) -> Result<Journal, S
 /// names, converted by it, as a finalised journal whose balance assertions
 /// are not checked (RulesReader's parse).
 pub fn read_rules_file(iopts: &InputOpts, rules_file: &str) -> Result<Journal, String> {
-    let (j, context) = read_rules_data(iopts, rules_file)?;
-    finalise_csv_journal(iopts, rules_file, j, &context)
+    read_rules_data_with(iopts, rules_file, |j, context| {
+        finalise_csv_journal(iopts, rules_file, j, context)
+    })
 }
 
 /// The data that a rules file's source rule names, converted by it,
@@ -178,11 +179,15 @@ pub fn read_rules_file(iopts: &InputOpts, rules_file: &str) -> Result<Journal, S
 /// pattern starting `./` or `../`, relative to the rules file; with an
 /// absolute one or one starting with `~`, as it is; otherwise in the data
 /// directory (`data/` beside the main file), or if none match there, in
-/// `~/Downloads`. A pattern matching nothing gives no data.
-pub fn read_rules_data(
+/// `~/Downloads`. A pattern matching nothing gives no data. The journal is
+/// then given to `postprocess`; after that, when importing (not a dry run)
+/// with an archive rule, data that was read is archived and its data file
+/// removed.
+pub fn read_rules_data_with(
     iopts: &InputOpts,
     rules_file: &str,
-) -> Result<(Journal, CsvContext), String> {
+    postprocess: impl FnOnce(Journal, &CsvContext) -> Result<Journal, String>,
+) -> Result<Journal, String> {
     let (rules, _) = super::rules::read_rules(rules_file)?;
     let (pattern, command) = match rules.directive("source") {
         None => (None, None),
@@ -218,7 +223,7 @@ pub fn read_rules_data(
             let primary = if anchored {
                 take_directory(rules_file)
             } else {
-                data_dir
+                data_dir.clone()
             };
             let mut found = source_files(&primary, pat)?;
             if found.is_empty() && !anchored && !absolute_or_tilde {
@@ -260,7 +265,110 @@ pub fn read_rules_data(
         _ => String::new(),
     };
     let csv_file = data_file.as_deref().unwrap_or("(cmd)");
-    read_journal_from_csv(iopts, rules_file, &rules, csv_file, &text, None)
+    let (j, context) = read_journal_from_csv(iopts, rules_file, &rules, csv_file, &text, None)?;
+    let j = postprocess(j, &context)?;
+    if !text.is_empty() && iopts.importing && rules.directive("archive").is_some() && !iopts.dry_run
+    {
+        archive_imported_data(&data_dir, rules_file, data_file.as_deref(), &text)?;
+    }
+    Ok(j)
+}
+
+/// Archive data that was imported, in `archive/` in the data directory,
+/// unless the latest archive for this rules file holds the same data;
+/// then remove its data file, if any, so that the next import can move on
+/// to the next one.
+fn archive_imported_data(
+    data_dir: &str,
+    rules_file: &str,
+    data_file: Option<&str>,
+    data: &str,
+) -> Result<(), String> {
+    let archive_dir = path_join(data_dir, "archive");
+    let previous = match latest_archive(&archive_dir, rules_file) {
+        Some(f) => Some(super::read_file_portably(&f)?),
+        None => None,
+    };
+    if previous.as_deref() != Some(data) {
+        save_to_archive(&archive_dir, rules_file, data_file, data)?;
+    }
+    if let Some(f) = data_file {
+        std::fs::remove_file(f)
+            .map_err(|e| format!("{f}: removeLink: {}", super::io_error_text(&e)))?;
+    }
+    Ok(())
+}
+
+/// The data file most recently archived for this rules file, if any: the
+/// archive directory's newest file named after the rules file, not an
+/// `.orig.` original (latestArchive).
+fn latest_archive(archive_dir: &str, rules_file: &str) -> Option<String> {
+    let prefix = format!("{}.", take_base_name(rules_file));
+    let mut archives: Vec<(Option<std::time::SystemTime>, String)> = std::fs::read_dir(archive_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&prefix) && !n.contains(".orig."))
+        .map(|n| {
+            let f = path_join(archive_dir, &n);
+            (std::fs::metadata(&f).and_then(|m| m.modified()).ok(), f)
+        })
+        .collect();
+    archives.sort_by_key(|(t, _)| *t);
+    archives.pop().map(|(_, f)| f)
+}
+
+/// Save imported data in the archive directory, created if need be, as
+/// `RULESNAME.DATE.EXT`: the data file's modification date (UTC) and
+/// extension, or for generated data, today and `.csv` (saveToArchive,
+/// archiveFileName).
+fn save_to_archive(
+    archive_dir: &str,
+    rules_file: &str,
+    data_file: Option<&str>,
+    data: &str,
+) -> Result<(), String> {
+    let io_error =
+        |f: &str, op: &str, e: std::io::Error| format!("{f}: {op}: {}", super::io_error_text(&e));
+    std::fs::create_dir_all(archive_dir)
+        .map_err(|e| io_error(archive_dir, "createDirectory", e))?;
+    let base = take_base_name(rules_file);
+    let name = match data_file {
+        Some(f) => {
+            let modified = std::fs::metadata(f)
+                .and_then(|m| m.modified())
+                .map_err(|e| io_error(f, "getModificationTime", e))?;
+            let secs = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            let day = crate::dates::Day::from_ymd(1970, 1, 1)
+                .expect("a valid date")
+                .add_days(secs.div_euclid(86_400));
+            format!("{base}.{day}{}", take_extension(f))
+        }
+        None => format!("{base}.{}.csv", crate::dates::current_day()),
+    };
+    let path = path_join(archive_dir, &name);
+    eprintln!("archiving {path}");
+    std::fs::write(&path, data).map_err(|e| io_error(&path, "withFile", e))
+}
+
+/// A path's file name without its last extension (takeBaseName).
+fn take_base_name(p: &str) -> &str {
+    let name = p.rsplit('/').next().unwrap_or(p);
+    match name.rfind('.') {
+        Some(i) if i > 0 => &name[..i],
+        _ => name,
+    }
+}
+
+/// A path's last extension with its dot, or nothing (takeExtension).
+fn take_extension(p: &str) -> &str {
+    let name = p.rsplit('/').next().unwrap_or(p);
+    match name.rfind('.') {
+        Some(i) if i > 0 => &name[i..],
+        _ => "",
+    }
 }
 
 /// The files a source rule's pattern matches, its leading `~` expanded and

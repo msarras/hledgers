@@ -672,7 +672,7 @@ impl<'a> JournalParser<'a, '_> {
     fn include_converted_file(&mut self, file: &str, sep: Option<char>) -> R<()> {
         let read = match sep {
             Some(sep) => super::csv::read_included_csv(self.iopts, file, sep),
-            None => super::csv::read_rules_data(self.iopts, file).map(|(j, _)| j),
+            None => super::csv::read_rules_data_with(self.iopts, file, |j, _| Ok(j)),
         };
         let cj = read.map_err(Failure::Included)?;
         let opt_aliases = self

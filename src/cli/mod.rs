@@ -12,7 +12,6 @@ use std::ffi::OsString;
 
 use crate::amount::currency::to_currency_code;
 use crate::cli::commands::compound::compound_balance_command as compound;
-use crate::dates::Day;
 use crate::model::Journal;
 use crate::valuation::{ConversionOp, journal_to_cost};
 use opts::CliOpts;
@@ -62,17 +61,6 @@ fn ensure_debug_flag_has_value(args: Vec<String>) -> Vec<String> {
     out
 }
 
-/// Today's date, in the local time zone.
-fn current_day() -> Day {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    let offset = crate::dates::local_utc_offset_seconds(secs);
-    Day::from_ymd(1970, 1, 1)
-        .expect("a valid date")
-        .add_days((secs + offset).div_euclid(86400))
-}
-
 fn dispatch(prog_args: &[String]) -> Result<(), String> {
     let args = ensure_debug_flag_has_value(replace_numeric_flags(prog_args));
     let cmd = args::command_index(&args);
@@ -103,7 +91,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     let to_file = raw.string("output-file").is_some_and(|f| f != "-");
     let color =
         !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
-    let mut opts = CliOpts::from_raw_opts(raw, current_day(), color)?;
+    let mut opts = CliOpts::from_raw_opts(raw, crate::dates::current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
     if opts.raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
