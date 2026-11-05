@@ -12,22 +12,34 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 4 of 10: the journal reader and writer, valuation, cost
-conversion and the listing commands are complete. `hledgers` reads journal
-files with every directive, include globs, amount expressions, costs, balance
-assertions and assignments, auto postings and periodic transactions; it
-balances and checks entries as hledger 1.99 does and prints the same error
-messages; it converts amounts to cost and values them with declared, inferred
-and commodity alias prices (`-B`, `-V`, `-X`, `--value`,
-`--infer-market-prices`), and pivots account names (`--pivot`). `print`,
-`check`, `files`, `prices`, `rewrite`, `accounts`, `payees`, `codes`, `notes`,
-`descriptions`, `tags`, `commodities`, `stats` and `transactions` work, with
-the general input, report and query options. Of hledger's 2420 functional
-test cases 691 pass byte-identically (565 of them gated: every print, check,
-prices, rewrite, parse-error, assertion, auto-posting, forecast, valuation,
-listing command, stats and query case that needs no later feature). The
-balance and register reports, lots, CSV and the other output formats are the
-later milestones.
+Milestone 5 of 10: the journal reader and writer, valuation, cost
+conversion, the listing commands and the balance reports, with all their
+output formats, are complete. `hledgers` reads journal files with every
+directive, include globs, amount expressions, costs, balance assertions and
+assignments, auto postings and periodic transactions; it balances and checks
+entries as hledger 1.99 does and prints the same error messages; it converts
+amounts to cost and values them with declared, inferred and commodity alias
+prices (`-B`, `-V`, `-X`, `--value`, `--infer-market-prices`), and pivots
+account names (`--pivot`). `print`, `check`, `files`, `prices`, `rewrite`,
+`accounts`, `payees`, `codes`, `notes`, `descriptions`, `tags`,
+`commodities`, `stats`, `transactions`, `balance`, `balancesheet`,
+`balancesheetequity`, `incomestatement` and `cashflow` work, with the general
+input, report and query options. `balance` shows single-column lists and
+trees (with `--format` line formats) and multi-period tables: changes,
+cumulative or historical balances, value changes, gains and counts, with
+totals, averages, percentages, sorting, `--invert`, `--transpose`, the wide,
+tall, bare, barewide and tidy layouts, plain or `--pretty`; with `--budget`,
+it compares the actual changes with the goals of the periodic transactions.
+The four compound commands show their sections (assets and liabilities,
+revenues and expenses, ...) normally positive, each with its totals, and the
+net totals. `print`, `balance` and the compound commands write txt, csv, tsv,
+json, html and fods (`-O`, or `-o FILE` by its extension), html and fods
+with links to hledger-web's register (`--base-url`); `balance` and the
+compound commands draw charts (`--chart[=KIND,SCALE]`, `-O svg`) as text,
+svg, html, or their data as csv, tsv and json. Of hledger's 2420 functional
+test cases 1276 pass byte-identically, all of them gated. Translations, the
+register reports, lots, CSV and the remaining commands are the later
+milestones.
 
 ## Build
 

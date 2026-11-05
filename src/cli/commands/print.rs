@@ -1,19 +1,33 @@
 //! The print command (Hledger.Cli.Commands.Print): transactions shown as
 //! journal entries, or with --export, the whole journal.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::amount::{CommodityStyles, Rounding, styles_with_rounding};
+use crate::amount::render::{AmountFormat, show_amount_b};
+use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
+use crate::cli::anchor::set_account_anchor;
 use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::commands::not_yet;
 use crate::cli::io::with_title;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
+use crate::dates::Day;
 use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
 };
 use crate::reports::entries::{entries_report, entries_report_unsorted};
-use crate::text::is_space;
-use crate::write::journal::{ItemRenderer, PostingLayout, journal_items_as_text, show_transaction};
+use crate::text::{is_space, strip};
+use crate::write::csv::{print_csv, print_tsv};
+use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::html::titled_table_html;
+use crate::write::journal::{
+    ItemRenderer, PostingLayout, journal_items_as_text, show_account_name, show_transaction,
+};
+use crate::write::json::to_json_text;
+use crate::write::spreadsheet::{
+    Cell, CellType, add_header_borders, add_row_span_header, cell_from_amount, integer_cell,
+    raw_table_content,
+};
 
 const NONE: Arity = Arity::None;
 const REQ: Arity = Arity::Req;
@@ -96,11 +110,6 @@ pub const LAYOUT_FLAG: Flag = Flag::new(
     "hledger1|COL",
     "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
 );
-
-/// What a milestone not yet done would provide.
-fn not_yet(what: &str, milestone: &str) -> String {
-    format!("{what} is not supported yet (hledgers milestone {milestone})")
-}
 
 /// Run the print command (print').
 pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
@@ -242,10 +251,150 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             }
             Ok(with_title(opts, out))
         }
+        "csv" | "tsv" => {
+            let txns = style_all(entries_report(&opts.spec, j)?, &styles);
+            let rows = raw_table_content(entries_report_as_spreadsheet(
+                &AmountFormat::MACHINE,
+                None,
+                &[],
+                &txns,
+            ));
+            Ok(if fmt == "csv" {
+                print_csv(&rows)
+            } else {
+                print_tsv(&rows)
+            })
+        }
+        "html" | "fods" => {
+            let txns = style_all(entries_report(&opts.spec, j)?, &styles);
+            let ropts = &opts.spec.opts;
+            let rows = entries_report_as_spreadsheet(
+                &AmountFormat::ONE_LINE_NO_COST,
+                ropts.balance_base_url.as_deref(),
+                &ropts.query_string,
+                &txns,
+            );
+            Ok(if fmt == "html" {
+                titled_table_html("", &rows) + "\n"
+            } else {
+                let tables = BTreeMap::from([("Print".to_string(), ((1, 0), rows))]);
+                print_fods(locale_encoding_name(), &tables)
+            })
+        }
+        "json" => Ok(to_json_text(&style_all(
+            entries_report(&opts.spec, j)?,
+            &styles,
+        ))),
         "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
-        "csv" | "tsv" | "json" | "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
         _ => Err(unsupported_output_format_error(&fmt)),
     }
+}
+
+/// Transactions as a table with a row for each posting amount, its
+/// transaction's fields repeated (merged down) on each, and a heading row
+/// (entriesReportAsSpreadsheet). The transaction index groups the rows
+/// back into transactions. With a base url, account names link to their
+/// registers, restricted to the query.
+pub fn entries_report_as_spreadsheet(
+    fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
+    txns: &[Transaction],
+) -> Vec<Vec<Cell<String>>> {
+    const HEADINGS: [&str; 14] = [
+        "txnidx",
+        "date",
+        "date2",
+        "status",
+        "code",
+        "description",
+        "comment",
+        "account",
+        "amount",
+        "commodity",
+        "debit",
+        "credit",
+        "posting-status",
+        "posting-comment",
+    ];
+    let mut rows = vec![add_header_borders(
+        HEADINGS.iter().map(|h| Cell::header(h)).collect(),
+    )];
+    for t in txns {
+        rows.extend(transaction_to_spreadsheet(fmt, base_url, query, t));
+    }
+    rows
+}
+
+/// A transaction's rows: its postings', each after the transaction's
+/// fields (transactionToSpreadsheet).
+fn transaction_to_spreadsheet(
+    fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
+    t: &Transaction,
+) -> Vec<Vec<Cell<String>>> {
+    let date_cell = |d: Day| Cell {
+        typ: CellType::Date,
+        ..Cell::new(d.to_string())
+    };
+    let common = [
+        integer_cell(t.index),
+        date_cell(t.date),
+        t.date2.map_or_else(Cell::empty, date_cell),
+        Cell::new(t.status.to_string()),
+        Cell::new(t.code.clone()),
+        Cell::new(t.description.clone()),
+        Cell::new(strip(&t.comment).to_string()),
+    ];
+    let postings = (t.postings.iter())
+        .flat_map(|p| posting_to_spreadsheet(fmt, base_url, query, p))
+        .collect();
+    add_row_span_header(&common, postings)
+}
+
+/// A posting's rows, one per amount: the account, the amount without its
+/// commodity, digit group marks or cost, the commodity, the amount again
+/// as a debit or (positive) credit, the status and the comment
+/// (postingToSpreadsheet).
+fn posting_to_spreadsheet(
+    fmt: &AmountFormat,
+    base_url: Option<&str>,
+    query: &[String],
+    p: &Posting,
+) -> Vec<Vec<Cell<String>>> {
+    let amount_cell = |a: Amount| {
+        let text = show_amount_b(&AmountFormat::MACHINE, &a).s;
+        cell_from_amount(fmt, "amount", text, a)
+    };
+    let account = show_account_name(p);
+    let status = p.status.to_string();
+    let comment = strip(&p.comment);
+    (p.amount.amounts().into_iter())
+        .map(|a| {
+            let commodity = a.commodity.to_string();
+            let negative = a.is_negative();
+            let bare = Amount {
+                commodity: Sym::from(""),
+                ..a
+            }
+            .strip_cost();
+            let (debit, credit) = if negative {
+                (Cell::empty(), amount_cell(-&bare))
+            } else {
+                (amount_cell(bare.clone()), Cell::empty())
+            };
+            vec![
+                set_account_anchor(base_url, query, &p.account, Cell::new(account.clone())),
+                amount_cell(bare),
+                Cell::new(commodity),
+                debit,
+                credit,
+                Cell::new(status.clone()),
+                Cell::new(comment.to_string()),
+            ]
+        })
+        .collect()
 }
 
 /// The error for an output format a command doesn't support

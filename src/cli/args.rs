@@ -26,7 +26,13 @@ pub struct Flag {
     pub value_name: &'static str,
     pub help: &'static str,
     pub hidden: bool,
+    /// A check of the flag's value as it is read, whose error is a
+    /// command-line error (a cmdargs flag update function's Left).
+    pub check: Option<FlagCheck>,
 }
+
+/// A check of a flag's value.
+pub type FlagCheck = fn(&str) -> Result<(), String>;
 
 impl Flag {
     /// A flag with these long names and arity, setting the option of its
@@ -46,6 +52,15 @@ impl Flag {
             value_name,
             help,
             hidden: false,
+            check: None,
+        }
+    }
+
+    /// This flag with this check of its value.
+    pub const fn check(self, check: FlagCheck) -> Flag {
+        Flag {
+            check: Some(check),
+            ..self
         }
     }
 
@@ -172,10 +187,14 @@ impl RawOpts {
         self.0.push((name.to_string(), value.to_string()));
     }
 
-    fn set_all(&mut self, flag: &Flag, value: &str) {
+    fn set_all(&mut self, flag: &Flag, value: &str) -> Result<(), String> {
+        if let Some(check) = flag.check {
+            check(value)?;
+        }
         for n in flag.names() {
             self.set(n, value);
         }
+        Ok(())
     }
 }
 
@@ -245,13 +264,13 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
                     .next()
                     .ok_or_else(|| format!("--{name} needs a value, none provided"))?,
             };
-            opts.set_all(flag, value);
+            opts.set_all(flag, value)?;
         } else if let Some(shorts) = a.strip_prefix('-').filter(|s| !s.is_empty()) {
             for (i, c) in shorts.char_indices() {
                 let flag = find_short(mode, c).ok_or_else(|| format!("Unknown flag: -{c}"))?;
                 let joined = &shorts[i + c.len_utf8()..];
                 match flag.arity {
-                    Arity::None => opts.set_all(flag, flag.default),
+                    Arity::None => opts.set_all(flag, flag.default)?,
                     Arity::Opt => {
                         opts.set_all(
                             flag,
@@ -260,18 +279,18 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
                             } else {
                                 joined
                             },
-                        );
+                        )?;
                         break;
                     }
                     Arity::Req if !joined.is_empty() => {
-                        opts.set_all(flag, joined);
+                        opts.set_all(flag, joined)?;
                         break;
                     }
                     Arity::Req => {
                         let v = rest
                             .next()
                             .ok_or_else(|| format!("-{c} needs a value, none provided"))?;
-                        opts.set_all(flag, v);
+                        opts.set_all(flag, v)?;
                     }
                 }
             }

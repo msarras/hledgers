@@ -14,6 +14,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::account::tree::PeriodData;
 use crate::parse::{Alts, PResult, Parser, choice, choice_try, is_non_newline_space, or};
 
 /// A date in the proleptic Gregorian calendar, as the number of days since
@@ -1888,6 +1889,12 @@ impl DayPartition {
         self.bounds.windows(2).map(|w| (w[0], prevday(w[1])))
     }
 
+    /// The periods' end dates by their start dates, both inclusive, and the
+    /// historical period's end (dayPartitionToPeriodData).
+    pub fn to_period_data(&self) -> PeriodData<Day> {
+        PeriodData::from_list(prevday(self.bounds[0]), self.periods())
+    }
+
     /// The periods as exact spans (dayPartitionToDateSpans).
     pub fn to_date_spans(&self) -> Vec<DateSpan> {
         self.bounds
@@ -2757,6 +2764,10 @@ mod tests {
     #[test]
     fn day_partitions() {
         let p = DayPartition::from_boundaries([day(2025, 1, 1), day(2025, 2, 1)]).unwrap();
+        assert_eq!(
+            p.to_period_data(),
+            PeriodData::from_list(day(2024, 12, 31), [(day(2025, 1, 1), day(2025, 1, 31))])
+        );
         assert_eq!(p.find(day(2024, 6, 1)), (None, day(2024, 12, 31)));
         assert_eq!(
             p.periods().collect::<Vec<_>>(),

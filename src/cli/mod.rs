@@ -1,6 +1,8 @@
 //! The command-line interface: argument processing and command dispatch (Hledger.Cli).
 
+pub mod anchor;
 pub mod args;
+pub mod chart;
 pub mod commands;
 pub mod io;
 pub mod opts;
@@ -9,6 +11,7 @@ pub mod version;
 use std::ffi::OsString;
 
 use crate::amount::currency::to_currency_code;
+use crate::cli::commands::compound::compound_balance_command as compound;
 use crate::dates::Day;
 use crate::model::Journal;
 use crate::valuation::{ConversionOp, journal_to_cost};
@@ -100,7 +103,11 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         raw.0
             .insert(0, ("command".to_string(), mode.name.to_string()));
     }
-    let mut opts = CliOpts::from_raw_opts(raw, current_day(), false)?;
+    // colour on stdout, unless writing to a file (useColorOnStdout)
+    let to_file = raw.string("output-file").is_some_and(|f| f != "-");
+    let color =
+        !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
+    let mut opts = CliOpts::from_raw_opts(raw, current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
     if opts.raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
@@ -114,6 +121,11 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
+        "balance" => |o, j| commands::balance::balance(o, &j),
+        "balancesheet" => |o, j| compound(&commands::compound::BALANCESHEET, o, &j),
+        "balancesheetequity" => |o, j| compound(&commands::compound::BALANCESHEETEQUITY, o, &j),
+        "cashflow" => |o, j| compound(&commands::compound::CASHFLOW, o, &j),
+        "incomestatement" => |o, j| compound(&commands::compound::INCOMESTATEMENT, o, &j),
         "codes" => commands::codes::codes,
         "commodities" => |o, j| commands::commodities::commodities(o, &j),
         "descriptions" => commands::descriptions::descriptions,
