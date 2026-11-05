@@ -12,13 +12,16 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 1 of 10: the workspace, the test harness and the benchmark are in
-place, and so is the library's numeric core: decimal numbers, dates,
-amounts and their rendering, text widths and regular expressions, with
-hledger's unit tests for them ported. `hledgers --version` prints
-`hledger 1.99.6 (hledgers 0.1.0)` and `hledgers` with no command prints the
-quick reference card; every command still exits with a "not implemented
-yet" error.
+Milestone 2 of 10: the journal reader and writer are complete. `hledgers`
+reads journal files with every directive, include globs, amount expressions,
+costs, balance assertions and assignments, auto postings and periodic
+transactions; it balances and checks entries as hledger 1.99 does and prints
+the same error messages; `print`, `check` and `files` work, with the general
+input, report and query options. Of hledger's 2420 functional test cases 500
+pass byte-identically (331 of them gated: every print, check, parse-error,
+assertion, auto-posting and forecast case that needs no later feature). The
+other commands, valuation, lots, CSV and the other output formats are the
+later milestones.
 
 ## Build
 
