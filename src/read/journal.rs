@@ -628,11 +628,6 @@ impl<'a> JournalParser<'a, '_> {
                 _ => "journal",
             })
         });
-        if let Some(f @ "timedot") = format {
-            let msg =
-                format!("reading {f} files is not supported yet (hledgers milestone 7): {file}");
-            return Err(Failure::Here(ParseError::fail_at(self.c.src, off, msg)));
-        }
         let sep = match format {
             Some("csv") => Some(','),
             Some("ssv") => Some(';'),
@@ -647,10 +642,14 @@ impl<'a> JournalParser<'a, '_> {
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
         self.j.files.push((file.to_string(), text.clone()));
-        if format == Some("timeclock") {
+        if let Some(f @ ("timeclock" | "timedot")) = format {
             // its transactions, made with the parse state in effect here
-            let txns = super::timeclock::timeclock_transactions(self.iopts, self.st, file, &text)
-                .map_err(|e| match e {
+            let txns = if f == "timeclock" {
+                super::timeclock::timeclock_transactions(self.iopts, self.st, file, &text)
+            } else {
+                super::timedot::timedot_transactions(self.st, file, &text)
+            };
+            let txns = txns.map_err(|e| match e {
                 Failure::Here(e) => Failure::Included(e.pretty(file, &text)),
                 e => e,
             })?;
