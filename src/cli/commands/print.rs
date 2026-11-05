@@ -11,8 +11,8 @@ use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
 };
+use crate::reports::entries::{entries_report, entries_report_unsorted};
 use crate::text::is_space;
-use crate::valuation::ConversionOp;
 use crate::write::journal::{ItemRenderer, PostingLayout, journal_items_as_text, show_transaction};
 
 const NONE: Arity = Arity::None;
@@ -170,7 +170,6 @@ pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
 /// (printEntries).
 fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
-    let ropts = &opts.spec.opts;
     let styles = match round_from_raw_opts(opts)? {
         Some(r) => styles_with_rounding(r, &j.commodity_styles()),
         None => j.commodity_styles(),
@@ -191,7 +190,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     if raw.bool("export") {
         return match fmt.as_str() {
             "journal" => {
-                let j = entries_report_unsorted(opts, j)?;
+                let j = entries_report_unsorted(&opts.spec, j)?;
                 let txns: Vec<Transaction> = j
                     .txns
                     .into_iter()
@@ -224,9 +223,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     }
     match fmt.as_str() {
         "journal" => {
-            let mut txns = entries_report_unsorted(opts, j)?.txns;
-            txns.sort_by_key(|t| ropts.transaction_date(t));
-            let txns: Vec<Transaction> = txns
+            let txns: Vec<Transaction> = entries_report(&opts.spec, j)?
                 .into_iter()
                 .map(|t| maybe_original_amounts(opts, true, t))
                 .collect();
@@ -270,30 +267,6 @@ pub fn unsupported_output_format_error(fmt: &str) -> String {
         ));
     }
     msg
-}
-
-/// The journal with just the transactions the query selects (but not by
-/// depth), in journal order, converted to cost or value as the options say
-/// (to no cost by default), with --invert's signs (entriesReportUnsorted).
-fn entries_report_unsorted(opts: &CliOpts, mut j: Journal) -> Result<Journal, String> {
-    let q = opts.spec.query.clone().filter(|q| !q.is_depth());
-    // account type terms match through the journal's account types (filterJournalTransactions)
-    let txns = std::mem::take(&mut j.txns);
-    j.txns = txns
-        .into_iter()
-        .filter(|t| q.matches_transaction_extra(&|a| j.account_type(a), t))
-        .collect();
-    let mut j = opts
-        .spec
-        .clone()
-        .with_default_conversion_op(ConversionOp::NoConversionOp)
-        .journal_apply_valuation(j)?;
-    if opts.spec.opts.invert {
-        for t in &mut j.txns {
-            t.negate();
-        }
-    }
-    Ok(j)
 }
 
 /// The transaction with its postings shown as written, unless explicit
