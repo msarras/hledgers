@@ -524,6 +524,18 @@ pub fn multi_balance_report_title(ropts: &ReportOpts, report: &MultiBalanceRepor
         (_, Historical) => "Ending balances (historical)",
     };
     let changing_valuation = ropts.balance_calc == ValueChange && ropts.balance_accum != Historical;
+    let default = format!(
+        "{what} in {}{}:",
+        report.span(),
+        valuation_description(ropts, changing_valuation)
+    );
+    ropts.effective_title(&default).to_string()
+}
+
+/// How a report title says amounts are converted or valued: nothing for
+/// end values when the report calculates changing values, which are
+/// period-end values anyway (multiBalanceReportTitle's valuationdesc).
+pub fn valuation_description(ropts: &ReportOpts, changing_valuation: bool) -> String {
     let cost = match ropts.conversion_op {
         Some(ConversionOp::ToCost) => ", converted to cost",
         _ => "",
@@ -536,26 +548,44 @@ pub fn multi_balance_report_title(ropts: &ReportOpts, report: &MultiBalanceRepor
         Some(ValuationType::AtDate(d, _)) => format!(", valued at {d}"),
         None => String::new(),
     };
-    let default = format!("{what} in {}{cost}{value}:", report.span());
-    ropts.effective_title(&default).to_string()
+    format!("{cost}{value}")
 }
 
-/// A multi-period balance report as a table of text: an account name per
-/// row (repeated for each line of its amounts), the period names (and
-/// Total and Average) as column headings, the totals row below a line
-/// unless --no-total; transposed with --transpose, keeping just the leaf
-/// accounts in tree mode (multiBalanceReportAsTable,
-/// multiBalanceReportAsPartTable).
+/// A multi-period balance report as a table of text, the bare-wide
+/// layout's commodity columns being its own (multiBalanceReportAsTable).
 pub fn multi_balance_report_as_table(
     ropts: &ReportOpts,
     layout: Layout,
     report: &MultiBalanceReport,
 ) -> Table<String, String, Wide> {
-    let commodities: Vec<Sym> = (report.rows.iter())
+    let commodities = all_commodities_from_periodic_report(&report.rows);
+    multi_balance_report_as_part_table(ropts, layout, &commodities, report)
+}
+
+/// The commodities of these rows' period amounts, sorted: the bare-wide
+/// layout's commodity columns (allCommoditiesFromPeriodicReport).
+pub fn all_commodities_from_periodic_report<N>(
+    rows: &[PeriodicReportRow<N, MixedAmount>],
+) -> Vec<Sym> {
+    (rows.iter())
         .flat_map(|r| r.amounts.iter().flat_map(MixedAmount::commodities))
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .collect();
+        .collect()
+}
+
+/// A multi-period balance report as a table of text, with these commodity
+/// columns in the bare-wide layout: an account name per row (repeated for
+/// each line of its amounts), the period names (and Total and Average) as
+/// column headings, the totals row below a line unless --no-total;
+/// transposed with --transpose, keeping just the leaf accounts in tree
+/// mode (multiBalanceReportAsPartTable).
+pub fn multi_balance_report_as_part_table(
+    ropts: &ReportOpts,
+    layout: Layout,
+    commodities: &[Sym],
+    report: &MultiBalanceReport,
+) -> Table<String, String, Wide> {
     let mut span_names: Vec<String> = Vec::new();
     if !ropts.summary_only {
         span_names
@@ -590,7 +620,7 @@ pub fn multi_balance_report_as_table(
         if ropts.transpose && tree && !is_leaf(row) {
             continue;
         }
-        let lines = multi_balance_row_as_text(ropts, layout, &commodities, row);
+        let lines = multi_balance_row_as_text(ropts, layout, commodities, row);
         let name = render_balance_acct(ropts, " ", &row.name);
         accounts.extend(std::iter::repeat_n(Header::Leaf(name), lines.len()));
         rows.extend(lines);
@@ -609,7 +639,7 @@ pub fn multi_balance_report_as_table(
         rows,
     };
     if !ropts.no_total {
-        let totals = multi_balance_row_as_text(ropts, layout, &commodities, &report.totals);
+        let totals = multi_balance_row_as_text(ropts, layout, commodities, &report.totals);
         let headers = std::iter::repeat_n(Header::Leaf(String::new()), totals.len().max(1));
         let total_table = Table {
             row_headers: Header::Group(Line::NoLine, headers.collect()),
@@ -633,7 +663,7 @@ pub fn multi_balance_report_as_table(
 /// line (tall), as bare numbers after a commodity column (bare), or a
 /// column per commodity (barewide); a tidy layout has none in text
 /// (multiBalanceRowAsText, multiBalanceRowAsCellBuilders).
-fn multi_balance_row_as_text<N>(
+pub fn multi_balance_row_as_text<N>(
     ropts: &ReportOpts,
     layout: Layout,
     all_commodities: &[Sym],

@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::account::tree::{Account, AccountTree, BalanceData, PeriodData, ROOT};
 use crate::account::{
-    AccountName, DepthSpec, account_leaf_name, account_name_clipped_depth, account_name_drop,
-    account_name_level, clip_or_ellipsify_account_name,
+    AccountName, AccountType, DepthSpec, account_leaf_name, account_name_clipped_depth,
+    account_name_drop, account_name_level, clip_or_ellipsify_account_name,
 };
 use crate::amount::{
     CommodityStyles, MixedAmount, Precision, Rounding, num, per, styles_with_rounding,
@@ -19,7 +19,7 @@ use crate::dates::{
     DateSpan, Day, DayPartition, empty_date_span, maybe_day_partition_to_date_spans, null_date,
 };
 use crate::decimal::Decimal;
-use crate::model::{Journal, PostingRef, Transaction};
+use crate::model::{Journal, Posting, PostingRef, Transaction};
 use crate::query::Query;
 use crate::reports::opts::{
     AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts,
@@ -87,6 +87,22 @@ impl<N, A> PeriodicReportRow<N, A> {
     }
 }
 
+impl<N> PeriodicReportRow<N, MixedAmount> {
+    /// The other row's values added to these, period by period, a period
+    /// only one has keeping its value; this row's name (prrAdd).
+    pub fn plus(mut self, other: &PeriodicReportRow<N, MixedAmount>) -> Self {
+        for (i, b) in other.amounts.iter().enumerate() {
+            match self.amounts.get_mut(i) {
+                Some(a) => *a = &*a + b,
+                None => self.amounts.push(b.clone()),
+            }
+        }
+        self.total = &self.total + &other.total;
+        self.average = &self.average + &other.average;
+        self
+    }
+}
+
 /// A report of rows of values per period, with the periods and a totals
 /// row (PeriodicReport).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,14 +157,20 @@ impl<N, A> PeriodicReport<N, A> {
     }
 }
 
+impl<N, A> PeriodicReport<N, A> {
+    /// Each value transformed, the totals' too (fmap).
+    pub fn map_values(&mut self, mut f: impl FnMut(&A) -> A) {
+        for r in &mut self.rows {
+            r.map_values(&mut f);
+        }
+        self.totals.map_values(f);
+    }
+}
+
 impl<N> PeriodicReport<N, MixedAmount> {
     /// With every amount styled (HasAmounts' styleAmounts).
     pub fn style_amounts(&mut self, styles: &CommodityStyles) {
-        let style = |m: &MixedAmount| m.clone().styled(styles);
-        for r in &mut self.rows {
-            r.map_values(style);
-        }
-        self.totals.map_values(style);
+        self.map_values(|m| m.clone().styled(styles));
     }
 }
 
@@ -161,6 +183,31 @@ pub struct CompoundPeriodicReport<N, A> {
     pub dates: Vec<DateSpan>,
     pub subreports: Vec<(String, PeriodicReport<N, A>, bool)>,
     pub totals: PeriodicReportRow<(), A>,
+}
+
+impl<N> CompoundPeriodicReport<N, MixedAmount> {
+    /// With every amount styled (HasAmounts' styleAmounts).
+    pub fn style_amounts(&mut self, styles: &CommodityStyles) {
+        for (_, r, _) in &mut self.subreports {
+            r.style_amounts(styles);
+        }
+        self.totals.map_values(|m| m.clone().styled(styles));
+    }
+}
+
+/// One section of a compound balance report: its title, the account type
+/// selecting its accounts, whether their balances are normally positive or
+/// negative, and whether it adds to the report's overall totals or
+/// subtracts (CBCSubreportSpec). In every compound command, a section's
+/// option transformation sets its normal sign, and its report
+/// transformation negates the amounts of a normally negative one, so that
+/// they show as positive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubreportSpec {
+    pub title: &'static str,
+    pub account_type: AccountType,
+    pub normal_sign: NormalSign,
+    pub increases_total: bool,
 }
 
 /// A multi-period balance report: balance changes, or accumulated or
@@ -240,6 +287,85 @@ pub fn multi_balance_report_with(
     let postings: Vec<PostingRef> = valued.postings().collect();
     let acct = generate_multi_balance_account(&spec, j, oracle, colspans.as_ref(), &postings)?;
     generate_multi_balance_report(&spec.opts, colspans.as_ref(), acct)
+}
+
+/// A compound balance report: for each section, the multi-period balance
+/// report of the postings its account type selects among those the
+/// report's query matches, with its normal sign and its normally negative
+/// amounts negated; and the overall totals, each section's totals added
+/// or (unless counting, when every count adds) subtracted
+/// (compoundBalanceReport, compoundBalanceReportWith).
+pub fn compound_balance_report(
+    spec: &ReportSpec,
+    j: &Journal,
+    sections: &[SubreportSpec],
+) -> Result<CompoundPeriodicReport<DisplayName, MixedAmount>, String> {
+    let oracle = PriceOracle::new(spec.opts.infer_prices, j);
+    let (span, colspans) = spec.report_span(j);
+    let spec = make_report_query(spec, span);
+    let valued = get_postings(&spec, j, &oracle, span)?;
+    let counting = is_count(spec.opts.balance_calc);
+    let types = |a: &str| j.account_type(a);
+    let mut subreports = Vec::with_capacity(sections.len());
+    for s in sections {
+        let q = Query::Type(vec![s.account_type]);
+        let negative = s.normal_sign == NormalSign::NormallyNegative;
+        let subspec = ReportSpec {
+            opts: ReportOpts {
+                normal_balance: Some(s.normal_sign),
+                ..spec.opts.clone()
+            },
+            query: Query::And(vec![q.clone(), spec.query.clone()]),
+            ..spec.clone()
+        };
+        let matched: Vec<PostingRef> = (valued.postings())
+            .filter(|p| q.matches_posting_extra(&types, *p))
+            .collect();
+        // with --count, a normally negative section counts each posting
+        // as -1, so that its negation shows positive counts
+        let negated: Vec<Posting>;
+        let postings = if counting && negative {
+            negated = (matched.iter())
+                .map(|p| Posting {
+                    amount: -&p.p.amount,
+                    ..p.p.clone()
+                })
+                .collect();
+            (matched.iter().zip(&negated))
+                .map(|(p, n)| PostingRef { t: p.t, p: n })
+                .collect()
+        } else {
+            matched
+        };
+        let acct =
+            generate_multi_balance_account(&subspec, j, &oracle, colspans.as_ref(), &postings)?;
+        let mut report = generate_multi_balance_report(&subspec.opts, colspans.as_ref(), acct)?;
+        if negative {
+            report.map_values(|m| -m);
+        }
+        subreports.push((s.title.to_string(), report, s.increases_total));
+    }
+    let totals = (subreports.iter())
+        .map(|(_, r, increases_total)| {
+            let mut t = r.totals.clone();
+            if !(*increases_total || counting) {
+                t.map_values(|m| -m);
+            }
+            t
+        })
+        .reduce(|a, b| a.plus(&b))
+        .unwrap_or(PeriodicReportRow {
+            name: (),
+            amounts: Vec::new(),
+            total: MixedAmount::null(),
+            average: MixedAmount::null(),
+        });
+    Ok(CompoundPeriodicReport {
+        title: String::new(),
+        dates: maybe_day_partition_to_date_spans(colspans.as_ref()),
+        subreports,
+        totals,
+    })
 }
 
 /// The report spec with the query's dates replaced by the report span's,
@@ -1090,5 +1216,58 @@ mod tests {
         let eur = MixedAmount::from_amount(crate::amount::eur(Decimal::from_i64(1)));
         assert!(perdivide(&usds(1), &eur).is_err());
         assert!(perdivide(&(&usds(1) + &eur), &usds(1)).is_err());
+    }
+    // prrAdd: a period only one row has keeps its value (zipWithPadded).
+    #[test]
+    fn rows_add_padded() {
+        let row = |ns: &[i64]| PeriodicReportRow {
+            name: (),
+            amounts: ns.iter().map(|n| usds(*n)).collect(),
+            total: usds(ns.iter().sum()),
+            average: usds(0),
+        };
+        assert_eq!(row(&[1, 2]).plus(&row(&[10, 20, 30])), row(&[11, 22, 30]));
+    }
+
+    // compoundBalanceReport: a normally negative section's amounts
+    // negated, and the net totals subtracting a section that decreases
+    // them, unless counting.
+    #[test]
+    fn compound_reports() {
+        let j = read("2024-01-01\n    assets  10\n    liabilities  -4\n    equity  -6\n");
+        let sections = [
+            SubreportSpec {
+                title: "Assets",
+                account_type: AccountType::Asset,
+                normal_sign: NormalSign::NormallyPositive,
+                increases_total: true,
+            },
+            SubreportSpec {
+                title: "Liabilities",
+                account_type: AccountType::Liability,
+                normal_sign: NormalSign::NormallyNegative,
+                increases_total: false,
+            },
+        ];
+        let n = |n| MixedAmount::from_amount(crate::amount::num(Decimal::from_i64(n)));
+        let totals = |balance_calc| {
+            let opts = ReportOpts {
+                balance_calc,
+                ..ReportOpts::default()
+            };
+            let r = compound_balance_report(&spec(opts, Query::Any), &j, &sections).unwrap();
+            let sections: Vec<MixedAmount> = (r.subreports.iter())
+                .map(|(_, s, _)| s.totals.total.clone())
+                .collect();
+            (sections, r.totals.total)
+        };
+        assert_eq!(
+            totals(BalanceCalculation::Change),
+            (vec![n(10), n(4)], n(6))
+        );
+        assert_eq!(
+            totals(BalanceCalculation::PostingsCount),
+            (vec![n(1), n(1)], n(2))
+        );
     }
 }

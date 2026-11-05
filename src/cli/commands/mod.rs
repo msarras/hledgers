@@ -5,6 +5,7 @@ pub mod balance;
 pub mod check;
 pub mod codes;
 pub mod commodities;
+pub mod compound;
 pub mod descriptions;
 pub mod files;
 pub mod notes;
@@ -30,9 +31,9 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("add", &[]),
     &command("aregister", &["areg"]),
     &balance::MODE,
-    &command("balancesheetequity", &["bse"]),
-    &command("balancesheet", &["bs"]),
-    &command("cashflow", &["cf"]),
+    &compound::BALANCESHEETEQUITY.mode,
+    &compound::BALANCESHEET.mode,
+    &compound::CASHFLOW.mode,
     &check::MODE,
     &command("close", &["equity"]),
     &codes::MODE,
@@ -44,7 +45,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("help", &[]),
     &command("holdings", &[]),
     &command("import", &[]),
-    &command("incomestatement", &["is"]),
+    &compound::INCOMESTATEMENT.mode,
     &notes::MODE,
     &payees::MODE,
     &prices::MODE,
