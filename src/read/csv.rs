@@ -331,6 +331,16 @@ fn run_command(rules_file: &str, cmd: &str, input: Option<&str>) -> Result<Strin
     Ok(out)
 }
 
+/// An included CSV, SSV or TSV file's records converted by its own rules
+/// file (FILE.rules, whatever `--rules` says), as an unfinalised journal
+/// (CsvReader's rParser).
+pub fn read_included_csv(iopts: &InputOpts, f: &str, sep: char) -> Result<Journal, String> {
+    let rules_file = format!("{f}.rules");
+    let (rules, _) = super::rules::read_rules(&rules_file)?;
+    let text = read_data(f, &rules_file, &rules)?;
+    Ok(read_journal_from_csv(iopts, &rules_file, &rules, f, &text, Some(sep))?.0)
+}
+
 /// The rules file for a CSV file: the one given (`--rules`), or the CSV
 /// file's path with `.rules` added; standard input needs one given
 /// (getRulesFile).
@@ -352,8 +362,7 @@ fn read_data(f: &str, rules_file: &str, rules: &CsvRules) -> Result<String, Stri
             super::read_stdin_portably()
         } else {
             super::read_file_portably(f)
-        }
-        .map_err(super::with_decoding_hint);
+        };
     };
     let bytes = if f == "-" {
         let mut bytes = Vec::new();
