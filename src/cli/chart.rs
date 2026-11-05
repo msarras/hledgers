@@ -652,12 +652,17 @@ pub fn postings_report_as_chart(
             let start = (start_bals.keys())
                 .filter(|a| matches(a))
                 .fold(Decimal::ZERO, |s, a| &s + &start_in(c, a));
+            // scanl (+), adding 0 for others' postings, as that can change
+            // a zero total's decimal places
             let mut total = start;
             (postings.iter())
                 .map(|p| {
-                    if matches(&p.account) {
-                        total = &total + &quantity_in(c, &p.amount);
-                    }
+                    let q = if matches(&p.account) {
+                        quantity_in(c, &p.amount)
+                    } else {
+                        Decimal::ZERO
+                    };
+                    total = &total + &q;
                     Some(total.clone())
                 })
                 .collect()
