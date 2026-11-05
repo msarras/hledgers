@@ -163,7 +163,7 @@ fn double(x: f64) -> Value {
 
 /// The encoding of a constructor with one field, under aeson's default
 /// options: its name as the tag, the field as the contents.
-fn tagged(tag: &str, contents: Value) -> Value {
+pub(crate) fn tagged(tag: &str, contents: Value) -> Value {
     json!({"tag": tag, "contents": contents})
 }
 

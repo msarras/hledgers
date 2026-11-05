@@ -3,7 +3,7 @@
 //! changes or balances, in one column (a Ledger-style list or tree, lines
 //! laid out by a --format line format), or with a report interval, in a
 //! table with a column per period; or a budget report. Text, csv, tsv,
-//! json, html and fods output; charts come later in hledgers milestone 5c.
+//! json, html and fods output, and charts (with --chart, or svg).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,7 +20,10 @@ use crate::cli::anchor::{
     set_account_anchor, set_account_anchor_with, total_date_span_cell, value_param, with_link,
 };
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::not_yet;
+use crate::cli::chart::{
+    balance_report_as_chart, chart_requested, check_chart_arg, check_chart_format,
+    check_chart_width, multi_balance_report_as_chart, render_chart,
+};
 use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::io::{warn_if_large_multi_period_report, with_title};
 use crate::cli::opts::{
@@ -105,7 +108,8 @@ pub const CHART_FLAG: Flag = Flag::new(
     "SCALE",
     "show a chart: instead of the table (txt), above it (html), or as data (csv, tsv, json). SCALE: the amount that fills the chart (eg 1000 or 1000 USD; one per commodity), for comparable charts.",
 )
-.default("auto");
+.default("auto")
+.check(check_chart_arg);
 
 /// The --width flag of commands that can show a chart (chartWidthFlag).
 pub const CHART_WIDTH_FLAG: Flag = Flag::new(
@@ -114,7 +118,8 @@ pub const CHART_WIDTH_FLAG: Flag = Flag::new(
     "N",
     "with --chart: draw the chart N characters wide (default: the terminal width)",
 )
-.short(&['w']);
+.short(&['w'])
+.check(check_chart_width);
 
 /// Run the balance command (balance): a budget report with --budget, a
 /// multi-period report with a report interval, otherwise a single-column
@@ -123,11 +128,11 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let fmt = opts.output_format();
     let ropts0 = &opts.spec.opts;
     let budget = ropts0.balance_calc == BalanceCalculation::Budget;
-    if opts.raw.string("chart").is_some() || fmt == "svg" {
+    if chart_requested(opts) {
         if budget {
             return Err("--chart does not yet support --budget".to_string());
         }
-        return Err(not_yet("balance --chart", "5c"));
+        return balance_chart(opts, j);
     }
     let layout = ropts0.layout.clone()?;
     // a tidy report has no totals
@@ -239,6 +244,50 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
                     balance_report_as_spreadsheet(&one_line, &ropts, layout, &report),
                 ),
             ),
+        })
+    }
+}
+
+/// The balance command's chart (balanceChart): of the multi-period report
+/// with a report interval, otherwise of the single-column one; with html,
+/// above the report's html.
+fn balance_chart(opts: &CliOpts, j: &Journal) -> Result<String, String> {
+    let ropts = &opts.spec.opts;
+    let multiperiod = ropts.interval != Interval::NoInterval;
+    if multiperiod {
+        warn_if_large_multi_period_report(opts, j);
+    }
+    check_chart_format(opts)?;
+    // the layout is needed only for the html
+    let layout = || ropts.layout.clone();
+    let styles = balance_report_styles(ropts, j);
+    let account_type = |a: &str| j.account_type(a);
+    // a chart shows the period values, which --percent must calculate
+    let spec = ReportSpec {
+        opts: ReportOpts {
+            summary_only: false,
+            ..ropts.clone()
+        },
+        ..opts.spec.clone()
+    };
+    let one_line = AmountFormat::ONE_LINE_NO_COST;
+    if multiperiod {
+        let mut report = multi_balance_report(&spec, j)?;
+        report.style_amounts(&styles);
+        let title = multi_balance_report_title(ropts, &report);
+        let chart = multi_balance_report_as_chart(&account_type, ropts, &title, &report);
+        render_chart(opts, chart, || {
+            let (_, rows) = multi_balance_report_as_spreadsheet(ropts, layout()?, &report);
+            Ok(titled_table_html(&title, &rows) + "\n")
+        })
+    } else {
+        let mut report = balance_report(&spec, j)?;
+        report.style_amounts(&styles);
+        let title = ropts.effective_title("");
+        let chart = balance_report_as_chart(&account_type, ropts, title, &report);
+        render_chart(opts, chart, || {
+            let rows = balance_report_as_spreadsheet(&one_line, ropts, layout()?, &report);
+            Ok(titled_table_html(title, &rows) + "\n")
         })
     }
 }

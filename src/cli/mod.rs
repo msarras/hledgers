@@ -2,6 +2,7 @@
 
 pub mod anchor;
 pub mod args;
+pub mod chart;
 pub mod commands;
 pub mod io;
 pub mod opts;

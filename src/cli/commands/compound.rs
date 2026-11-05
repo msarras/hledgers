@@ -3,7 +3,7 @@
 //! and Cashflow): a multi-period balance report in sections (assets and
 //! liabilities, revenues and expenses, ...), each with its own totals, and
 //! the net totals, all amounts normally positive. Text, csv, tsv, json,
-//! html and fods output; charts come later in hledgers milestone 5c.
+//! html and fods output, and charts (with --chart, or svg).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,6 +12,10 @@ use crate::amount::render::AmountFormat;
 use crate::amount::{MixedAmount, Sym};
 use crate::cli::anchor::{LinkOpts, header_date_span_cell};
 use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::chart::{
+    chart_requested, check_chart_arg, check_chart_format, compound_balance_report_as_chart,
+    render_chart,
+};
 use crate::cli::commands::balance::{
     ACCOUNT_CLASS, CHART_WIDTH_FLAG, NBSP, TIDY_COLUMN_LABELS, TOTAL_ROW_HEADING_SPREADSHEET,
     balance_sub_report_as_spreadsheet_parts, multi_balance_report_as_part_table,
@@ -19,7 +23,6 @@ use crate::cli::commands::balance::{
     multi_balance_row_as_text, multi_balance_totals_rows, report_link_opts, report_period_name,
     valuation_description,
 };
-use crate::cli::commands::not_yet;
 use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::io::warn_if_large_multi_period_report;
 use crate::cli::opts::{
@@ -190,7 +193,7 @@ const fn compound_balance_command_flags(historical_default: bool) -> [Flag; 28] 
         output_format_flag("select the output format. Supported formats:\ntxt, html, csv, tsv, json, svg."),
         OUTPUT_FILE_FLAG,
         OUTPUT_VIEW_FLAG,
-        Flag::new(&["chart"], Arity::Opt, "KIND,SCALE", "show a chart: instead of the table (txt), above it (html), or as data (csv, tsv, json). KIND: grouped (sections side by side) or diverging (above and below zero). SCALE: the amount that fills the chart (eg 1000 or 1000 USD; one per commodity), for comparable charts.").default("auto"),
+        Flag::new(&["chart"], Arity::Opt, "KIND,SCALE", "show a chart: instead of the table (txt), above it (html), or as data (csv, tsv, json). KIND: grouped (sections side by side) or diverging (above and below zero). SCALE: the amount that fills the chart (eg 1000 or 1000 USD; one per commodity), for comparable charts.").default("auto").check(check_chart_arg),
         CHART_WIDTH_FLAG,
         Flag::new(&["commodity-column"], NONE, "", "show commodity symbols in a separate column, amounts as bare numbers, one row per commodity").hidden(),
     ]
@@ -206,11 +209,9 @@ pub fn compound_balance_command(
 ) -> Result<String, String> {
     warn_if_large_multi_period_report(opts, j);
     let fmt = opts.output_format();
-    let command = cbc.mode.name;
-    if opts.raw.string("chart").is_some() || fmt == "svg" {
-        return Err(not_yet(&format!("{command} --chart"), "5c"));
-    }
+    let chart = chart_requested(opts);
     match fmt.as_str() {
+        _ if chart => check_chart_format(opts)?,
         "txt" | "csv" | "tsv" | "json" | "html" | "fods" => {}
         f => return Err(unsupported_output_format_error(f)),
     }
@@ -222,9 +223,18 @@ pub fn compound_balance_command(
         all_values_shown: fmt == "json",
         ..ropts.clone()
     };
-    let layout = ropts1.layout.clone()?;
+    // the layout is needed by the report's own output (an invalid one is an
+    // error before the report is made), and by a chart's html
+    let layout = ropts1.layout.clone();
+    if !chart {
+        layout.clone()?;
+    }
     let spec = ReportSpec {
-        opts: ropts1.clone(),
+        opts: ReportOpts {
+            // a chart shows the period values, which --percent must calculate
+            summary_only: ropts1.summary_only && !chart,
+            ..ropts1.clone()
+        },
         ..opts.spec.clone()
     };
     let mut cbr = compound_balance_report(&spec, j, cbc.sections)?;
@@ -232,6 +242,16 @@ pub fn compound_balance_command(
     cbr.title = ropts1.effective_title(&title).to_string();
     apply_subreport_titles(&ropts1, &mut cbr);
     cbr.style_amounts(&balance_report_styles(ropts, j));
+    if chart {
+        let section_types: Vec<Option<AccountType>> =
+            cbc.sections.iter().map(|s| Some(s.account_type)).collect();
+        let account_type = |a: &str| j.account_type(a);
+        let c = compound_balance_report_as_chart(&account_type, &section_types, &ropts1, &cbr);
+        return render_chart(opts, c, || {
+            Ok(compound_balance_report_as_html(&ropts1, layout?, cbc.sections, &cbr) + "\n")
+        });
+    }
+    let layout = layout?;
     Ok(match fmt.as_str() {
         "csv" => print_csv(&compound_balance_report_as_csv(
             &ropts1,
