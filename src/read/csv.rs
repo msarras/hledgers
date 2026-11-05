@@ -830,7 +830,11 @@ pub fn read_journal_from_csv(
     for (field, bad, replacement) in [("description", ';', ".,"), ("code", ')', "]")] {
         let n = groups
             .iter()
-            .filter(|(_, g)| rules.field_value(g, field).is_some_and(|v| v.contains(bad)))
+            .filter(|(_, g)| {
+                rules
+                    .field_value(g, field)
+                    .is_ok_and(|v| v.is_some_and(|v| v.contains(bad)))
+            })
             .count();
         if n > 0 {
             warn(&format!(
@@ -1083,20 +1087,24 @@ impl Converter<'_> {
             pos.1.line,
             &record_as_approximate_text(record),
         );
-        let field = |f: &str| rules.field_value(record, f);
+        let field = |f: &str| {
+            rules
+                .field_value(record, f)
+                .map_err(|e| self.template_error(&errpfx, record, &e))
+        };
         let date_format = rules.directive("date-format");
         let parse_date =
             |s: &str| parse_date_with_format(self.zoned, self.tz_in, self.tz_out, date_format, s);
-        let date_s = field("date").unwrap_or_default();
+        let date_s = field("date")?.unwrap_or_default();
         let date =
             parse_date(&date_s).ok_or_else(|| self.date_error(&errpfx, record, "date", &date_s))?;
-        let date2 = match field("date2") {
+        let date2 = match field("date2")? {
             Some(s) => {
                 Some(parse_date(&s).ok_or_else(|| self.date_error(&errpfx, record, "date2", &s))?)
             }
             None => None,
         };
-        let status = match field("status") {
+        let status = match field("status")? {
             Some(s) => parse_status(&s).map_err(|e| {
                 format!(
                     "{errpfx}could not parse status value \"{s}\" (should be *, ! or empty)\nthe parse error is:      {e}\n"
@@ -1104,22 +1112,23 @@ impl Converter<'_> {
             })?,
             None => Status::Unmarked,
         };
-        let code = field("code").map_or(String::new(), |s| single_line(&s).replace(')', "]"));
+        let code = field("code")?.map_or(String::new(), |s| single_line(&s).replace(')', "]"));
         let description =
-            field("description").map_or(String::new(), |s| single_line(&s).replace(';', ".,"));
-        let comment = field("comment").map_or(String::new(), |s| unescape_newlines(&s));
+            field("description")?.map_or(String::new(), |s| single_line(&s).replace(';', ".,"));
+        let comment = field("comment")?.map_or(String::new(), |s| unescape_newlines(&s));
         let tags = transaction_comment_tags(&comment);
         let p1_virtual =
-            field("account1").is_some_and(|a| account_name_posting_type(&a) == Realness::Virtual);
+            field("account1")?.is_some_and(|a| account_name_posting_type(&a) == Realness::Virtual);
         let mut postings = Vec::new();
         for &n in &self.postings {
             let comment =
-                field(&format!("comment{n}")).map_or(String::new(), |s| unescape_newlines(&s));
+                field(&format!("comment{n}"))?.map_or(String::new(), |s| unescape_newlines(&s));
             let (ptags, pdate) = posting_comment_tags_and_date(&comment);
-            let currency = field(&format!("currency{n}"))
-                .or_else(|| field("currency"))
-                .unwrap_or_default();
-            let account = field(&format!("account{n}")).map(|a| strip(&a).to_string());
+            let currency = match field(&format!("currency{n}"))? {
+                Some(c) => c,
+                None => field("currency")?.unwrap_or_default(),
+            };
+            let account = field(&format!("account{n}"))?.map(|a| strip(&a).to_string());
             if account.as_deref() == Some("") {
                 continue;
             }
@@ -1184,6 +1193,16 @@ impl Converter<'_> {
         Ok(super::balancing::transaction_round_calculated_amounts(t))
     }
 
+    /// The error for a template function that can not make a value: split's
+    /// arguments that are not an amount, weights or a part number.
+    fn template_error(&self, errpfx: &str, record: &[CsvRecord], msg: &str) -> String {
+        format!(
+            "{errpfx}{msg}\n{}\n{}",
+            self.rules.show_record_fields(record),
+            self.rules.show_rules(record)
+        )
+    }
+
     /// The error for a date that can not be parsed (mkdateerror).
     fn date_error(&self, errpfx: &str, record: &[CsvRecord], field: &str, value: &str) -> String {
         let rules = self.rules;
@@ -1233,13 +1252,15 @@ impl Converter<'_> {
         if n == 1 || (n == 2 && !p1_virtual) {
             names.extend(unnumbered.map(String::from));
         }
-        let mut values: Vec<(String, String)> = names
-            .into_iter()
-            .filter_map(|f| {
-                let v = strip(&rules.field_value(record, &f)?).to_string();
-                (!v.is_empty()).then_some((f, v))
-            })
-            .collect();
+        let mut values: Vec<(String, String)> = Vec::new();
+        for f in names {
+            let v = rules
+                .field_value(record, &f)
+                .map_err(|e| self.template_error(errpfx, record, &e))?;
+            if let Some(v) = v.map(|v| strip(&v).to_string()).filter(|v| !v.is_empty()) {
+                values.push((f, v));
+            }
+        }
         if values
             .iter()
             .any(|(f, _)| f.contains(|c: char| c.is_ascii_digit()))
@@ -1310,13 +1331,16 @@ impl Converter<'_> {
         n: usize,
     ) -> Result<Option<crate::amount::Amount>, String> {
         let rules = self.rules;
-        let value = rules
-            .field_value(record, &format!("balance{n}"))
-            .or_else(|| {
-                (n == 1)
-                    .then(|| rules.field_value(record, "balance"))
-                    .flatten()
-            });
+        let field = |f: &str| {
+            rules
+                .field_value(record, f)
+                .map_err(|e| self.template_error(errpfx, record, &e))
+        };
+        let value = match field(&format!("balance{n}"))? {
+            Some(v) => Some(v),
+            None if n == 1 => field("balance")?,
+            None => None,
+        };
         let Some(s) = value.map(|v| strip(&v).to_string()) else {
             return Ok(None);
         };
@@ -1375,23 +1399,12 @@ impl Converter<'_> {
     ) -> Result<Result<crate::amount::Amount, String>, String> {
         let decimal_mark = self.decimal_mark()?;
         let parse = |default: Option<&(Sym, Arc<AmountStyle>)>| {
-            let ctx = AmountCtx {
-                decimal_mark,
-                default_commodity: default,
-                ..AmountCtx::default()
-            };
-            run_parser(text, |c| {
-                if expr {
-                    posting_amountp(c, &ctx, AmountKind::Ordinary)
-                } else {
-                    amountp(c, &ctx, AmountKind::Ordinary)
-                }
-            })
+            parse_csv_amount(text, expr, decimal_mark, default)
         };
         if currency.is_empty() {
             return Ok(parse(None));
         }
-        match self.parse_currency(currency, decimal_mark) {
+        match parse_currency(currency, decimal_mark) {
             Some(default) => Ok(parse(Some(&default))),
             None => match parse(None) {
                 Ok(a) if !a.commodity.is_empty() => Ok(Ok(a)),
@@ -1417,27 +1430,6 @@ impl Converter<'_> {
                 "decimal-mark's argument should be \".\" or \",\" (not \"{s}\")"
             )),
         }
-    }
-
-    /// A currency rule's value as a default commodity and style: an amount
-    /// such as `1 USD` or `USD 1`, or a commodity symbol, placed on the left
-    /// with no space (parseCurrency).
-    fn parse_currency(
-        &self,
-        currency: &str,
-        decimal_mark: Option<char>,
-    ) -> Option<(Sym, Arc<AmountStyle>)> {
-        let as_default = |t: &str| {
-            let ctx = AmountCtx {
-                decimal_mark,
-                ..AmountCtx::default()
-            };
-            match run_parser(t, |c| amountp(c, &ctx, AmountKind::Style)) {
-                Ok(a) if !a.commodity.is_empty() => Some((a.commodity.clone(), a.style.clone())),
-                _ => None,
-            }
-        };
-        as_default(currency).or_else(|| as_default(&format!("{currency}1")))
     }
 
     /// The balance assertion of an expected balance, of the type the
@@ -1470,6 +1462,49 @@ impl Converter<'_> {
 
 /// A parser run on all of a text, its error as megaparsec shows it without
 /// a file name.
+/// A currency rule's value as a default commodity and style: an amount such
+/// as `1 USD` or `USD 1`, or a commodity symbol, placed on the left with no
+/// space (parseCurrency).
+pub fn parse_currency(
+    currency: &str,
+    decimal_mark: Option<char>,
+) -> Option<(Sym, Arc<AmountStyle>)> {
+    let as_default = |t: &str| {
+        let ctx = AmountCtx {
+            decimal_mark,
+            ..AmountCtx::default()
+        };
+        match run_parser(t, |c| amountp(c, &ctx, AmountKind::Style)) {
+            Ok(a) if !a.commodity.is_empty() => Some((a.commodity.clone(), a.style.clone())),
+            _ => None,
+        }
+    };
+    as_default(currency).or_else(|| as_default(&format!("{currency}1")))
+}
+
+/// An amount, or an amount expression, parsed from all of a text with this
+/// decimal mark and this default commodity for an amount without one; or
+/// the parse error as megaparsec shows it (runCsvAmountParser's parse).
+pub fn parse_csv_amount(
+    text: &str,
+    expr: bool,
+    decimal_mark: Option<char>,
+    default: Option<&(Sym, Arc<AmountStyle>)>,
+) -> Result<crate::amount::Amount, String> {
+    let ctx = AmountCtx {
+        decimal_mark,
+        default_commodity: default,
+        ..AmountCtx::default()
+    };
+    run_parser(text, |c| {
+        if expr {
+            posting_amountp(c, &ctx, AmountKind::Ordinary)
+        } else {
+            amountp(c, &ctx, AmountKind::Ordinary)
+        }
+    })
+}
+
 fn run_parser<T>(
     text: &str,
     p: impl FnOnce(&mut Cursor) -> crate::parse::PResult<T>,

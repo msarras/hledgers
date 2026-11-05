@@ -1,0 +1,405 @@
+# * let and split in CSV rules: this repo's extension, not upstream's
+
+# ** 1. Top-level lets feed postings: 30% of a 1000.00 payment is principal and 70%
+# interest, each split equally in two; the transaction balances.
+<
+2024-01-01,payment,1000.00
+RULES
+fields date, description, amount
+let principal %amount * 0.3
+let interest %amount * 0.7
+account1 assets:bank
+amount1 -%amount
+account2 liabilities:loan:alice
+amount2 %{split(principal, 2, 1)}
+account3 liabilities:loan:bob
+amount3 %{split(principal, 2, 2)}
+account4 expenses:interest:alice
+amount4 %{split(interest, 2, 1)}
+account5 expenses:interest:bob
+amount5 %{split(interest, 2, 2)}
+
+$ ./csvtest.sh
+2024-01-01 payment
+    assets:bank                                -1000.00
+    liabilities:loan:alice                       150.00
+    liabilities:loan:bob                         150.00
+    expenses:interest:alice                      350.00
+    expenses:interest:bob                        350.00
+
+>=0
+
+# ** 2. A let assigned in an if block overrides the top-level one for the records it
+# matches (by payee, by date), the last matching block winning.
+<
+2024-01-01,Landlord,100.00
+2024-02-01,Landlord,100.00
+2024-01-15,Grocer,100.00
+RULES
+fields date, description, amount
+let share 50:50
+if %description Grocer
+  let share 25:75
+if %date 2024-02
+  let share 10:90
+account1 assets:bank
+amount1 -%amount
+account2 expenses:alice
+amount2 %{split(%amount, share, 1)}
+account3 expenses:bob
+amount3 %{split(%amount, share, 2)}
+
+$ ./csvtest.sh
+2024-01-01 Landlord
+    assets:bank                                 -100.00
+    expenses:alice                                50.00
+    expenses:bob                                  50.00
+
+2024-01-15 Grocer
+    assets:bank                                 -100.00
+    expenses:alice                                25.00
+    expenses:bob                                  75.00
+
+2024-02-01 Landlord
+    assets:bank                                 -100.00
+    expenses:alice                                10.00
+    expenses:bob                                  90.00
+
+>=0
+
+# ** 3. A let can refer to another let, to hledger fields such as description, and
+# in an if block to its match groups.
+<
+2024-01-01,Coffee,3.50
+2024-01-02,Rent March,500
+RULES
+fields date, description, amt
+let who %{description} shop
+let memo paid at %{who}
+if %description Rent (.*)
+  let memo rent for \1
+account1 assets:cash
+amount1 -%amt
+account2 expenses:misc
+comment2 %{memo}
+
+$ ./csvtest.sh
+2024-01-01 Coffee
+    assets:cash                                   -3.50
+    expenses:misc                                     ; paid at Coffee shop
+
+2024-01-02 Rent March
+    assets:cash                                 -500
+    expenses:misc                                     ; rent for March
+
+>=0
+
+# ** 4. split(%amount, 3, I) splits exactly: the parts add up to the amount, the
+# unit left over going to the last part; a negative amount's parts are negative.
+<
+2024-01-01,a,100.00
+2024-01-02,b,-100.00
+RULES
+fields date, description, amount
+account1 x
+amount1 %{split(%amount, 3, 1)}
+account2 y
+amount2 %{split(%amount, 3, 2)}
+account3 z
+amount3 %{split(%amount, 3, 3)}
+account4 total
+amount4 %{negate(%amount)}
+
+$ ./csvtest.sh
+2024-01-01 a
+    x                                             33.33
+    y                                             33.33
+    z                                             33.34
+    total                                       -100.00
+
+2024-01-02 b
+    x                                            -33.33
+    y                                            -33.33
+    z                                            -33.34
+    total                                        100.00
+
+>=0
+
+# ** 5. Weights "30:70" (or "0.3:0.7") split 333.33 into 100.00 and 233.33: the
+# unit lost in rounding goes to the part that lost most (30% is 99.999).
+<
+2024-01-01,loan,333.33
+RULES
+fields date, description, amount
+let principal %amount
+account1 a
+amount1 %{split(principal, "30:70", 1)}
+account2 b
+amount2 %{split(principal, "0.3:0.7", 2)}
+account3 c
+amount3 -%amount
+
+$ ./csvtest.sh
+2024-01-01 loan
+    a                                            100.00
+    b                                            233.33
+    c                                           -333.33
+
+>=0
+
+# ** 6. split reads the amount with the currency rule, and writes the parts with its
+# commodity and no digit group marks.
+<
+2024-01-01,big,"1,234.56"
+RULES
+fields date, description, amount
+currency $
+account1 a
+amount1 %{split(%amount, 2, 1)}
+account2 b
+amount2 %{split(%amount, 2, 2)}
+account3 c
+amount3 %{negate(%amount)}
+
+$ ./csvtest.sh
+2024-01-01 big
+    a                                           $617.28
+    b                                           $617.28
+    c                                        $-1,234.56
+
+>=0
+
+# ** 7. A let whose value is an amount expression is substituted in parentheses, so
+# %{sum} * 2 doubles the sum, where %a + %b * 2 doubles only %b.
+<
+2024-01-01,x,10,5
+RULES
+fields date, description, a, b
+let sum %a + %b
+account1 x
+amount1 %{sum} * 2
+account2 y
+amount2 %a + %b * 2
+account3 z
+
+$ ./csvtest.sh
+2024-01-01 x
+    x                                             30
+    y                                             20
+    z
+
+>=0
+
+# ** 8. An ifs table can assign a let in a let:NAME column.
+<
+2024-01-01,Rent,100
+2024-01-02,Shop,100
+2024-01-03,Other,100
+RULES
+fields date, description, amt
+let rate 1
+if,let:rate
+%description Rent,0.5
+%description Shop,0.25
+
+account1 x
+amount1 %amt * %{rate}
+account2 y
+
+$ ./csvtest.sh
+2024-01-01 Rent
+    x                                             50
+    y
+
+2024-01-02 Shop
+    x                                             25
+    y
+
+2024-01-03 Other
+    x                                            100
+    y
+
+>=0
+
+# ** 9. The mortgage example: each payment's interest is given, the rest is principal;
+# both are split between two owners, principal equally, interest 30:70.
+<
+date,description,payment,interest
+2024-01-01,mortgage,1000.00,333.33
+2024-02-01,mortgage,1000.00,330.01
+RULES
+skip 1
+fields date, description, payment, interest
+let interest %interest
+let principal %payment - %interest
+account1 assets:checking
+amount1 -%payment
+account2 liabilities:mortgage:alice
+amount2 %{split(principal, 2, 1)}
+account3 liabilities:mortgage:bob
+amount3 %{split(principal, 2, 2)}
+account4 expenses:interest:alice
+amount4 %{split(interest, "30:70", 1)}
+account5 expenses:interest:bob
+amount5 %{split(interest, "30:70", 2)}
+
+$ ./csvtest.sh
+2024-01-01 mortgage
+    assets:checking                            -1000.00
+    liabilities:mortgage:alice                   333.33
+    liabilities:mortgage:bob                     333.34
+    expenses:interest:alice                      100.00
+    expenses:interest:bob                        233.33
+
+2024-02-01 mortgage
+    assets:checking                            -1000.00
+    liabilities:mortgage:alice                   334.99
+    liabilities:mortgage:bob                     335.00
+    expenses:interest:alice                       99.00
+    expenses:interest:bob                        231.01
+
+>=0
+
+# ** 10. An unknown name is an error, which mentions lets when the rules have some.
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+let fee 1
+account1 a
+amount1 %{fees}
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules:4:11:
+  |
+4 | amount1 %{fees}
+  |           ^
+unknown hledger field or let name "fees". To refer to a CSV field, write %fees. The hledger fields are: date, date2, status, code, description, comment, amount, balance, currency, and commentN, accountN, amountN, balanceN, currencyN (N = 1-99)
+>=1
+
+# ** 11. A part number out of range is an error: when written, in the rules ...
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+account1 a
+amount1 %{split(%amount, 2, 3)}
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules:3:11:
+  |
+3 | amount1 %{split(%amount, 2, 3)}
+  |           ^
+split's part number should be between 1 and 2
+>=1
+
+# ** 12. ... and otherwise, for the record.
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+let parts 2
+account1 a
+amount1 %{split(%amount, parts, 3)}
+
+$ ./csvtest.sh
+>2 /hledger: Error: .*input:1:
+1 \| 2024-01-01,x,1
+
+split's part number should be between 1 and 2
+record: 2024-01-01,x,1
+  %1 date         2024-01-01
+  %2 description  x
+  %3 amount       1
+hledger field assignment rules:
+  account1:    a                             \(input\.rules:3\)
+  amount1:     %\{split\(%amount, parts, 3\)\}   \(input\.rules:4\)
+/
+>=1
+
+# ** 13. Bad weights, and a first argument that is not an amount, are errors.
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+account1 a
+amount1 %{split(%amount, "30:x", 1)}
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules:3:11:
+  |
+3 | amount1 %{split(%amount, "30:x", 1)}
+  |           ^
+split's weights should be a positive count or a list like "30:70"
+>=1
+
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+account1 a
+amount1 %{split(%description, 2, 1)}
+
+$ ./csvtest.sh
+>2 /^split's first argument "x" is not an amount$/
+>=1
+
+# ** 14. A let may not be named like a hledger field or a template function.
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+let amount2 5
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules:2:5:
+  |
+2 | let amount2 5
+  |     ^
+let name "amount2" is a hledger field; choose another name
+>=1
+
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+let split 5
+
+$ ./csvtest.sh
+>2 /let name "split" is a template function; choose another name/
+>=1
+
+# ** 15. Lets and hledger fields whose values depend on each other in a loop are an
+# error (a let's own name gives its previous value, which is not a loop).
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+let total %{amount1}
+account1 a
+amount1 %{total}
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules:4:1:
+  |
+4 | amount1 %{total}
+  | ^
+these hledger fields' values depend on each other in a loop: amount1, let:total
+>=1
+
+# ** 16. split is among the template functions an unknown function's error lists.
+<
+2024-01-01,x,1
+RULES
+fields date, description, amount
+account1 a
+amount1 %{splt(%amount, 2, 1)}
+
+$ ./csvtest.sh
+>2 /unknown function "splt" \(known functions: upper, lower, capitalize, capitalise, trim, negate, abs, concat, join, default, replace, substr, split\)/
+>=1
