@@ -525,13 +525,17 @@ pub fn journal_items_as_text(
             blocks.push(Block::Txn((r.transaction)(t)));
         }
     }
-    // merge adjacent groups of lines, and drop breaks
+    // merge adjacent groups of lines; a break keeps them apart, and is dropped
     let mut merged: Vec<Block> = Vec::new();
+    let mut after_break = false;
     for b in blocks {
         match (merged.last_mut(), b) {
-            (_, Block::Break) => {}
-            (Some(Block::Lines(a)), Block::Lines(b)) => a.push_str(&b),
-            (_, b) => merged.push(b),
+            (_, Block::Break) => after_break = true,
+            (Some(Block::Lines(a)), Block::Lines(b)) if !after_break => a.push_str(&b),
+            (_, b) => {
+                merged.push(b);
+                after_break = false;
+            }
         }
     }
     // each block is followed by a blank line, except final comment or directive lines
