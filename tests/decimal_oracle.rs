@@ -163,9 +163,8 @@ fn decimal_matches_exact_rationals() {
         let (ra, rb) = (ratio(&a), ratio(&b));
         let ctx = || format!("case {case}: a = {a}, b = {b}");
 
-        // Sums and differences: exact, at the larger places (roundMax), a
-        // zero operand's places counting too.
-        let places = a.places().max(b.places());
+        // Sums and differences: exact, at the larger places, except that a
+        // zero operand gives the other one unchanged.
         let sum = &a + &b;
         assert_eq!(
             cmp(&ratio(&sum), &add(&ra, &rb)),
@@ -173,6 +172,11 @@ fn decimal_matches_exact_rationals() {
             "{}",
             ctx()
         );
+        let places = match (a.is_zero(), b.is_zero()) {
+            (true, _) => b.places(),
+            (false, true) => a.places(),
+            _ => a.places().max(b.places()),
+        };
         assert_eq!(sum.places(), places, "{}", ctx());
         let difference = &a - &b;
         assert_eq!(
@@ -181,6 +185,11 @@ fn decimal_matches_exact_rationals() {
             "{}",
             ctx()
         );
+        let places = match (a.is_zero(), b.is_zero()) {
+            (true, _) => b.places(),
+            (false, true) => a.places(),
+            _ => a.places().max(b.places()),
+        };
         assert_eq!(difference.places(), places, "{}", ctx());
 
         // Products: exact (at most 60 places here), normalized.
