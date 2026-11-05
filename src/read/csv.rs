@@ -353,22 +353,17 @@ fn save_to_archive(
     std::fs::write(&path, data).map_err(|e| io_error(&path, "withFile", e))
 }
 
-/// A path's file name without its last extension (takeBaseName).
+/// A path's file name without its last extension, which starts at its
+/// last dot, even a leading one (takeBaseName).
 fn take_base_name(p: &str) -> &str {
     let name = p.rsplit('/').next().unwrap_or(p);
-    match name.rfind('.') {
-        Some(i) if i > 0 => &name[..i],
-        _ => name,
-    }
+    name.rfind('.').map_or(name, |i| &name[..i])
 }
 
 /// A path's last extension with its dot, or nothing (takeExtension).
 fn take_extension(p: &str) -> &str {
     let name = p.rsplit('/').next().unwrap_or(p);
-    match name.rfind('.') {
-        Some(i) if i > 0 => &name[i..],
-        _ => "",
-    }
+    name.rfind('.').map_or("", |i| &name[i..])
 }
 
 /// The files a source rule's pattern matches, its leading `~` expanded and
@@ -1635,5 +1630,19 @@ mod tests {
         assert_eq!(decode(enc("utf_32"), b"\x00\x00\x00a").unwrap(), "a");
         assert!(encoding_from_name("cp437").unwrap().is_err());
         assert!(encoding_from_name("nosuch").is_none());
+    }
+
+    // as filepath's takeBaseName and takeExtension
+    #[test]
+    fn base_names_and_extensions() {
+        for (p, base, ext) in [
+            ("rules/bank.rules", "bank", ".rules"),
+            ("data/x.tar.gz", "x.tar", ".gz"),
+            ("data/noext", "noext", ""),
+            ("data/.csv", "", ".csv"),
+            ("/a.b/c", "c", ""),
+        ] {
+            assert_eq!((take_base_name(p), take_extension(p)), (base, ext), "{p}");
+        }
     }
 }
