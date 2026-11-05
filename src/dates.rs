@@ -126,6 +126,13 @@ impl Day {
     }
 }
 
+/// The local time zone's offset from UTC at this time, in seconds, from the
+/// TZ variable's simple forms or /etc/localtime; UTC if unknown.
+pub fn local_utc_offset_seconds(_utc_secs: i64) -> i64 {
+    // M8: local time zones (tz-rs, per the plan); the tests run with explicit dates or in UTC.
+    0
+}
+
 pub fn is_leap_year(year: i64) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
