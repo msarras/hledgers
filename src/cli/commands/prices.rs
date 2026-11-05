@@ -2,7 +2,7 @@
 //! directives: declared, inferred from costs, reversed, or given by
 //! commodity aliases; or a summary of the declared ones per commodity.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::amount::currency::to_currency_code;
 use crate::amount::{Amount, DEFAULT_MAX_DISPLAY_PRECISION, Sym};
@@ -207,7 +207,7 @@ fn reverse_price_directive(pd: &PriceDirective) -> Option<PriceDirective> {
 /// declared prices, first and last price dates, the period between them,
 /// and the share of its weekdays having a price (pricesSummary).
 fn prices_summary(j: &Journal, q: &Query, pds: &[&PriceDirective]) -> String {
-    let base = journal_base_currency_code(j);
+    let base = j.base_currency_code();
     let symq = q.clone().filter(Query::is_cur);
     let used = j.commodities_used();
     let codes: BTreeSet<&str> = used
@@ -301,33 +301,4 @@ fn compact_duration(n: i64) -> String {
             format!("{y}y {mo}mo")
         }
     }
-}
-
-/// The ISO 4217 code of the journal's most likely base currency: the most
-/// frequent one among the P directives' price commodities, or else among
-/// the posting and cost amounts' commodities, the first seen winning ties;
-/// USD if there are none (journalBaseCurrencyCode).
-fn journal_base_currency_code(j: &Journal) -> String {
-    fn most_frequent<'a>(codes: impl Iterator<Item = &'a str>) -> Option<String> {
-        let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
-        for (i, c) in codes.enumerate() {
-            stats.entry(c).or_insert((0, i)).0 -= 1;
-        }
-        stats
-            .into_iter()
-            .min_by_key(|(_, s)| *s)
-            .map(|(c, _)| c.to_string())
-    }
-    most_frequent(
-        j.price_directives
-            .iter()
-            .map(|pd| to_currency_code(&pd.amount.commodity)),
-    )
-    .or_else(|| {
-        most_frequent(
-            j.posting_and_cost_amounts()
-                .map(|a| to_currency_code(&a.commodity)),
-        )
-    })
-    .unwrap_or_else(|| "USD".to_string())
 }

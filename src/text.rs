@@ -223,6 +223,87 @@ pub fn strip_quotes(s: &str) -> &str {
     }
 }
 
+/// A number with this many decimal places, as Haskell's printf `%.Nf`
+/// shows a Double or Float: its shortest decimal digits, rounded half to
+/// even (showFFloat, roundTo). Rust's `{:.N}` rounds the exact binary
+/// value instead, so 0.35 gives 0.3 there but 0.4 here.
+pub fn show_ffloat<F: Into<f64> + std::fmt::LowerExp + Copy>(decimals: usize, x: F) -> String {
+    let sign = if x.into() < 0.0 { "-" } else { "" };
+    // the shortest digits (of an f32 or f64), and e such that
+    // |x| = 0.DIGITS * 10^e (floatToDigits)
+    let sci = format!("{x:e}");
+    let sci = sci.trim_start_matches('-');
+    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci, "0"));
+    let mut is: Vec<u8> = mantissa
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .map(|b| b - b'0')
+        .collect();
+    let mut e = exp.parse::<isize>().unwrap_or(0) + 1;
+    if is == [0] {
+        e = 0;
+    }
+    // is rounded to d digits, and whether that carried into a new digit
+    fn round_to(d: usize, is: &[u8]) -> (usize, Vec<u8>) {
+        fn f(n: usize, even: bool, is: &[u8]) -> (u8, Vec<u8>) {
+            match (n, is.split_first()) {
+                (_, None) => (0, vec![0; n]),
+                (0, Some((&x, rest))) => {
+                    let up = x > 5 || x == 5 && !(even && rest.iter().all(|&r| r == 0));
+                    (u8::from(up), vec![])
+                }
+                (_, Some((&i, rest))) => {
+                    let (c, mut ds) = f(n - 1, i % 2 == 0, rest);
+                    let i1 = c + i;
+                    if i1 == 10 {
+                        ds.insert(0, 0);
+                        (1, ds)
+                    } else {
+                        ds.insert(0, i1);
+                        (0, ds)
+                    }
+                }
+            }
+        }
+        match f(d, true, is) {
+            (0, ds) => (0, ds),
+            (_, mut ds) => {
+                ds.insert(0, 1);
+                (1, ds)
+            }
+        }
+    }
+    let digits = |ds: &[u8]| ds.iter().map(|d| char::from(b'0' + d)).collect::<String>();
+    let out = if e >= 0 {
+        let (ei, ds) = round_to(decimals + e as usize, &is);
+        let (ls, rs) = ds.split_at((e as usize + ei).min(ds.len()));
+        let ls = if ls.is_empty() {
+            "0".to_string()
+        } else {
+            digits(ls)
+        };
+        if rs.is_empty() {
+            ls
+        } else {
+            format!("{ls}.{}", digits(rs))
+        }
+    } else {
+        let mut padded = vec![0; e.unsigned_abs()];
+        padded.append(&mut is);
+        let (ei, mut ds) = round_to(decimals, &padded);
+        if ei == 0 {
+            ds.insert(0, 0);
+        }
+        let (d, rest) = ds.split_at(1);
+        if rest.is_empty() {
+            digits(d)
+        } else {
+            format!("{}.{}", digits(d), digits(rest))
+        }
+    };
+    format!("{sign}{out}")
+}
+
 /// Text as Haskell shows a string, in double quotes with escapes: `\"`,
 /// `\\`, `\n` and the like for control characters, and decimal codes for
 /// characters beyond ASCII, `\&` separating a code from a following digit
@@ -304,6 +385,44 @@ pub fn words_quoted(s: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Values and results from GHC 9.10's Text.Printf.
+    #[test]
+    fn ffloat_as_printf() {
+        for (d, x, s) in [
+            (1, 0.25, "0.2"),
+            (1, 0.35, "0.4"),
+            (1, 0.05, "0.0"),
+            (1, 0.45, "0.4"),
+            (1, 2.5, "2.5"),
+            (0, 0.5, "0"),
+            (0, 2.5, "2"),
+            (2, 1.005, "1.00"),
+            (1, 0.0, "0.0"),
+            (1, 9.96, "10.0"),
+            (1, 0.96, "1.0"),
+            (1, 0.04, "0.0"),
+            (1, 1.0 / 3.0, "0.3"),
+            (1, 2.0 / 3.0, "0.7"),
+            (1, 100.0, "100.0"),
+            (1, 1e-5, "0.0"),
+            (1, -0.35, "-0.4"),
+            (2, 0.125, "0.12"),
+            (2, 0.375, "0.38"),
+            (0, 1.5, "2"),
+            (1, 0.15, "0.2"),
+            (1, 1234567.25, "1234567.2"),
+            (1, 0.95, "1.0"),
+            (1, 5.0 / 30.0, "0.2"),
+            (2, 1.0 / 7.0, "0.14"),
+        ] {
+            assert_eq!(show_ffloat(d, x), s, "{d} {x}");
+        }
+        // a Float's own shortest digits: 0.35f32 is 0.3499999940 as a Double
+        assert_eq!(show_ffloat(1, 0.35f32), "0.4");
+        assert_eq!(show_ffloat(1, f64::from(0.35f32)), "0.3");
+        assert_eq!(show_ffloat(2, 0.125f32), "0.12");
+    }
 
     #[test]
     fn display_widths() {

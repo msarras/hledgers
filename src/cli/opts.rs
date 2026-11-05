@@ -149,6 +149,66 @@ pub const OUTPUT_VIEW_FLAG: Flag = Flag::new(
     "write output to FILE, or to view.FMT in hledger's cache directory, and open it in the system's default viewer for its format (eg a web browser for html). The default format is html.",
 );
 
+/// The list/tree mode flags (flattreeflags), with extra help about
+/// subaccount amounts for reports that show amounts.
+pub const fn flat_flag(amount_help: bool) -> Flag {
+    let help = if amount_help {
+        "list/tree mode: show accounts as a flat list (default). Amounts exclude subaccount amounts, except where the account is depth-clipped."
+    } else {
+        "list/tree mode: show accounts as a flat list (default)"
+    };
+    Flag::new(&["flat"], NONE, "", help).short(&['l'])
+}
+
+/// See [`flat_flag`].
+pub const fn tree_flag(amount_help: bool) -> Flag {
+    let help = if amount_help {
+        "list/tree mode: show accounts as a tree. Amounts include subaccount amounts."
+    } else {
+        "list/tree mode: show accounts as a tree"
+    };
+    Flag::new(&["tree"], NONE, "", help).short(&['t'])
+}
+
+/// Which of the things a journal can declare (accounts, commodities,
+/// payees, tags) a listing command shows, when not all of them
+/// (DeclarablesSelector).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Declarables {
+    Used,
+    Declared,
+    /// Used but not declared.
+    Undeclared,
+    /// Declared but not used.
+    Unused,
+    /// The first one the first argument matches (`--find`).
+    FindFirst,
+}
+
+/// The first of these items that the first argument, as a
+/// case-insensitive regular expression, matches part of, for `--find`;
+/// `itemtype` names the items in the errors (findMatchedByArgument).
+pub fn find_matched_by_argument<'a>(
+    raw: &RawOpts,
+    itemtype: &str,
+    items: impl IntoIterator<Item = &'a str>,
+) -> Result<&'a str, String> {
+    let Some(arg) = raw.args().next() else {
+        return Err(format!(
+            "With --find, please provide a {itemtype} name or\n\
+             {itemtype} pattern (case-insensitive, infix, regexp) as first command argument."
+        ));
+    };
+    let re = crate::regex::to_regex_ci(arg).ok();
+    re.and_then(|re| items.into_iter().find(|i| re.is_match(i)))
+        .ok_or_else(|| {
+            format!(
+                "{} did not match any {itemtype}.",
+                crate::text::show_string(arg)
+            )
+        })
+}
+
 /// Yes, no, or decide automatically (YNA).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Yna {
@@ -173,6 +233,9 @@ pub struct CliOpts {
     pub no_new_accounts: bool,
     pub width: Option<String>,
     pub available_width: usize,
+    /// When the program started, nearly: when its options were made
+    /// (progstarttime_).
+    pub start_time: std::time::Instant,
 }
 
 impl CliOpts {
@@ -218,8 +281,30 @@ impl CliOpts {
             no_new_accounts: raw.bool("no-new-accounts"),
             width: raw.string("width").map(str::to_string),
             available_width: 80,
+            start_time: std::time::Instant::now(),
             raw,
         })
+    }
+
+    /// The one of --used, --declared, --undeclared, --unused and --find
+    /// given, if any (declarablesSelectorFromOpts).
+    pub fn declarables(&self) -> Result<Option<Declarables>, String> {
+        let flags = [
+            ("used", Declarables::Used),
+            ("declared", Declarables::Declared),
+            ("undeclared", Declarables::Undeclared),
+            ("unused", Declarables::Unused),
+            ("find", Declarables::FindFirst),
+        ];
+        let mut given = flags.into_iter().filter(|(f, _)| self.raw.bool(f));
+        match (given.next(), given.next()) {
+            (None, _) => Ok(None),
+            (Some((_, d)), None) => Ok(Some(d)),
+            _ => Err(
+                "please pick at most one of --used, --declared, --undeclared, --unused, --find"
+                    .to_string(),
+            ),
+        }
     }
 
     /// The journal files to read: those given with -f, made absolute (but

@@ -1,4 +1,5 @@
-//! A command's output (writeOutputLazyText and withTitle in
+//! A command's output, and a warning before a large one
+//! (writeOutputLazyText, withTitle and warnIfLargeMultiPeriodReport in
 //! Hledger.Cli.Utils).
 
 use std::io::Write;
@@ -32,5 +33,38 @@ pub fn with_title(opts: &CliOpts, body: String) -> String {
         body
     } else {
         format!("{title}\n\n{body}")
+    }
+}
+
+/// These items one per line, after the report's title if any: the output
+/// of the commands listing names (T.unlines and writeOutputWithTitle).
+pub fn lines_with_title<S: AsRef<str>>(
+    opts: &CliOpts,
+    items: impl IntoIterator<Item = S>,
+) -> String {
+    let mut out = String::new();
+    for i in items {
+        out.push_str(i.as_ref());
+        out.push('\n');
+    }
+    with_title(opts, out)
+}
+
+/// Warn if the report has a report interval and more than 10000 periods,
+/// which might be a mistyped date (warnIfLargeMultiPeriodReport).
+pub fn warn_if_large_multi_period_report(opts: &CliOpts, j: &crate::model::Journal) {
+    if opts.spec.opts.interval == crate::dates::Interval::NoInterval {
+        return;
+    }
+    let (span, periods) = opts.spec.report_span(j);
+    let n = periods.map_or(0, |p| p.periods().count());
+    if n > 10000 {
+        crate::console::warn(
+            &opts.input.prog_args,
+            &format!(
+                "this report has {n} periods ({span}), and may use a lot of memory.\n\
+                 If not intended, press control-C now, and check for a mistyped date, or narrow the report."
+            ),
+        );
     }
 }

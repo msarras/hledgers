@@ -11,7 +11,7 @@
 //! The run fails if a parse fails, a case matched by tests/shelltest-gate.txt
 //! fails, an unsupported case is missing from tests/shelltest-unsupported.txt, or
 //! that list or the gate list has an entry that matches nothing.
-//! HLEDGERS_TEST_FILTER=GLOB selects files; HLEDGERS_TEST_VERBOSE=1 shows every
+//! HLEDGERS_TEST_FILTER=GLOB selects files; HLEDGERS_TEST_VERBOSE=1 lists every passing case and shows every
 //! failure's details, not just gated ones; HLEDGERS_TEST_BIN=PATH runs another binary.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -169,6 +169,9 @@ pub fn main() -> ExitCode {
                 Outcome::Pass => {
                     p += 1;
                     gated_passed += usize::from(in_gate);
+                    if verbose {
+                        let _ = writeln!(out, "PASS {id}");
+                    }
                 }
                 Outcome::Fail(details) => {
                     x += 1;

@@ -113,11 +113,20 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         return io::write_output(&opts, &commands::quickref::render());
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
+        "accounts" => |o, j| commands::accounts::accounts(o, &j),
+        "codes" => commands::codes::codes,
+        "commodities" => |o, j| commands::commodities::commodities(o, &j),
+        "descriptions" => commands::descriptions::descriptions,
+        "notes" => commands::notes::notes,
+        "payees" => |o, j| commands::payees::payees(o, &j),
         "print" => commands::print::print,
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,
+        "stats" => commands::stats::stats,
+        "tags" => commands::tags::tags,
+        "transactions" => commands::transactions::transactions,
         name => return Err(format!("the {name} command is not implemented yet")),
     };
     let j = with_journal(&opts)?;
