@@ -34,3 +34,17 @@ pub fn with_title(opts: &CliOpts, body: String) -> String {
         format!("{title}\n\n{body}")
     }
 }
+
+/// These items one per line, after the report's title if any: the output
+/// of the commands listing names (T.unlines and writeOutputWithTitle).
+pub fn lines_with_title<S: AsRef<str>>(
+    opts: &CliOpts,
+    items: impl IntoIterator<Item = S>,
+) -> String {
+    let mut out = String::new();
+    for i in items {
+        out.push_str(i.as_ref());
+        out.push('\n');
+    }
+    with_title(opts, out)
+}

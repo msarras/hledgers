@@ -113,6 +113,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         return io::write_output(&opts, &commands::quickref::render());
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
+        "accounts" => |o, j| commands::accounts::accounts(o, &j),
         "print" => commands::print::print,
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),

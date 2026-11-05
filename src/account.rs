@@ -281,6 +281,68 @@ pub fn expand_account_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec
     set.into_iter().collect()
 }
 
+/// The budget report's top-level account for unbudgeted amounts
+/// (unbudgetedAccountName).
+pub const UNBUDGETED_ACCOUNT_NAME: &str = "<unbudgeted>";
+
+/// The account name without its first `n` components, or `...` if that
+/// leaves none; under the `<unbudgeted>` top-level account, the components
+/// after it are dropped instead (accountNameDrop).
+pub fn account_name_drop(n: usize, a: &str) -> String {
+    if a == UNBUDGETED_ACCOUNT_NAME {
+        return a.to_string();
+    }
+    if let Some(rest) = a
+        .strip_prefix(UNBUDGETED_ACCOUNT_NAME)
+        .and_then(|r| r.strip_prefix(ACCT_SEP))
+    {
+        return match account_name_drop(n, rest) {
+            d if d.is_empty() => UNBUDGETED_ACCOUNT_NAME.to_string(),
+            d => format!("{UNBUDGETED_ACCOUNT_NAME}{ACCT_SEP}{d}"),
+        };
+    }
+    let rest: Vec<&str> = a.split(ACCT_SEP).skip(n).collect();
+    if rest.is_empty() {
+        "...".to_string()
+    } else {
+        rest.join(":")
+    }
+}
+
+/// These account names without duplicates, in tree order: each after its
+/// parent, siblings in the order of their account directives, then the
+/// undeclared ones by name; with `keep_parents`, their missing parents are
+/// added (sortAccountNamesByDeclaration).
+pub fn sort_account_names_by_declaration<'a>(
+    j: &crate::model::Journal,
+    keep_parents: bool,
+    names: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    let mut order: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (a, info) in &j.declared_accounts {
+        order.entry(a).or_insert(info.order);
+    }
+    let names: std::collections::BTreeSet<&str> = if keep_parents {
+        names.into_iter().flat_map(expand_account_name).collect()
+    } else {
+        names.into_iter().collect()
+    };
+    // the path from the top: each level's declaration order and name
+    let key = |a: &'a str| -> Vec<(usize, &'a str)> {
+        expand_account_name(a)
+            .map(|p| {
+                (
+                    order.get(p).copied().unwrap_or(usize::MAX),
+                    account_leaf_name(p),
+                )
+            })
+            .collect()
+    };
+    let mut sorted: Vec<&str> = names.into_iter().collect();
+    sorted.sort_by_cached_key(|a| key(a));
+    sorted
+}
+
 /// Whether the first name is a proper prefix of the second, ending at a
 /// component boundary (isAccountNamePrefixOf).
 pub fn is_account_name_prefix_of(prefix: &str, a: &str) -> bool {
@@ -554,6 +616,16 @@ pub fn elide_account_name(width: usize, s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drop_components() {
+        assert_eq!(account_name_drop(1, "a:b:c"), "b:c");
+        assert_eq!(account_name_drop(0, "a:b"), "a:b");
+        assert_eq!(account_name_drop(2, "a:b"), "...");
+        assert_eq!(account_name_drop(1, "<unbudgeted>"), "<unbudgeted>");
+        assert_eq!(account_name_drop(1, "<unbudgeted>:a:b"), "<unbudgeted>:b");
+        assert_eq!(account_name_drop(2, "<unbudgeted>:a"), "<unbudgeted>:...");
+    }
 
     // tests_AccountName "expandAccountNames".
     #[test]
