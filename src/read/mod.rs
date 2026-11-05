@@ -227,6 +227,37 @@ pub fn read_journal_files_and_latest_dates(
     Ok((j, latest))
 }
 
+/// Like [`read_journal_files`], but a first file that does not exist is an
+/// empty journal of that name, for the commands that write to it
+/// (readPossibleJournalFiles). The journals are combined without
+/// preferring the later files' commodity declarations.
+pub fn read_possible_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal, String> {
+    let Some((first, rest)) = files.split_first() else {
+        return Ok(Journal::default());
+    };
+    let deferred = InputOpts {
+        defer: true,
+        ..iopts.clone()
+    };
+    let f = journal::split_reader_prefix(first).1;
+    let mut j = if f == "-" || file_exists(f) {
+        read_journal_file(&deferred, first)?
+    } else {
+        Journal {
+            files: vec![(f.to_string(), String::new())],
+            ..Journal::default()
+        }
+    };
+    for f in rest {
+        j = finalise::journal_concat(j, read_journal_file(&deferred, f)?);
+    }
+    finalise::journal_number_and_tie_transactions(&mut j);
+    if iopts.strict {
+        checks::journal_strict_checks(&j)?;
+    }
+    Ok(j)
+}
+
 /// Read and finalise one journal file (readJournalFile), and with --new,
 /// unless deferred, save its latest dates.
 pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, String> {
