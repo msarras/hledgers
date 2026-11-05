@@ -12,6 +12,7 @@ pub mod finalise;
 pub mod journal;
 pub mod modifiers;
 pub mod rules;
+pub mod timeclock;
 
 use crate::amount::CommodityStyles;
 use crate::dates::{DateSpan, Day};
@@ -222,7 +223,7 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         .or(iopts.format.as_deref())
         .unwrap_or_else(|| format_from_extension(f));
     let read = match format {
-        "journal" => None,
+        "journal" | "timeclock" => None,
         "csv" => Some(csv::read_csv_file(iopts, f, ',')),
         "ssv" => Some(csv::read_csv_file(iopts, f, ';')),
         "tsv" => Some(csv::read_csv_file(iopts, f, '\t')),
@@ -242,6 +243,9 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         read_file_portably(f)
     }
     .map_err(with_decoding_hint)?;
+    if format == "timeclock" {
+        return timeclock::read_timeclock(iopts, f, &text);
+    }
     let (j, st) = journal::parse_journal(iopts, f, &text)?;
     finalise::journal_finalise(iopts, f, &text, j, st)
 }
