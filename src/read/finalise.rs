@@ -3,8 +3,8 @@
 //! order that infers missing information, checks it, and adds derived data.
 //!
 //! The parser keeps every list in file order, so upstream's journalReverse
-//! has nothing to do here. The stages of milestone 2c (and the lot stages of
-//! milestone 6) are present, returning the journal unchanged until then.
+//! has nothing to do here. The lot stages of milestone 6 are present,
+//! returning the journal unchanged until then.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
