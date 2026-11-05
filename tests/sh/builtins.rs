@@ -35,6 +35,7 @@ pub fn validate(name: &str, args: &[String]) -> Result<(), String> {
         "chmod" => chmod_opts(args).map(drop),
         "test" => test_path(args).map(drop),
         "mktemp" => mktemp_opts(args).map(drop),
+        "ls" => ls_operand(args).map(drop),
         _ => Err(format!("command `{name}`")),
     }
 }
@@ -268,9 +269,61 @@ pub fn run(sh: &mut Shell, name: &str, args: &[String], io: &Io) -> R<i32> {
                 }
             }
         }
+        "ls" => {
+            let operand = ls_operand(args).unwrap();
+            let path = sh.path(operand.unwrap_or("."));
+            match fs::metadata(&path) {
+                Err(e) => {
+                    let name = operand.unwrap_or(".");
+                    io.err.write(
+                        format!("ls: cannot access '{name}': {}\n", os_error(&e)).as_bytes(),
+                    );
+                    2
+                }
+                Ok(m) if !m.is_dir() => {
+                    io.out
+                        .write(format!("{}\n", operand.unwrap_or(".")).as_bytes());
+                    0
+                }
+                Ok(_) => match fs::read_dir(&path) {
+                    Err(e) => {
+                        let name = operand.unwrap_or(".");
+                        io.err.write(
+                            format!("ls: cannot open directory '{name}': {}\n", os_error(&e))
+                                .as_bytes(),
+                        );
+                        2
+                    }
+                    Ok(entries) => {
+                        let mut names: Vec<Vec<u8>> = entries
+                            .flatten()
+                            .map(|e| e.file_name().into_encoded_bytes())
+                            .filter(|n| !n.starts_with(b"."))
+                            .collect();
+                        names.sort();
+                        for n in names {
+                            io.out.write(&n);
+                            io.out.write(b"\n");
+                        }
+                        0
+                    }
+                },
+            }
+        }
         _ => unreachable!("validated above"),
     };
     Ok(status)
+}
+
+/// `ls [DIR]`: the names in a directory (the current one by default), except
+/// hidden ones, one per line in byte order, as GNU ls writes them to a pipe
+/// under LC_COLLATE=C; a file operand is listed as itself.
+fn ls_operand(args: &[String]) -> Result<Option<&str>, String> {
+    match operands("ls", args)?[..] {
+        [] => Ok(None),
+        [d] => Ok(Some(d)),
+        _ => Err("ls with several operands".to_string()),
+    }
 }
 
 /// Print a tool's error message for a failed file operation; returns the status.
