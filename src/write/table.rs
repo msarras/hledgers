@@ -157,7 +157,7 @@ impl Cell {
         let lines = if s.is_empty() {
             vec![Wide::new("")]
         } else {
-            s.lines().map(Wide::new).collect()
+            s.split_terminator('\n').map(Wide::new).collect()
         };
         Cell { align, lines }
     }

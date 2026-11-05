@@ -16,6 +16,7 @@ use crate::valuation::{
     ConversionOp, PriceOracle, ValuationType, journal_to_cost, mixed_amount_apply_gain,
     mixed_amount_apply_valuation, mixed_amount_gain_at_date, mixed_amount_value_at_date,
 };
+use crate::write::string_format::{StringFormat, parse_string_format};
 
 /// What to calculate in each balance report cell (BalanceCalculation).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -104,8 +105,8 @@ pub struct ReportOpts {
     pub empty: bool,
     pub full_names: bool,
     pub real: bool,
-    /// The `--format` string, parsed by the reports that use it (M5).
-    pub format: Option<String>,
+    /// The line format of `--format`, or the balance report's default.
+    pub format: StringFormat,
     pub balance_base_url: Option<String>,
     pub pretty: bool,
     /// The query arguments.
@@ -155,7 +156,7 @@ impl Default for ReportOpts {
             empty: false,
             full_names: false,
             real: false,
-            format: None,
+            format: StringFormat::default(),
             balance_base_url: None,
             pretty: false,
             query_string: Vec::new(),
@@ -199,6 +200,11 @@ impl ReportOpts {
     /// Report options from the parsed command line, today's date, and
     /// whether stdout gets colour (rawOptsToReportOpts).
     pub fn from_raw_opts(today: Day, color: bool, raw: &RawOpts) -> Result<ReportOpts, String> {
+        let format = match raw.string("format") {
+            None => StringFormat::default(),
+            Some(f) => parse_string_format(f)
+                .map_err(|e| usage_error(&format!("could not parse format option: {e}")))?,
+        };
         let pretty = match raw.string("pretty") {
             None => false,
             Some("always" | "yes" | "y") => true,
@@ -219,7 +225,7 @@ impl ReportOpts {
             empty: raw.bool("empty"),
             full_names: raw.bool("full-names"),
             real: raw.bool("real"),
-            format: raw.string("format").map(str::to_string),
+            format,
             balance_base_url: raw.string("base-url").map(str::to_string),
             query_string: raw.args().map(str::to_string).collect(),
             average: raw.bool("average"),

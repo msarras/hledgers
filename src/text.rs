@@ -131,6 +131,27 @@ pub fn fit_text(
     t
 }
 
+/// Each line of the text clipped to at most `max` characters, then padded
+/// with spaces to at least `min` characters, on the right if `left` is set,
+/// otherwise on the left (formatText). Characters are counted, not their
+/// widths.
+pub fn format_text(left: bool, min: Option<usize>, max: Option<usize>, s: &str) -> String {
+    let lines: Vec<&str> = if s.is_empty() {
+        vec![""]
+    } else {
+        s.split_terminator('\n').collect()
+    };
+    let fit = |l: &str| {
+        let clipped: String = match max {
+            Some(m) => l.chars().take(m).collect(),
+            None => l.to_string(),
+        };
+        let pad = " ".repeat(min.unwrap_or(0).saturating_sub(clipped.chars().count()));
+        if left { clipped + &pad } else { pad + &clipped }
+    };
+    lines.into_iter().map(fit).collect::<Vec<_>>().join("\n")
+}
+
 /// Shorten text longer than `width` characters to `width`, ending with `..`
 /// (elideRight).
 pub fn elide_right(width: isize, s: &str) -> String {
