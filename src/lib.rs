@@ -3,6 +3,7 @@
 pub mod account;
 pub mod amount;
 pub mod cli;
+pub mod console;
 pub mod dates;
 pub mod decimal;
 pub mod model;

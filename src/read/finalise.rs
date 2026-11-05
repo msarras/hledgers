@@ -473,7 +473,7 @@ fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) {
         .map(|pt| super::modifiers::periodic_transaction_dates(pt, span).count())
         .sum();
     if n > MAX_EXPECTED_FORECAST_TXNS {
-        crate::cli::io::warn(
+        crate::console::warn(
             &iopts.prog_args,
             &format!(
                 "--forecast would generate {n} transactions (forecast period {span}),\n\

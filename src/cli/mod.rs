@@ -22,7 +22,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> i32 {
     match dispatch(&args) {
         Ok(()) => 0,
         Err(msg) => {
-            io::print_error(&progname, io::color_option(&args), &msg);
+            crate::console::print_error(&progname, crate::console::color_option(&args), &msg);
             1
         }
     }
