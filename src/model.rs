@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::account::{AccountName, AccountType, Realness};
+use crate::amount::currency::to_currency_code;
 use crate::amount::{Amount, AmountStyle, CommodityStyles, MixedAmount, Sym};
 use crate::dates::{DateSpan, Day, Interval};
 use crate::decimal::Decimal;
@@ -835,6 +836,36 @@ impl Journal {
         let mut cs: BTreeSet<Sym> = self.declared_commodities.keys().cloned().collect();
         cs.extend(self.commodities_used());
         cs
+    }
+
+    /// The guessed base currency: among the P directives' price
+    /// commodities, or else the posting and cost amounts' commodities, the
+    /// first with the most frequent ISO 4217 code (the first seen winning
+    /// ties), and that code (journalBaseCurrency).
+    pub fn base_currency(&self) -> Option<(&str, &str)> {
+        fn pick(syms: Vec<&str>) -> Option<(&str, &str)> {
+            let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
+            for (i, s) in syms.iter().enumerate() {
+                stats.entry(to_currency_code(s)).or_insert((0, i)).0 -= 1;
+            }
+            let code = stats.into_iter().min_by_key(|(_, s)| *s)?.0;
+            let sym = syms.into_iter().find(|s| to_currency_code(s) == code)?;
+            Some((sym, code))
+        }
+        let price_targets = self.price_directives.iter().map(|pd| &*pd.amount.commodity);
+        pick(price_targets.collect()).or_else(|| {
+            pick(
+                self.posting_and_cost_amounts()
+                    .map(|a| &*a.commodity)
+                    .collect(),
+            )
+        })
+    }
+
+    /// The ISO 4217 code of the guessed base currency, or USD
+    /// (journalBaseCurrencyCode).
+    pub fn base_currency_code(&self) -> &str {
+        self.base_currency().map_or("USD", |(_, c)| c)
     }
 
     /// Replace the postings' account names with their values of a field or
