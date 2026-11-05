@@ -12,16 +12,19 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 2 of 10: the journal reader and writer are complete. `hledgers`
-reads journal files with every directive, include globs, amount expressions,
-costs, balance assertions and assignments, auto postings and periodic
-transactions; it balances and checks entries as hledger 1.99 does and prints
-the same error messages; `print`, `check` and `files` work, with the general
-input, report and query options. Of hledger's 2420 functional test cases 500
-pass byte-identically (331 of them gated: every print, check, parse-error,
-assertion, auto-posting and forecast case that needs no later feature). The
-other commands, valuation, lots, CSV and the other output formats are the
-later milestones.
+Milestone 3 of 10: the journal reader and writer, valuation and cost
+conversion are complete. `hledgers` reads journal files with every directive,
+include globs, amount expressions, costs, balance assertions and assignments,
+auto postings and periodic transactions; it balances and checks entries as
+hledger 1.99 does and prints the same error messages; it converts amounts to
+cost and values them with declared, inferred and commodity alias prices (`-B`,
+`-V`, `-X`, `--value`, `--infer-market-prices`), and pivots account names
+(`--pivot`). `print`, `check`, `files`, `prices` and `rewrite` work, with the
+general input, report and query options. Of hledger's 2420 functional test
+cases 567 pass byte-identically (401 of them gated: every print, check,
+prices, rewrite, parse-error, assertion, auto-posting, forecast and valuation
+case that needs no later feature). The other commands, lots, CSV and the other
+output formats are the later milestones.
 
 ## Build
 
