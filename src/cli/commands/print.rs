@@ -277,7 +277,12 @@ pub fn unsupported_output_format_error(fmt: &str) -> String {
 /// (to no cost by default), with --invert's signs (entriesReportUnsorted).
 fn entries_report_unsorted(opts: &CliOpts, mut j: Journal) -> Result<Journal, String> {
     let q = opts.spec.query.clone().filter(|q| !q.is_depth());
-    j.txns.retain(|t| q.matches_transaction(t));
+    // account type terms match through the journal's account types (filterJournalTransactions)
+    let txns = std::mem::take(&mut j.txns);
+    j.txns = txns
+        .into_iter()
+        .filter(|t| q.matches_transaction_extra(&|a| j.account_type(a), t))
+        .collect();
     let mut j = opts
         .spec
         .clone()

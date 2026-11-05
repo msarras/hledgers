@@ -51,3 +51,4 @@ check-ordereddates.test
 check-payees.test
 check-tags.test
 check-uniqueleafnames.test
+query-type.test:5-6
