@@ -450,12 +450,19 @@ impl AccountTree<BalanceData> {
 
     /// With every account's balances including subaccounts recalculated:
     /// its own balance plus its subaccounts', period by period
-    /// (sumAccounts).
+    /// (sumAccounts). The subaccounts are added from the last to the first,
+    /// each on the left of the sum so far, as foldMap nests them: with
+    /// Data.Decimal's zero shortcut, the places of a sum that passes through
+    /// zero depend on the order (1,000.50 + (-1,000.50 + 1) is 1.00;
+    /// (1,000.50 + -1,000.50) + 1 is 1), and a merged amount keeps the
+    /// left operand's cost.
     pub fn sum(&mut self) {
         for i in (0..self.accounts.len()).rev() {
             let mut subtotals = PeriodData::default();
-            for &s in &self.accounts[i].subs {
-                subtotals.add(&self.accounts[s].data);
+            for &s in self.accounts[i].subs.iter().rev() {
+                let mut sub = self.accounts[s].data.clone();
+                sub.add(&subtotals);
+                subtotals = sub;
             }
             let this = std::mem::take(&mut self.accounts[i].data);
             self.accounts[i].data = subtotals.merge(
@@ -537,6 +544,17 @@ mod tests {
             AccountTree::from_names("root", PeriodData::default(), [], |_| PeriodData::default());
         assert_eq!(t, empty);
         assert!(t.accounts.iter().all(|a| a.data.periods.is_empty()));
+    }
+
+    // The subaccounts' balances are summed from the last, as foldMap nests
+    // them, which decides the places of a sum passing through zero.
+    #[test]
+    fn account_tree_sums_from_the_last_subaccount() {
+        let m = |s: &str| MixedAmount::from_amount(usd(s.parse().unwrap()));
+        let (a, b, c) = (m("1000.50"), m("-1000.50"), m("1"));
+        let t = AccountTree::from_postings([(None, "a", &a), (None, "b", &b), (None, "c", &c)]);
+        assert_eq!(t.root().data.pre.incl, m("1.00"));
+        assert_eq!(t.root().data.pre.incl.amounts()[0].quantity.places(), 2);
     }
 
     #[test]
