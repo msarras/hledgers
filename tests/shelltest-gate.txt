@@ -67,7 +67,7 @@ journal/infer-cost.test:1
 journal/infer-costbasis.test:1-2
 journal/infer-imbalance.test:1-2,5-7,9-10,13
 journal/lots-acquire-entries.test:1-2
-journal/lots-acquire.test:2-3,16,20,29-30
+journal/lots-acquire.test:2-3,16,29-30
 journal/lots-clopen.test:2,7
 journal/lots-dispose-entries.test:15-16
 journal/lots-dispose.test:11,20-22,32,67,69
