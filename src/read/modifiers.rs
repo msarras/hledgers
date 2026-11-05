@@ -4,32 +4,48 @@
 //! (Hledger.Data.PeriodicTransaction), which generate transactions when
 //! forecasting.
 
-use crate::amount::Amount;
+use crate::amount::{Amount, CommodityStyles};
 use crate::dates::{DateSpan, Day, split_span_to_date_spans};
 use crate::model::{
     GENERATED_POSTING_TAG, GENERATED_TRANSACTION_TAG, Journal, MODIFIED_TRANSACTION_TAG,
-    PeriodicTransaction, Posting, PostingRef, TmPostingRule, Transaction, comment_add_tag,
-    comment_join,
+    PeriodicTransaction, Posting, PostingRef, TmPostingRule, Transaction, TransactionModifier,
+    comment_add_tag, comment_join,
 };
 use crate::query::{Query, parse_query};
 
-/// Apply the journal's auto posting rules to its transactions
-/// (journalModifyTransactions, modifyTransactions): each rule in turn, so a
-/// later rule sees the postings an earlier one added. A transaction that
-/// gets postings is tagged as modified (visibly too, with `verbose_tags`).
-/// Relative dates in the rules' queries are relative to `today`.
+/// Apply the journal's auto posting rules to its transactions, the
+/// generated postings styled with the journal's commodity styles
+/// (journalModifyTransactions).
 pub fn journal_modify_transactions(
     verbose_tags: bool,
     today: Day,
     mut j: Journal,
 ) -> Result<Journal, String> {
-    let rules = j
-        .txn_modifiers
+    let styles = j.commodity_styles();
+    let txns = std::mem::take(&mut j.txns);
+    j.txns = modify_transactions(&j, &j.txn_modifiers, &styles, today, verbose_tags, txns)?;
+    Ok(j)
+}
+
+/// Apply auto posting rules to transactions (modifyTransactions): each
+/// rule in turn, so a later rule sees the postings an earlier one added,
+/// and its postings follow the matched posting, before any added by
+/// earlier rules. Generated postings get these styles, and the journal's
+/// tags for their accounts; a transaction that gets postings is tagged as
+/// modified (visibly too, with `verbose_tags`). Relative dates in the
+/// rules' queries are relative to `today`.
+pub fn modify_transactions(
+    j: &Journal,
+    modifiers: &[TransactionModifier],
+    styles: &CommodityStyles,
+    today: Day,
+    verbose_tags: bool,
+    mut txns: Vec<Transaction>,
+) -> Result<Vec<Transaction>, String> {
+    let rules = modifiers
         .iter()
         .map(|tm| Ok((parse_query(today, &tm.query)?.0.simplify(), tm)))
         .collect::<Result<Vec<_>, String>>()?;
-    let styles = j.commodity_styles();
-    let mut txns = std::mem::take(&mut j.txns);
     for t in &mut txns {
         let mut modified = false;
         for (q, tm) in &rules {
@@ -41,7 +57,7 @@ pub fn journal_modify_transactions(
                 }
                 for rule in &tm.rules {
                     let mut new = tm_posting_rule_posting(verbose_tags, q, &tm.query, rule, p);
-                    new.style_amounts(&styles);
+                    new.style_amounts(styles);
                     new.add_tags(j.inherited_account_tags(&new.account));
                     postings.push(new);
                     modified = true;
@@ -56,8 +72,7 @@ pub fn journal_modify_transactions(
             );
         }
     }
-    j.txns = txns;
-    Ok(j)
+    Ok(txns)
 }
 
 /// The posting an auto posting rule's posting makes from a matched posting

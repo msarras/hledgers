@@ -74,12 +74,7 @@ pub static MODE: Mode = Mode {
             "TYPE",
             "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
         ),
-        Flag::new(
-            &["layout"],
-            REQ,
-            "hledger1|COL",
-            "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
-        ),
+        LAYOUT_FLAG,
         Flag::new(
             &["base-url"],
             REQ,
@@ -93,6 +88,14 @@ pub static MODE: Mode = Mode {
         OUTPUT_VIEW_FLAG,
     ],
 };
+
+/// The --layout flag (layoutFlag).
+pub const LAYOUT_FLAG: Flag = Flag::new(
+    &["layout"],
+    REQ,
+    "hledger1|COL",
+    "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
+);
 
 /// What a milestone not yet done would provide.
 fn not_yet(what: &str, milestone: &str) -> String {
@@ -153,7 +156,7 @@ fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
 }
 
 /// The posting layout of --layout (layoutFromRawOpts).
-fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
+pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
     match opts.raw.string("layout") {
         None => Ok(PostingLayout::default()),
         Some("hledger1") => Ok(PostingLayout::Hledger1),
