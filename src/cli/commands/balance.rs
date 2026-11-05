@@ -540,13 +540,6 @@ pub fn multi_balance_report_title(ropts: &ReportOpts, report: &MultiBalanceRepor
     ropts.effective_title(&default).to_string()
 }
 
-/// Whether a multi-period report has a row total column: with
-/// --row-total, unless it shows accumulated balances
-/// (multiBalanceHasTotalsColumn).
-fn has_totals_column(ropts: &ReportOpts) -> bool {
-    ropts.row_total && ropts.balance_accum == BalanceAccumulation::PerPeriod
-}
-
 /// A multi-period balance report as a table of text: an account name per
 /// row (repeated for each line of its amounts), the period names (and
 /// Total and Average) as column headings, the totals row below a line
@@ -568,7 +561,7 @@ pub fn multi_balance_report_as_table(
         span_names
             .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
     }
-    if has_totals_column(ropts) {
+    if ropts.has_totals_column() {
         span_names.push("  Total".to_string());
     }
     if ropts.average {
@@ -654,7 +647,7 @@ fn multi_balance_row_as_text<N>(
     if !ropts.summary_only {
         amounts.extend(&row.amounts);
     }
-    if has_totals_column(ropts) && !row.amounts.is_empty() {
+    if ropts.has_totals_column() && !row.amounts.is_empty() {
         amounts.push(&row.total);
     }
     if ropts.average && !row.amounts.is_empty() {

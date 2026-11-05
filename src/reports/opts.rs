@@ -320,6 +320,13 @@ impl ReportOpts {
         self.title.as_deref().unwrap_or(default)
     }
 
+    /// Whether a multi-period report has a row total column: with
+    /// --row-total, unless it shows accumulated balances
+    /// (multiBalanceHasTotalsColumn).
+    pub fn has_totals_column(&self) -> bool {
+        self.row_total && self.balance_accum == BalanceAccumulation::PerPeriod
+    }
+
     /// Whether the report needs the postings before its start: it shows
     /// historical balances, or calculates value changes or gains
     /// (requiresHistorical).

@@ -22,8 +22,8 @@ use crate::decimal::Decimal;
 use crate::model::{Journal, PostingRef, Transaction};
 use crate::query::Query;
 use crate::reports::opts::{
-    AccountListMode, BalanceAccumulation, BalanceCalculation, NormalSign, ReportOpts, ReportSpec,
-    mixed_amount_apply_valuation_after_sum,
+    AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts,
+    ReportSpec, mixed_amount_apply_valuation_after_sum,
 };
 use crate::valuation::{ConversionOp, PriceOracle};
 
@@ -625,7 +625,7 @@ pub fn generate_multi_balance_report(
         totals,
     };
     if ropts.percent {
-        report = report_percent(report)?;
+        report = report_percent(ropts, report)?;
     }
     if is_count(ropts.balance_calc) && !ropts.percent {
         let one = |m: &MixedAmount| m.clone().with_precision(Precision::Fixed(1));
@@ -794,18 +794,39 @@ fn make_row<N>(
 }
 
 /// The report with each value as a percentage of its column's total
-/// (reportPercent).
-fn report_percent(report: MultiBalanceReport) -> Result<MultiBalanceReport, String> {
+/// (reportPercent). Upstream calculates a percentage when it is shown, so
+/// one that cannot be calculated is an error only then; here the values
+/// a report does not show are left null instead: the period values with
+/// --summary-only (unless the bare-wide layout lists their commodities),
+/// the row totals unless the report has one period (the single-column
+/// report shows its totals) or a row total column, and the averages
+/// without --average.
+fn report_percent(
+    ropts: &ReportOpts,
+    report: MultiBalanceReport,
+) -> Result<MultiBalanceReport, String> {
+    let shown_periods = !ropts.summary_only || ropts.layout == Ok(Layout::BareWide);
+    let shown_total = report.dates.len() <= 1 || ropts.has_totals_column();
     let t = &report.totals;
     let percent = |amounts: &[MixedAmount], total: &MixedAmount, average: &MixedAmount| {
-        let amounts = (amounts.iter().zip(&t.amounts))
-            .map(|(a, b)| perdivide(a, b))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok::<_, String>((
-            amounts,
-            perdivide(total, &t.total)?,
-            perdivide(average, &t.average)?,
-        ))
+        let amounts = if shown_periods {
+            (amounts.iter().zip(&t.amounts))
+                .map(|(a, b)| perdivide(a, b))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            vec![MixedAmount::null(); amounts.len()]
+        };
+        let total = if shown_total {
+            perdivide(total, &t.total)?
+        } else {
+            MixedAmount::null()
+        };
+        let average = if ropts.average {
+            perdivide(average, &t.average)?
+        } else {
+            MixedAmount::null()
+        };
+        Ok::<_, String>((amounts, total, average))
     };
     let mut rows = Vec::with_capacity(report.rows.len());
     for r in &report.rows {
