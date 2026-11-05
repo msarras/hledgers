@@ -14,6 +14,7 @@ use crate::amount::{
 use crate::dates::{DateSpan, EfDay, Period};
 use crate::decimal::Decimal;
 use crate::model::{BalanceAssertion, Posting, SourcePos, Status, Transaction};
+use crate::reports::account_txns::AccountTransactionsReportItem;
 use crate::reports::periodic::{
     BalanceReport, CompoundPeriodicReport, DisplayName, PeriodicReport, PeriodicReportRow,
 };
@@ -372,6 +373,25 @@ impl ToJson for PostingsReportItem<'_> {
             self.description,
             posting_json(&self.posting, self.txn),
             self.total.to_json(),
+        ])
+    }
+}
+
+/// An account transactions report line as a tuple: the transaction, the
+/// transaction as seen from the account, whether it is a split, the other
+/// accounts, the change, the balance.
+impl ToJson for AccountTransactionsReportItem {
+    fn to_json(&self) -> Value {
+        json!([
+            self.txn.to_json(),
+            self.acct_txn.to_json(),
+            self.split,
+            self.other_accounts
+                .iter()
+                .map(|a| &**a)
+                .collect::<Vec<&str>>(),
+            self.amount.to_json(),
+            self.balance.to_json(),
         ])
     }
 }

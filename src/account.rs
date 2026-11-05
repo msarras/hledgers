@@ -228,6 +228,19 @@ pub fn account_leaf_name(a: &str) -> &str {
     a.rsplit(ACCT_SEP).next().unwrap_or(a)
 }
 
+/// The name with each of its parents' components shortened to two
+/// characters: `ex:food` for `expenses:food` (accountSummarisedName).
+pub fn account_summarised_name(a: &str) -> String {
+    let mut cs: Vec<&str> = account_name_components(a).collect();
+    let leaf = cs.pop().unwrap_or("");
+    if cs.is_empty() {
+        return account_leaf_name(a).to_string();
+    }
+    let mut out: Vec<String> = cs.iter().map(|c| c.chars().take(2).collect()).collect();
+    out.push(leaf.to_string());
+    out.join(":")
+}
+
 /// The number of components; none for the empty name (accountNameLevel).
 pub fn account_name_level(a: &str) -> usize {
     if a.is_empty() {
@@ -564,6 +577,13 @@ pub fn escape_name(a: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// A regex matching this account and its subaccounts
+/// (accountNameToAccountRegex).
+pub fn account_name_to_account_regex(a: &str) -> Regexp {
+    crate::regex::to_regex(&format!("^{}(:|$)", escape_name(a)))
+        .expect("a valid regular expression")
 }
 
 /// A case-insensitive regex matching this account and its subaccounts

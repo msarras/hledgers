@@ -1,6 +1,7 @@
 //! The builtin commands (Hledger.Cli.Commands), found by name or alias.
 
 pub mod accounts;
+pub mod aregister;
 pub mod balance;
 pub mod check;
 pub mod codes;
@@ -30,7 +31,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
     &command("activity", &[]),
     &command("add", &[]),
-    &command("aregister", &["areg"]),
+    &aregister::MODE,
     &balance::MODE,
     &compound::BALANCESHEETEQUITY.mode,
     &compound::BALANCESHEET.mode,

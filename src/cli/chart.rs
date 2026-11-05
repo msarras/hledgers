@@ -10,10 +10,11 @@ use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
 use crate::cli::commands::balance::report_period_name;
 use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::opts::CliOpts;
-use crate::dates::{DateSpan, Period};
+use crate::dates::{DateSpan, Day, Period};
 use crate::decimal::Decimal;
-use crate::model::{Commodity, Posting, SourcePos};
+use crate::model::{Commodity, Posting, SourcePos, Transaction};
 use crate::read::amount::{AmountCtx, parse_amount_with};
+use crate::reports::account_txns::AccountTransactionsReportItem;
 use crate::reports::opts::{BalanceAccumulation, ReportOpts};
 use crate::reports::periodic::{
     BalanceReport, CompoundPeriodicReport, DisplayName, MultiBalanceReport, MultiBalanceReportRow,
@@ -512,6 +513,49 @@ type Section = (
     i32,
     Vec<MultiBalanceReportRow>,
 );
+
+/// An account register's chart (accountTransactionsReportAsChart): the
+/// balance (or running total or average) after each transaction, as a line
+/// by the transaction's register date; a panel per commodity, most used
+/// first.
+pub fn account_transactions_report_as_chart(
+    account_type: &dyn Fn(&str) -> Option<AccountType>,
+    title: &str,
+    acct: &str,
+    txn_date: &dyn Fn(&Transaction) -> Day,
+    items: &[AccountTransactionsReportItem],
+) -> Chart {
+    let bals: Vec<&MixedAmount> = items.iter().map(|i| &i.balance).collect();
+    let all_amounts: Vec<&Amount> = bals.iter().flat_map(|m| m.amounts_raw()).collect();
+    let panel = |c: Sym| Panel {
+        unit: unit_amount(&c, &all_amounts),
+        series: vec![Series {
+            label: ChartLabel {
+                full: acct.to_string(),
+                short: acct.to_string(),
+                indent: 0,
+                typ: account_type(acct),
+                account: true,
+            },
+            role: SeriesRole::Item,
+            mark: Mark::Line,
+            values: bals.iter().map(|m| Some(quantity_in(&c, m))).collect(),
+            group: 0,
+            sign: 0,
+        }],
+        group_names: Vec::new(),
+        scale: None,
+        layout: BarLayout::Diverging,
+        counts: false,
+        summary: Vec::new(),
+        value_labels: Vec::new(),
+    };
+    Chart {
+        title: title.to_string(),
+        x_axis: XAxis::Dates(items.iter().map(|i| txn_date(&i.txn)).collect()),
+        panels: commodities_by_use(&bals).into_iter().map(panel).collect(),
+    }
+}
 
 /// A postings report's chart (postingsReportAsChart). With a report
 /// interval, each account's amount in each period as stacked bars, with

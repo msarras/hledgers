@@ -121,6 +121,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
+        "aregister" => |o, j| commands::aregister::aregister(o, &j),
         "balance" => |o, j| commands::balance::balance(o, &j),
         "balancesheet" => |o, j| compound(&commands::compound::BALANCESHEET, o, &j),
         "balancesheetequity" => |o, j| compound(&commands::compound::BALANCESHEETEQUITY, o, &j),
