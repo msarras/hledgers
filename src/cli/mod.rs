@@ -141,6 +141,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "files" => |o, j| commands::files::files(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,
+        "roi" => |o, j| commands::roi::roi(o, &j),
         "stats" => commands::stats::stats,
         "tags" => commands::tags::tags,
         "transactions" => commands::transactions::transactions,
