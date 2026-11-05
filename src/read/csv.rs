@@ -1200,7 +1200,7 @@ impl Converter<'_> {
         match self.run_amount_parser(errpfx, record, currency, &simplify_sign(&s), false)? {
             Ok(a) => Ok(Some(a)),
             Err(e) => Err(format!(
-                "{errpfx}could not parse \"{s}\" as balance{n} amount\n{}\n{}the parse error is:      {e}\n",
+                "{errpfx}could not parse \"{s}\" as balance{n} amount\n{}\n{}\nthe parse error is:      {e}\n",
                 rules.show_record_fields(record),
                 rules.show_rules(record)
             )),
@@ -1270,7 +1270,7 @@ impl Converter<'_> {
             None => match parse(None) {
                 Ok(a) if !a.commodity.is_empty() => Ok(Ok(a)),
                 _ => Err(format!(
-                    "{errpfx}could not parse \"{currency}\" as a currency\n{}\n{}a currency rule's value should be a commodity symbol, like USD or \"Some Fund\",\nor an amount showing the symbol's position, like 1 USD\n",
+                    "{errpfx}could not parse \"{currency}\" as a currency\n{}\n{}\na currency rule's value should be a commodity symbol, like USD or \"Some Fund\",\nor an amount showing the symbol's position, like 1 USD\n",
                     self.rules.show_record_fields(record),
                     self.rules.show_rules(record)
                 )),
