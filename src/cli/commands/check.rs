@@ -5,6 +5,7 @@
 use crate::cli::args::Mode;
 use crate::cli::opts::CliOpts;
 use crate::model::Journal;
+use crate::read::checks;
 use crate::text::words_quoted;
 
 pub static MODE: Mode = Mode {
@@ -40,8 +41,10 @@ fn parse_check(s: &str) -> Option<usize> {
     CHECKS.iter().position(|c| c.starts_with(&capitalised))
 }
 
-/// Run the check command (check).
-pub fn check(opts: &CliOpts, _j: &Journal) -> Result<String, String> {
+/// Run the check command (check): the named checks, in their order. The
+/// basic checks, and balanced (which forbids inferring costs), were done
+/// when the journal was read.
+pub fn check(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let mut checks = Vec::new();
     let mut unknown = Vec::new();
     for a in opts.raw.args() {
@@ -57,12 +60,16 @@ pub fn check(opts: &CliOpts, _j: &Journal) -> Result<String, String> {
     }
     checks.sort();
     for c in checks {
-        if c > 3 {
-            // M2c: the other checks
-            return Err(format!(
-                "the {} check is not supported yet (hledgers milestone 2c)",
-                CHECKS[c].to_lowercase()
-            ));
+        match CHECKS[c] {
+            "Accounts" => checks::journal_check_accounts(j)?,
+            "Commodities" => checks::journal_check_commodities(j)?,
+            "Ordereddates" => checks::journal_check_ordereddates(j)?,
+            "Payees" => checks::journal_check_payees(j)?,
+            "Recentassertions" => checks::journal_check_recent_assertions(j)?,
+            "Tags" => checks::journal_check_tags(j)?,
+            "Uniqueleafnames" => checks::journal_check_uniqueleafnames(j)?,
+            // checked when reading; M6: lots (journalCheckLots is a no-op there too)
+            _ => {}
         }
     }
     Ok(String::new())

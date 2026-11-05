@@ -194,6 +194,25 @@ fn postings_as_lines_decimal(
         .collect()
 }
 
+/// One posting's lines on its own, with these status and account widths
+/// and its amount's decimal mark at this column (postingAsLines).
+pub fn posting_as_lines(
+    basefmt: &AmountFormat,
+    one_line_amounts: bool,
+    status_width: usize,
+    acct_width: usize,
+    dec_mark: usize,
+    p: &Posting,
+) -> Vec<String> {
+    let fmt = display_format(basefmt, one_line_amounts);
+    let cols = AmountCols {
+        dec_mark,
+        equals: 0,
+        asn_dec_mark: 0,
+    };
+    PostingRender::new(&fmt, p).lines(&fmt, p, status_width, acct_width, cols)
+}
+
 /// The amount format postings are shown with: zeros with their commodity,
 /// a decimal mark after digit groups, and no padding of their own.
 fn display_format(basefmt: &AmountFormat, one_line_amounts: bool) -> AmountFormat {

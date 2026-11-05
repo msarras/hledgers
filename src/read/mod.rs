@@ -3,6 +3,7 @@
 
 pub mod amount;
 pub mod balancing;
+pub mod checks;
 pub mod common;
 pub mod costs;
 pub mod errors;
@@ -198,16 +199,9 @@ pub fn read_journal_files(iopts: &InputOpts, files: &[String]) -> Result<Journal
     }
     finalise::journal_number_and_tie_transactions(&mut j);
     if iopts.strict {
-        journal_strict_checks(&j)?;
+        checks::journal_strict_checks(&j)?;
     }
     Ok(j)
-}
-
-/// The strict checks: accounts, commodities, balanced transactions
-/// (journalStrictChecks).
-// M2c: the check family; nothing is checked until then.
-fn journal_strict_checks(_j: &Journal) -> Result<(), String> {
-    Ok(())
 }
 
 /// Read and finalise one journal file (readJournalFile). Its format comes

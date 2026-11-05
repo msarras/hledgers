@@ -53,7 +53,7 @@ pub fn journal_finalise(
         j = journal_add_auto_postings(iopts, j)?;
     }
     // transaction balancing
-    j = journal_check_ordereddates(j)?;
+    j = journal_check_ordereddates(iopts, j)?;
     let (mut j, assertion_error) = journal_balance_transactions_and_defer_assertions(iopts, j)?;
     // lot classification
     j = journal_classify_lot_postings(j);
@@ -570,9 +570,11 @@ fn journal_add_auto_postings(iopts: &InputOpts, j: Journal) -> Result<Journal, S
 }
 
 /// With `hledger check ordereddates`, check that transactions are in date
-/// order (journalCheckOrdereddates).
-// M2c: the check family; the journal is unchanged until then.
-fn journal_check_ordereddates(j: Journal) -> Result<Journal, String> {
+/// order, before balancing (journalCheckOrdereddates).
+fn journal_check_ordereddates(iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
+    if iopts.checking("ordereddates") {
+        super::checks::journal_check_ordereddates(&j)?;
+    }
     Ok(j)
 }
 
