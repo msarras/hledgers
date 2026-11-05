@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::account::{AccountName, AccountType, Realness};
 use crate::amount::{Amount, AmountStyle, CommodityStyles, MixedAmount, Sym};
-use crate::dates::Day;
+use crate::dates::{DateSpan, Day, Interval};
 use crate::decimal::Decimal;
 
 /// A position in a source file: its name, and a 1-based line and column.
@@ -551,6 +551,9 @@ pub struct TransactionModifier {
 pub struct PeriodicTransaction {
     /// The period expression as written.
     pub period_expr: String,
+    /// How often it recurs, and in what span.
+    pub interval: Interval,
+    pub span: DateSpan,
     pub pos: (SourcePos, SourcePos),
     pub status: Status,
     pub code: String,
@@ -652,8 +655,15 @@ pub struct Journal {
     pub periodic_txns: Vec<PeriodicTransaction>,
     pub txns: Vec<Transaction>,
     pub items: Vec<JournalItem>,
-    /// The files read, with their text, the main file first.
+    /// The files read, with their text, the main file first, then the
+    /// included files, each before the files it includes.
     pub files: Vec<(String, String)>,
+    /// The default commodity and style of the D directive in effect at the
+    /// end of parsing (jparsedefaultcommodity), whose style counts as a
+    /// declared one.
+    pub default_commodity: Option<(Sym, Arc<AmountStyle>)>,
+    /// When the files were read (jlastreadtime).
+    pub last_read_time: Option<std::time::SystemTime>,
 }
 
 impl Journal {

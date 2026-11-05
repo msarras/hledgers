@@ -107,6 +107,27 @@ impl ParseError {
         }
     }
 
+    /// The error moved by `delta` bytes, for text parsed as part of a
+    /// larger text that starts `delta` bytes earlier.
+    pub fn shifted(self, delta: usize) -> ParseError {
+        match self {
+            ParseError::Trivial {
+                offset,
+                unexpected,
+                expected,
+            } => ParseError::Trivial {
+                offset: offset + delta,
+                unexpected,
+                expected,
+            },
+            ParseError::Fancy { offset, end, msgs } => ParseError::Fancy {
+                offset: offset + delta,
+                end: end + delta,
+                msgs,
+            },
+        }
+    }
+
     pub fn offset(&self) -> usize {
         match self {
             ParseError::Trivial { offset, .. } | ParseError::Fancy { offset, .. } => *offset,
@@ -452,6 +473,17 @@ impl<'a> Cursor<'a> {
         } else {
             false
         }
+    }
+
+    /// Move past an ASCII digit if one is next.
+    pub fn eat_digit(&mut self) -> bool {
+        let digit = self
+            .rest()
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_digit);
+        self.pos += usize::from(digit);
+        digit
     }
 
     /// Move past the characters satisfying a predicate, returning them.
