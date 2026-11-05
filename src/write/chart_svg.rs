@@ -1917,10 +1917,14 @@ fn tick_label(unit: &Amount, decimals: usize, ticks: &[f64], t: f64) -> String {
 }
 
 /// A double as a decimal with this many places, rounded half to even
-/// (realFracToDecimal).
+/// (realFracToDecimal). The mantissa is unbounded, like Haskell's round:
+/// a chart of 12345678901234567890 USD has ticks beyond i64.
 fn tick_quantity(decimals: usize, t: f64) -> Decimal {
-    let m = round(t * 10f64.powi(decimals as i32));
-    Decimal::new(dashu_int::IBig::from(m), decimals as u8)
+    let m = (t * 10f64.powi(decimals as i32)).round_ties_even();
+    let mantissa: dashu_int::IBig = format!("{m:.0}")
+        .parse()
+        .expect("a rounded double is a whole number");
+    Decimal::new(mantissa, decimals as u8)
 }
 
 /// The chart's styles, with a dark variant if wanted (stylesheet).
@@ -2024,6 +2028,13 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tick_quantities_beyond_i64() {
+        assert_eq!(tick_quantity(0, 1.5e19).to_string(), "15000000000000000000");
+        assert_eq!(tick_quantity(1, -0.25).to_string(), "-0.2");
+        assert_eq!(tick_quantity(0, -0.0).to_string(), "0");
+    }
 
     // tests_Hledger_Write_Chart_Svg's pure cases.
     #[test]
