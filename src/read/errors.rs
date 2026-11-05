@@ -91,6 +91,21 @@ pub fn posting_error_excerpt(
     (t.pos.0.file.to_string(), line, ex)
 }
 
+/// The transaction as an excerpt, numbered at the line of the posting
+/// with this index, with these columns marked under it
+/// (makePostingErrorExcerptByIndex).
+pub fn posting_error_excerpt_by_index(t: &Transaction, idx: usize, cols: Columns) -> Excerpt {
+    let rel = comment_extra_lines(&t.comment)
+        + t.postings
+            .iter()
+            .take(idx + 1)
+            .map(|q| 1 + comment_extra_lines(&q.comment))
+            .sum::<usize>();
+    let line = clamp_to_transaction_lines(t, t.pos.0.line + rel);
+    let ex = decorate_posting_excerpt(line, rel, cols, &transaction_text(t));
+    (t.pos.0.file.to_string(), line, ex)
+}
+
 /// The rendered transaction with the margin, the line number on the line
 /// `rel` lines after the first, and a marker line under it
 /// (decoratePostingErrorExcerpt).

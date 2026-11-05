@@ -328,14 +328,35 @@ pub fn balance_single_transaction(
     balance_transaction(bopts, t).map(|(t, _)| t)
 }
 
-/// Balance a transaction, which in a journal using lots might first need
-/// its lot fee outflows split off (balanceTransactionHelperMaybeSplittingLotFees).
-// M6: lots (tagging gain postings, splitting lot fees); until then this is plain balancing.
+/// Balance a transaction which could involve lots after tagging its gain
+/// postings, trying first with its lot fee outflows split off, since a
+/// lot transfer with a priced fee balances only in that form; if that does
+/// not balance, the unsplit form is balanced as usual
+/// (balanceTransactionHelperMaybeSplittingLotFees).
 fn balance_transaction_maybe_splitting_lot_fees(
     bopts: &BalancingOpts,
     t: Transaction,
 ) -> Result<(Transaction, Vec<(AccountName, MixedAmount)>), String> {
-    balance_transaction(bopts, t)
+    use crate::lots::{LotLookups, classify, transaction_has_lotful_amounts};
+    let lotful = &bopts.lotful_commodities;
+    if !transaction_has_lotful_amounts(lotful, &t) {
+        return balance_transaction(bopts, t);
+    }
+    let lk = LotLookups {
+        account_types: &bopts.account_types,
+        lotful,
+        lots_tags: &bopts.account_lots_tags,
+    };
+    let verbose = bopts.verbose_balancing_tags;
+    let t = classify::transaction_tag_gain_postings(!bopts.lenient_lots, verbose, &lk, t);
+    if lotful.is_empty() {
+        return balance_transaction(bopts, t);
+    }
+    let t2 = classify::transaction_auto_split_fee_outflows(verbose, &lk, t.clone());
+    if t2.postings.len() == t.postings.len() {
+        return balance_transaction(bopts, t);
+    }
+    balance_transaction(bopts, t2).or_else(|_| balance_transaction(bopts, t))
 }
 
 /// Balance a transaction: infer conversion costs (if allowed) and a missing
