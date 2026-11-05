@@ -1,6 +1,7 @@
 //! The builtin commands (Hledger.Cli.Commands), found by name or alias.
 
 pub mod accounts;
+pub mod activity;
 pub mod aregister;
 pub mod balance;
 pub mod check;
@@ -29,7 +30,7 @@ pub static MAIN_MODE: Mode = command("hledger", &[]);
 /// Command-specific flags and actions arrive with the milestones that implement them.
 pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
-    &command("activity", &[]),
+    &activity::MODE,
     &command("add", &[]),
     &aregister::MODE,
     &balance::MODE,
