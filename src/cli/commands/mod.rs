@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod check;
 pub mod codes;
+pub mod commodities;
 pub mod descriptions;
 pub mod files;
 pub mod notes;
@@ -32,7 +33,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &check::MODE,
     &command("close", &["equity"]),
     &codes::MODE,
-    &command("commodities", &["comm"]),
+    &commodities::MODE,
     &descriptions::MODE,
     &command("diff", &[]),
     &files::MODE,
