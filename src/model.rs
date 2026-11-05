@@ -634,6 +634,43 @@ pub enum JournalItem {
     Blank,
 }
 
+/// A posting's value of a field: code, desc or description, payee, note,
+/// status, acct or account, cur or comm (its one commodity), amt (its one
+/// quantity), cost (its one amount's cost); or else of a tag, its own or
+/// its transaction's, a `type` tag's value shortened to its one-letter
+/// code; or else nothing (pivotComponent).
+fn pivot_component(name: &str, t: &Transaction, p: &Posting) -> String {
+    let one_amount = || match p.amount.amounts().as_slice() {
+        [a] => Some(a.clone()),
+        _ => None,
+    };
+    match name {
+        "code" => t.code.clone(),
+        "desc" | "description" => t.description.clone(),
+        "payee" => t.payee().to_string(),
+        "note" => t.note().to_string(),
+        "status" => t.status.to_string(),
+        "acct" | "account" => p.account.to_string(),
+        "cur" | "comm" => one_amount().map_or_else(String::new, |a| a.commodity.to_string()),
+        "amt" => one_amount().map_or_else(String::new, |a| a.quantity.to_string()),
+        "cost" => match one_amount() {
+            Some(a) if a.cost.is_some() => {
+                let fmt = &crate::amount::render::AmountFormat::DEFAULT;
+                let cost = crate::amount::render::show_amount_cost_b(fmt, &a).s;
+                cost.trim_start().to_string()
+            }
+            _ => String::new(),
+        },
+        _ => match p.tags.iter().chain(&t.tags).find(|(n, _)| n == name) {
+            Some((_, v)) if name == "type" => {
+                AccountType::parse(true, v).map_or_else(|_| v.clone(), |at| at.letter().to_string())
+            }
+            Some((_, v)) => v.clone(),
+            None => String::new(),
+        },
+    }
+}
+
 /// Each commodity alias, with its commodity, the number of alias units in
 /// one unit of the commodity, and the commodity's style if known
 /// (CommodityAliases).
@@ -798,6 +835,30 @@ impl Journal {
         let mut cs: BTreeSet<Sym> = self.declared_commodities.keys().cloned().collect();
         cs.extend(self.commodities_used());
         cs
+    }
+
+    /// Replace the postings' account names with their values of a field or
+    /// tag, or of several joined by `:` (`acct:kind:project`), keeping the
+    /// postings as they were as their originals (journalPivot,
+    /// transactionPivot, postingPivot, pivotAccount).
+    pub fn pivot(&mut self, field_or_tag: &str) {
+        for t in &mut self.txns {
+            let accounts: Vec<String> = t
+                .postings
+                .iter()
+                .map(|p| {
+                    field_or_tag
+                        .split(':')
+                        .map(|name| pivot_component(name, t, p))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                })
+                .collect();
+            for (p, a) in t.postings.iter_mut().zip(accounts) {
+                p.original = Some(Box::new(p.original().clone()));
+                p.account = a.into();
+            }
+        }
     }
 
     /// The span of all the transactions' and postings' dates, primary and

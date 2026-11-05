@@ -139,13 +139,14 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
             .map(|d| d.display().to_string())
             .unwrap_or_default()
     });
-    if !iopts.pivot.is_empty() {
-        return Err("--pivot is not supported yet (hledgers milestone 5)".to_string());
-    }
     if iopts.anon {
         return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());
     }
     let mut j = crate::read::read_journal_files(&iopts, &paths)?;
+    // with --pivot, even an empty one (maybePivot)
+    if let Some(name) = opts.raw.string("pivot") {
+        j.pivot(name);
+    }
     // -B converts to cost basis now, before lot detail is collapsed
     // (journalPrepareLotDetail; collapsing arrives with milestone 6)
     if opts.spec.opts.conversion_op == Some(ConversionOp::ToCost) {
