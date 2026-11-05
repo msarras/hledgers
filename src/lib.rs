@@ -11,3 +11,4 @@ pub mod query;
 pub mod read;
 pub mod regex;
 pub mod text;
+pub mod write;
