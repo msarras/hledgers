@@ -10,8 +10,9 @@ use super::InputOpts;
 use super::amount::{AmountCtx, AmountKind, amountp, posting_amountp};
 use super::common::{posting_commentp, statusp, transaction_commentp};
 use super::rules::{
-    CsvRules, MAX_POSTINGS, is_amount_expression, parse_balance_assertion_type, read_int,
-    record_as_approximate_text, simplify_sign, split_row_suffix, with_rules_pos,
+    CsvRules, MAX_POSTINGS, is_amount_expression, parse_balance_assertion_type, path_join,
+    read_int, record_as_approximate_text, simplify_sign, split_row_suffix, take_directory,
+    with_rules_pos,
 };
 use crate::account::{
     AccountAlias, Realness, account_name_apply_aliases, account_name_posting_type,
@@ -159,6 +160,175 @@ pub fn read_csv_file(iopts: &InputOpts, f: &str, sep: char) -> Result<Journal, S
     let text = read_data(f, &rules_file, &rules)?;
     let (j, context) = read_journal_from_csv(iopts, &rules_file, &rules, f, &text, Some(sep))?;
     finalise_csv_journal(iopts, f, j, &context)
+}
+
+/// A rules file read as data (`-f FILE.rules`): the data its source rule
+/// names, converted by it, as a finalised journal whose balance assertions
+/// are not checked (RulesReader's parse).
+pub fn read_rules_file(iopts: &InputOpts, rules_file: &str) -> Result<Journal, String> {
+    let (j, context) = read_rules_data(iopts, rules_file)?;
+    finalise_csv_journal(iopts, rules_file, j, &context)
+}
+
+/// The data that a rules file's source rule names, converted by it,
+/// unfinalised (readRulesFileWith). The source rule gives a file pattern,
+/// or a command producing the data after a `|`, or both, the command then
+/// cleaning the file's data; `#` starts a comment. The newest matching file
+/// is read (or when importing with an archive rule, the oldest): with a
+/// pattern starting `./` or `../`, relative to the rules file; with an
+/// absolute one or one starting with `~`, as it is; otherwise in the data
+/// directory (`data/` beside the main file), or if none match there, in
+/// `~/Downloads`. A pattern matching nothing gives no data.
+pub fn read_rules_data(
+    iopts: &InputOpts,
+    rules_file: &str,
+) -> Result<(Journal, CsvContext), String> {
+    let (rules, _) = super::rules::read_rules(rules_file)?;
+    let (pattern, command) = match rules.directive("source") {
+        None => (None, None),
+        Some(s) => {
+            let s = strip(s.split('#').next().unwrap_or(""));
+            let (p, c) = match s.find('|') {
+                Some(i) => (&s[..i], Some(strip(&s[i + 1..]))),
+                None => (s, None),
+            };
+            let p = strip(p);
+            (
+                (!p.is_empty()).then(|| p.to_string()),
+                c.filter(|c| !c.is_empty()).map(str::to_string),
+            )
+        }
+    };
+    let journal_dir = iopts
+        .journal_dir
+        .clone()
+        .unwrap_or_else(|| take_directory(rules_file));
+    let data_dir = path_join(&journal_dir, "data");
+    let data_file = match (&pattern, &command) {
+        (None, None) => {
+            return Err(format!(
+                "to make {rules_file} readable,\n please add a 'source' rule with a non-empty file pattern or command"
+            ));
+        }
+        (None, Some(_)) => None,
+        (Some(pat), _) => {
+            let first = pat.split('/').next().unwrap_or("");
+            let anchored = first == "." || first == "..";
+            let absolute_or_tilde = pat.starts_with('/') || first == "~";
+            let primary = if anchored {
+                take_directory(rules_file)
+            } else {
+                data_dir
+            };
+            let mut found = source_files(&primary, pat)?;
+            if found.is_empty() && !anchored && !absolute_or_tilde {
+                let home = std::env::var("HOME").unwrap_or_default();
+                found = source_files(&path_join(&home, "Downloads"), pat)?;
+            }
+            if iopts.importing && rules.directive("archive").is_some() {
+                found.first().cloned()
+            } else {
+                found.last().cloned()
+            }
+        }
+    };
+    let existing = data_file.clone().filter(|f| super::file_exists(f));
+    let log_command = |c: &str| {
+        let name = rules_file.rsplit('/').next().unwrap_or(rules_file);
+        eprintln!("{name}: running source command: {c}");
+    };
+    let text = match (&pattern, &existing, &command) {
+        (_, Some(f), c) => {
+            let raw = read_data(f, rules_file, &rules)?;
+            match c {
+                Some(c) => {
+                    log_command(c);
+                    run_command(rules_file, c, Some(&raw))?
+                }
+                None => raw,
+            }
+        }
+        (None, None, Some(c)) => {
+            // a data generating command that fails gives a warning (showing
+            // the error as upstream's error' makes it) and no data
+            log_command(c);
+            run_command(rules_file, c, None).unwrap_or_else(|e| {
+                crate::console::warn(&iopts.prog_args, &format!("Error: {e}"));
+                String::new()
+            })
+        }
+        _ => String::new(),
+    };
+    let csv_file = data_file.as_deref().unwrap_or("(cmd)");
+    read_journal_from_csv(iopts, rules_file, &rules, csv_file, &text, None)
+}
+
+/// The files a source rule's pattern matches, its leading `~` expanded and
+/// relative to a directory, oldest first (expandGlob, sortByModTime).
+fn source_files(dir: &str, pattern: &str) -> Result<Vec<String>, String> {
+    let expanded = super::journal::expand_home_path(pattern)?;
+    let dir = if expanded.starts_with('/') { "/" } else { dir };
+    let mut found: Vec<(Option<std::time::SystemTime>, String)> =
+        super::journal::glob_matches(dir, &expanded)
+            .into_iter()
+            .map(|f| (std::fs::metadata(&f).and_then(|m| m.modified()).ok(), f))
+            .collect();
+    found.sort();
+    Ok(found.into_iter().map(|(_, f)| f).collect())
+}
+
+/// The output of a shell command run in the rules file's directory, with
+/// this text as its input if any; an error if it fails, showing its error
+/// output. A data generating command's error output is shown as a warning
+/// when it succeeds (runCommand, runCommandAsFilter).
+fn run_command(rules_file: &str, cmd: &str, input: Option<&str>) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    let failed_pipes = || format!("in {rules_file}: failed to create pipes for command execution");
+    let mut child = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(take_directory(rules_file))
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| failed_pipes())?;
+    let writer = match (input, child.stdin.take()) {
+        (Some(text), Some(mut stdin)) => {
+            let text = text.to_string();
+            Some(std::thread::spawn(move || {
+                let _ = std::io::Write::write_all(&mut stdin, text.as_bytes());
+            }))
+        }
+        _ => None,
+    };
+    let output = child.wait_with_output().map_err(|_| failed_pipes())?;
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
+    let out = String::from_utf8_lossy(&output.stdout).into_owned();
+    let err = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or_else(|| {
+            -std::os::unix::process::ExitStatusExt::signal(&output.status).unwrap_or(0)
+        });
+        let detail = if err.is_empty() {
+            String::new()
+        } else {
+            format!(":\n{err}")
+        };
+        return Err(format!(
+            "in {rules_file}: command \"{cmd}\" failed with exit code {code}{detail}"
+        ));
+    }
+    if input.is_none() && !err.is_empty() {
+        crate::console::warn(&[], &err);
+    }
+    Ok(out)
 }
 
 /// The rules file for a CSV file: the one given (`--rules`), or the CSV

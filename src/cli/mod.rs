@@ -157,11 +157,7 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
     let mut iopts = opts.input.clone();
     iopts.journal_dir = paths.first().map(|p| {
-        let f = crate::read::journal::split_reader_prefix(p).1;
-        std::path::Path::new(f)
-            .parent()
-            .map(|d| d.display().to_string())
-            .unwrap_or_default()
+        crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
     });
     if iopts.anon {
         return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());

@@ -226,6 +226,7 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         "csv" => return csv::read_csv_file(iopts, f, ','),
         "ssv" => return csv::read_csv_file(iopts, f, ';'),
         "tsv" => return csv::read_csv_file(iopts, f, '\t'),
+        "rules" => return csv::read_rules_file(iopts, f),
         _ => {
             return Err(format!(
                 "reading {format} files is not supported yet (hledgers milestone 7): {f}"
