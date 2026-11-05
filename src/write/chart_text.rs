@@ -597,7 +597,7 @@ fn panel_lines(
         } else {
             0
         };
-        overlay_at(col.max(0) as usize, plain(markchar), line)
+        overlay_at(col, plain(markchar), line)
     };
     let pad_to = |w: usize, mut l: StyledLine| -> StyledLine {
         let used = line_width(&l);
@@ -748,19 +748,21 @@ fn panel_lines(
 /// The line with the character at a column (of single-width characters)
 /// replaced by this piece, padded with spaces if it is shorter
 /// (overlayAt).
-fn overlay_at(i: usize, new: (Style, String), line: StyledLine) -> StyledLine {
+fn overlay_at(i: isize, new: (Style, String), line: StyledLine) -> StyledLine {
     let mut out = Vec::new();
-    let mut col = 0;
+    let mut col: isize = 0;
     let mut rest = line.into_iter();
     while let Some((st, t)) = rest.next() {
-        let n = t.chars().count();
+        let n = t.chars().count() as isize;
         if i < col + n {
             if i > col {
-                out.push((st, t.chars().take(i - col).collect()));
+                out.push((st, t.chars().take((i - col) as usize).collect()));
             }
             out.push(new);
+            // at a column before the start (a negative value beside an
+            // axis with no room on its left), the text is kept whole
             if i - col + 1 < n {
-                out.push((st, t.chars().skip(i - col + 1).collect()));
+                out.push((st, t.chars().skip((i - col + 1).max(0) as usize).collect()));
             }
             out.extend(rest);
             return out;
@@ -768,7 +770,7 @@ fn overlay_at(i: usize, new: (Style, String), line: StyledLine) -> StyledLine {
         out.push((st, t));
         col += n;
     }
-    out.push(plain(&" ".repeat(i - col)));
+    out.push(plain(&" ".repeat((i - col).max(0) as usize)));
     out.push(new);
     out
 }
@@ -798,6 +800,16 @@ mod tests {
             .into_iter()
             .map(|l| l.into_iter().map(|(_, t)| t).collect())
             .collect()
+    }
+
+    #[test]
+    fn overlaying_before_the_start_keeps_the_text() {
+        let line = vec![plain("│"), plain("ab")];
+        let at = |i| texts(vec![overlay_at(i, plain("┃"), line.clone())]).remove(0);
+        assert_eq!(at(-1), "┃│ab");
+        assert_eq!(at(0), "┃ab");
+        assert_eq!(at(2), "│a┃");
+        assert_eq!(at(5), "│ab  ┃");
     }
 
     // tests_Hledger_Write_Chart_Text.
