@@ -129,10 +129,75 @@ Linking needs `libgmp-dev`. The bench crate has no dependencies.
 
 ## `let` and `split` in CSV rules
 
-CSV rules files will be able to derive several postings from one amount, with
-named formulas (`let NAME EXPR`, read back as `%{NAME}`) and an exact
-allocation function (`%{split(VALUE, WEIGHTS, I)}`). This lands with
-milestone 7b, together with its documentation here.
+hledgers extends CSV rules with named values and an exact split, so that one
+amount in a bank's CSV can become several postings without editing the CSV.
+Rules files that use neither behave exactly as hledger's.
+
+**`let NAME VALUE`** (or `let NAME: VALUE`) names a value, which is a field
+template like any other: `let principal %payment - %interest`. A let can be
+assigned wherever a field can: at top level, indented in an `if` block (where
+it overrides earlier assignments for the records the block matches, and its
+`\1` refers to the block's match groups), and in an `ifs` table, as a
+`let:NAME` column. The last assignment in effect wins, as for fields.
+`%{NAME}` gives a let's value, and so does a bare `NAME` in a template
+function's arguments; a let's value can use other lets and hledger fields
+(`let memo paid at %{description}`), and its own name gives its previous
+value. A name is a lowercase letter, then lowercase letters, digits and
+underscores, and may not be a hledger field's name (`amount1`, `skip`...) or a
+template function's (`split`...). A let can be used before it is declared. A
+value that is an amount expression is substituted in parentheses, so with
+`let sum %a + %b`, `amount1 %{sum} * 2` doubles the sum.
+
+**`%{split(VALUE, WEIGHTS, I)}`** gives part `I` (from 1) of the amount
+`VALUE` split in proportion to `WEIGHTS`: a number of equal parts (`3`), or
+positive numbers separated by colons (`"30:70"`, `"0.3:0.7"`). `VALUE` is
+read as a CSV amount is, with the `decimal-mark` rule and the `currency`
+rule's commodity: an amount expression if it has an operator, otherwise with
+its sign made canonical. The split is exact: the amount, rounded to the
+decimal places it is written with, is shared out in whole units of its last
+place; each part is rounded down, and the units left over go one each to the
+parts that lost most in rounding, the later part first among equal losses.
+So the parts always add up to the amount: 100.00 split in 3 is 33.33, 33.33
+and 33.34, 333.33 split "30:70" is 100.00 and 233.33. A negative amount's
+parts are negative. A part is written with the amount's commodity, without
+digit group marks, with the same decimal places, so reading it as an amount
+again changes nothing. Bad weights, a part number out of range, and a first
+argument that is not an amount are errors: when the rules are read if they
+are written there, otherwise for the record.
+
+A mortgage payment, of which the bank's CSV gives the interest, shared
+between two owners, the principal equally and the interest 30:70:
+
+    date,description,payment,interest
+    2024-01-01,mortgage,1000.00,333.33
+
+    skip 1
+    fields date, description, payment, interest
+    let interest %interest
+    let principal %payment - %interest
+    account1 assets:checking
+    amount1 -%payment
+    account2 liabilities:mortgage:alice
+    amount2 %{split(principal, 2, 1)}
+    account3 liabilities:mortgage:bob
+    amount3 %{split(principal, 2, 2)}
+    account4 expenses:interest:alice
+    amount4 %{split(interest, "30:70", 1)}
+    account5 expenses:interest:bob
+    amount5 %{split(interest, "30:70", 2)}
+
+    $ hledgers -f mortgage.csv print
+    2024-01-01 mortgage
+        assets:checking                            -1000.00
+        liabilities:mortgage:alice                   333.33
+        liabilities:mortgage:bob                     333.34
+        expenses:interest:alice                      100.00
+        expenses:interest:bob                        233.33
+
+`tests/rules/let-split.test` has more examples. Limits: a split part has no
+cost (an `@` cost of `VALUE` is dropped); weights use `.` as their decimal
+mark; and since `split` is a template function, hledger's error for an
+unknown function, which lists them all, lists it too.
 
 ## Licence
 
