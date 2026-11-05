@@ -110,6 +110,7 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         return io::write_output(&opts, &commands::quickref::render());
     };
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
+        "print" => commands::print::print,
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
         name => return Err(format!("the {name} command is not implemented yet")),

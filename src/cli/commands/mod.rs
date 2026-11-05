@@ -2,6 +2,7 @@
 
 pub mod check;
 pub mod files;
+pub mod print;
 pub mod quickref;
 
 use super::args::Mode;
@@ -35,7 +36,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &command("notes", &[]),
     &command("payees", &[]),
     &command("prices", &[]),
-    &command("print", &[]),
+    &print::MODE,
     &command("register", &["reg"]),
     &command("rewrite", &[]),
     &command("roi", &[]),
