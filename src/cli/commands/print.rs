@@ -117,9 +117,6 @@ pub const LAYOUT_FLAG: Flag = Flag::new(
 /// Run the print command (print').
 pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
-    if raw.bool("new") {
-        return Err(not_yet("print --new", "8"));
-    }
     // show amounts with all their decimal digits, except generated gain postings
     for t in &mut j.txns {
         for p in &mut t.postings {
