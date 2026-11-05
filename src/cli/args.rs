@@ -198,6 +198,44 @@ impl RawOpts {
     }
 }
 
+/// The flags of a mode in cmdargs' order: the command's own, the hidden
+/// ones (the general ones first), then the general input, output and
+/// help flags.
+fn cmdargs_flags(mode: &'static Mode) -> impl Iterator<Item = &'static Flag> {
+    use super::opts::{HELP_FLAGS, HIDDEN_FLAGS, INPUT_FLAGS, REPORT_FLAGS};
+    (mode.flags.iter().filter(|f| !f.hidden))
+        .chain(HIDDEN_FLAGS)
+        .chain(mode.flags.iter().filter(|f| f.hidden))
+        .chain(INPUT_FLAGS)
+        .chain(REPORT_FLAGS)
+        .chain(HELP_FLAGS)
+}
+
+/// The flag a long name selects (cmdargs' lookupName): the one with that
+/// name, or else the one with a name it is the start of; if several are,
+/// an error naming them.
+fn lookup_long(mode: &'static Mode, name: &str) -> Result<&'static Flag, String> {
+    let matching = |m: &dyn Fn(&str) -> bool| -> Vec<(&'static str, &'static Flag)> {
+        (cmdargs_flags(mode))
+            .filter_map(|f| f.longs.iter().find(|l| m(l)).map(|l| (*l, f)))
+            .collect()
+    };
+    let exact = matching(&|l| l == name);
+    let found = if exact.is_empty() {
+        matching(&|l| l.starts_with(name))
+    } else {
+        exact
+    };
+    match found.as_slice() {
+        [] => Err(format!("Unknown flag: --{name}")),
+        [(_, f)] => Ok(f),
+        _ => Err(format!(
+            "Ambiguous flag '--{name}', could be any of: {}",
+            found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join(" ")
+        )),
+    }
+}
+
 fn find_long(mode: &'static Mode, name: &str) -> Option<&'static Flag> {
     mode.flags
         .iter()
@@ -253,7 +291,7 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
                 Some((n, v)) => (n, Some(v)),
                 None => (long, None),
             };
-            let flag = find_long(mode, name).ok_or_else(|| format!("Unknown flag: --{name}"))?;
+            let flag = lookup_long(mode, name)?;
             let value = match (flag.arity, joined) {
                 (Arity::None, Some(_)) => {
                     return Err(format!("Unhandled argument to flag, none expected: {a}"));
@@ -340,6 +378,14 @@ mod tests {
         let err = |args: &[&str]| process(mode, &strings(args)).unwrap_err();
         assert_eq!(err(&["-m"]), "Unknown flag: -m");
         assert_eq!(err(&["--nosuch"]), "Unknown flag: --nosuch");
+        // long flags may be abbreviated to an unambiguous prefix
+        let raw = process(mode, &strings(&["--vers", "--fi=x"])).unwrap();
+        assert!(raw.bool("version"));
+        assert_eq!(raw.string("file"), Some("x"));
+        assert_eq!(
+            err(&["--ex"]),
+            "Ambiguous flag '--ex', could be any of: exchange examples"
+        );
         assert_eq!(err(&["-f"]), "-f needs a value, none provided");
     }
 }
