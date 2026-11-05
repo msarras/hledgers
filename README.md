@@ -12,10 +12,10 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 7a of 10: the journal reader and writer, valuation, cost
+Milestone 7 of 10: the journal reader and writer, valuation, cost
 conversion, lot tracking, the listing commands, the balance reports, the
-register reports and holdings, with all their output formats, and the CSV
-reader are complete. `hledgers` reads journal files with every directive,
+register reports and holdings, with all their output formats, the CSV,
+timeclock and timedot readers and the import command are complete. `hledgers` reads journal files with every directive,
 include globs, amount expressions, costs, balance assertions and
 assignments, auto postings and periodic transactions; it balances and
 checks entries as hledger 1.99 does and prints the same error messages; it
@@ -68,9 +68,16 @@ end and merge rules, date formats and time zones, decimal marks,
 currencies, amounts and amount expressions, balance assertions, postings 1
 to 99, separators, encodings, and included rules files; rules files read
 as data through their source rule (a file pattern, a data cleaning or
-generating command); and CSV and rules files included by journals. Of
-hledger's 2420 functional test cases 2136 pass byte-identically, all of
-them gated. Translations, timeclock and timedot, the import command,
+generating command); and CSV and rules files included by journals. CSV
+rules also have this repo's `let` and `split` (below). It reads timeclock
+files (clock-in and clock-out sessions, split at midnight, open ones
+ending now; `--old-timeclock`) and timedot files (dots, numbers with
+units, letters), directly or included. `import` appends the new
+transactions of data files, or of the rules files in `rules/`, to the
+journal, remembering how far each was read in `.latest` files (as `print
+--new` does), with `--dry-run`, `--catchup`, `--strict` and the `archive`
+rule. Of hledger's 2420 functional test cases 2182 pass byte-identically,
+all of them gated, with this repo's 27. Translations, `import --get`,
 beancount and ledger output, and the remaining commands are the later
 milestones. Register widths come from `--width` or are 80 columns: the
 terminal's width is not yet queried, and local time is UTC for now.
