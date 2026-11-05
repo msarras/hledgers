@@ -36,7 +36,7 @@ use crate::text::is_space;
 /// The state that directives change and later items see (the jparse*
 /// fields of upstream's Journal). An included file starts with its
 /// includer's, and its changes do not return to the includer.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ParseState {
     /// The year of dates written without one (Y), initially this year.
     pub year: Option<i64>,
@@ -49,8 +49,23 @@ pub struct ParseState {
     /// The aliases from alias directives and account alias: tags, most
     /// recent first, applied to account names as written.
     pub aliases: Vec<AccountAlias>,
-    /// The aliases from --alias options, applied to full account names.
-    pub opt_aliases: Vec<AccountAlias>,
+    /// The aliases from --alias options, applied to full account names,
+    /// or the error of a bad one, which is reported only once an account
+    /// name is aliased (as upstream's lazily parsed aliases are).
+    pub opt_aliases: Result<Vec<AccountAlias>, String>,
+}
+
+impl Default for ParseState {
+    fn default() -> ParseState {
+        ParseState {
+            year: None,
+            default_commodity: None,
+            decimal_mark: None,
+            parent_accounts: Vec::new(),
+            aliases: Vec::new(),
+            opt_aliases: Ok(Vec::new()),
+        }
+    }
 }
 
 /// Parse a journal file's text, and the files it includes, into an
@@ -64,13 +79,16 @@ pub fn parse_journal(
 ) -> Result<(Journal, ParseState), String> {
     let mut st = ParseState {
         year: Some(iopts.today.year()),
-        opt_aliases: aliases_from_opts(iopts)?,
+        opt_aliases: aliases_from_opts(iopts),
         ..ParseState::default()
     };
     let mut j = Journal::default();
     let mut stack = vec![(file.to_string(), canonical_path(&absolute_path(file)))];
-    parse_file(iopts, &mut st, &mut stack, &mut j, file, text)?;
-    Ok((j, st))
+    match parse_file(iopts, &mut st, &mut stack, &mut j, file, text) {
+        Ok(()) => Ok((j, st)),
+        Err(Failure::Here(e)) => Err(e.pretty(file, text)),
+        Err(Failure::Included(msg) | Failure::Unlocated(msg)) => Err(msg),
+    }
 }
 
 /// An auto posting rule's posting written alone, `ACCOUNT  AMOUNT` or
@@ -99,7 +117,7 @@ pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule
     };
     rule.map_err(|e| match e {
         Failure::Here(e) => e.pretty("", &text),
-        Failure::Included(msg) => msg,
+        Failure::Included(msg) | Failure::Unlocated(msg) => msg,
     })
 }
 
@@ -116,11 +134,14 @@ pub fn aliases_from_opts(iopts: &InputOpts) -> Result<Vec<AccountAlias>, String>
         .collect()
 }
 
-/// Why parsing stopped: an error in this file, or a message about an error
-/// in a file it includes.
+/// Why parsing stopped: an error in this file; a message about an error
+/// in it or a file it includes, which each includer prefixes with its
+/// name; or a message about something with no place in the files, shown
+/// as it is.
 enum Failure {
     Here(ParseError),
     Included(String),
+    Unlocated(String),
 }
 
 impl From<ParseError> for Failure {
@@ -132,7 +153,8 @@ impl From<ParseError> for Failure {
 type R<T> = Result<T, Failure>;
 
 /// Parse one file into the journal, as if it were written where it is
-/// included.
+/// included. An error in it, or in a file it includes, becomes a complete
+/// message, prefixed with its name if it was in an included file.
 fn parse_file(
     iopts: &InputOpts,
     st: &mut ParseState,
@@ -140,7 +162,7 @@ fn parse_file(
     j: &mut Journal,
     file: &str,
     text: &str,
-) -> Result<(), String> {
+) -> R<()> {
     let mut p = JournalParser {
         c: Cursor::new(text),
         file: Arc::from(file),
@@ -151,9 +173,11 @@ fn parse_file(
         anchor: (0, 1, 0),
     };
     match p.journalp() {
-        Ok(()) => Ok(()),
-        Err(Failure::Here(e)) => Err(e.pretty(file, text)),
-        Err(Failure::Included(msg)) => Err(format!("in file included from {file},\n{msg}")),
+        Err(Failure::Here(e)) => Err(Failure::Included(e.pretty(file, text))),
+        Err(Failure::Included(msg)) => Err(Failure::Included(format!(
+            "in file included from {file},\n{msg}"
+        ))),
+        r => r,
     }
 }
 
@@ -608,7 +632,7 @@ impl<'a> JournalParser<'a, '_> {
         self.stack.push((file.to_string(), canonical_path(file)));
         let r = parse_file(self.iopts, &mut st, self.stack, self.j, file, &text);
         self.stack.pop();
-        r.map_err(Failure::Included)
+        r
     }
 
     /// `account NAME`, with a comment, tags (including `type:` and
@@ -709,12 +733,14 @@ impl<'a> JournalParser<'a, '_> {
 
     /// An account name with the parent account and --alias options applied
     /// (applyParentAndOptionAliases).
-    fn apply_parent_and_option_aliases(&mut self, a: &str) -> PResult<String> {
+    fn apply_parent_and_option_aliases(&mut self, a: &str) -> R<String> {
         let parent = self.st.parent_accounts.join(":");
-        Ok(alias_or_die(
-            &self.st.opt_aliases,
-            &join_account_names(&parent, a),
-        ))
+        let aliases = self
+            .st
+            .opt_aliases
+            .as_ref()
+            .map_err(|e| Failure::Unlocated(e.clone()))?;
+        Ok(alias_or_die(aliases, &join_account_names(&parent, a)))
     }
 
     /// `commodity AMOUNT` declaring a commodity and its display style, or
