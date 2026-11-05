@@ -4,7 +4,7 @@
 cli/cli.test:1-5,10,13-23,26,29,35-36,42-45,51
 print/print.test
 print/print-style.test:1-7,14
-print/explicit.test:1-8
+print/explicit.test
 print/date2.test
 print/long-account-name.test
 print/query-not-acct.test
@@ -12,6 +12,7 @@ print/export.test:1-3,5,8
 journal/parse-errors.test
 journal/amount-expressions.test:1-3,5-14,17-30,32,34,36
 journal/assertions.test
+journal/auto-postings.test:1,5-12,16-19,21-22
 journal/precision.test:1-2,7-8,10,13,16-23
 journal/costs.test:1,3,5-8,23,29,31,33-36,38-41
 journal/infer-cost.test:1

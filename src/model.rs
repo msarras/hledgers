@@ -728,6 +728,23 @@ impl Journal {
         self.declared_accounts.iter().map(|(a, _)| a)
     }
 
+    /// The tags declared for an account and its parents, its own first
+    /// (journalInheritedAccountTags).
+    pub fn inherited_account_tags(&self, a: &str) -> Vec<Tag> {
+        let mut tags: Vec<Tag> = Vec::new();
+        for name in std::iter::once(a).chain(crate::account::parent_account_names(a)) {
+            union_tags(
+                &mut tags,
+                self.declared_account_tags
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+        }
+        tags
+    }
+
     /// The account to use for postings hledger generates to an account of
     /// this type: the first declared with it, or else the alphabetically
     /// first having it, or else the default (journalAccountForType).

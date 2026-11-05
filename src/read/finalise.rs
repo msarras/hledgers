@@ -492,10 +492,19 @@ fn journal_tag_gain_postings(j: Journal) -> Result<Journal, String> {
     Ok(j)
 }
 
-/// Add auto postings (journalAddAutoPostings).
-// M2c: auto postings; the journal is unchanged until then.
-fn journal_add_auto_postings(_iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
-    Ok(j)
+/// Balance the transactions without checking assertions, then add auto
+/// postings (journalAddAutoPostings).
+fn journal_add_auto_postings(iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
+    let bopts = super::BalancingOpts {
+        ignore_assertions: true,
+        lotful_commodities: j.lotful_commodities(),
+        account_lots_tags: j.account_lots_tags(),
+        lenient_lots: lenient_lots(iopts),
+        verbose_balancing_tags: iopts.verbose_tags,
+        ..iopts.balancing.clone()
+    };
+    let (j, _) = super::balancing::journal_balance_transactions(&bopts, j, false)?;
+    super::modifiers::journal_modify_transactions(iopts.verbose_tags, iopts.today, j)
 }
 
 /// With `hledger check ordereddates`, check that transactions are in date
