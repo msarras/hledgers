@@ -1509,16 +1509,10 @@ fn posting_round_calculated_amounts(mut p: Posting) -> Posting {
 }
 
 /// A file path's reader prefix, if any, and the rest (splitReaderPrefix).
+/// The rules reader has no prefix: `rules:` stays part of the path, as
+/// upstream leaves it.
 pub fn split_reader_prefix(f: &str) -> (Option<&str>, &str) {
-    for r in [
-        "journal",
-        "timeclock",
-        "timedot",
-        "csv",
-        "rules",
-        "ssv",
-        "tsv",
-    ] {
+    for r in ["journal", "timeclock", "timedot", "csv", "ssv", "tsv"] {
         if let Some(rest) = f.strip_prefix(r).and_then(|s| s.strip_prefix(':')) {
             return (Some(r), rest);
         }
