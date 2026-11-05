@@ -756,6 +756,19 @@ impl Journal {
         DateSpan::exact(min, max.map(|d| d.add_days(1)))
     }
 
+    /// The span of all the transactions' and postings' dates, primary and
+    /// secondary, from the earliest to the day after the latest
+    /// (journalDateSpanBothDates).
+    pub fn date_span_both_dates(&self) -> DateSpan {
+        crate::dates::days_span(self.txns.iter().flat_map(|t| {
+            let pdates = t
+                .postings
+                .iter()
+                .flat_map(|p| p.date.into_iter().chain(p.date2));
+            std::iter::once(t.date).chain(t.date2).chain(pdates)
+        }))
+    }
+
     /// The tags declared for an account and its parents, its own first
     /// (journalInheritedAccountTags).
     pub fn inherited_account_tags(&self, a: &str) -> Vec<Tag> {

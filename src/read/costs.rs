@@ -480,10 +480,10 @@ pub fn journal_infer_market_prices_from_transactions(mut j: Journal) -> Journal 
         .flat_map(|t| {
             t.postings.iter().flat_map(move |p| {
                 let date = p.date_in(Some(t));
-                p.amount
-                    .amounts_raw()
-                    .iter()
-                    .filter_map(move |a| crate::valuation::amount_price_from_cost(date, a))
+                p.amount.amounts_raw().iter().filter_map(move |a| {
+                    crate::valuation::amount_price_directive_from_cost(date, a)
+                        .map(|pd| crate::valuation::price_directive_to_market_price(&pd))
+                })
             })
         })
         .collect::<Vec<MarketPrice>>();
