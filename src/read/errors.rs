@@ -242,6 +242,20 @@ pub fn show_price_directive(pd: &PriceDirective) -> String {
     )
 }
 
+/// The start of an error message about a CSV record: its file and lines
+/// (the end line being the start of the line after it), the first line
+/// number and the record's fields joined by commas, and a blank line
+/// (csvRecordErrPrefix).
+pub fn csv_record_error_prefix(file: &str, l1: usize, lend: usize, record_text: &str) -> String {
+    let l2 = lend.saturating_sub(1);
+    let last = if l2 > l1 {
+        format!("-{l2}")
+    } else {
+        String::new()
+    };
+    format!("{file}:{l1}{last}:\n{l1} | {record_text}\n\n")
+}
+
 /// An error message with the transaction's position and text after it
 /// (annotateErrorWithTransaction).
 pub fn annotate_error_with_transaction(t: &Transaction, msg: &str) -> String {

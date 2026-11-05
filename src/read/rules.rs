@@ -1772,7 +1772,7 @@ impl CsvRules {
 
 /// A reference's name and row number, if it has a `_N` suffix with N at
 /// least 2 (splitRowSuffix).
-fn split_row_suffix(f: &str) -> Option<(&str, usize)> {
+pub fn split_row_suffix(f: &str) -> Option<(&str, usize)> {
     let i = f.rfind('_')?;
     let (base, digits) = (&f[..i], &f[i + 1..]);
     if base.is_empty() || digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
@@ -1780,6 +1780,97 @@ fn split_row_suffix(f: &str) -> Option<(&str, usize)> {
     }
     let row: usize = digits.parse().ok()?;
     (row >= 2).then_some((base, row))
+}
+
+impl CsvRules {
+    /// A record group as its fields joined by commas, then its field values
+    /// one per line, each with its number and its name if the fields list
+    /// gives one; for a merged group, row by row, the later rows' references
+    /// with their `_ROWNUM` suffix (showRecordFields).
+    pub fn show_record_fields(&self, rows: &[CsvRecord]) -> String {
+        let named: Vec<&(String, usize)> = self
+            .field_indexes
+            .iter()
+            .filter(|(n, _)| !n.is_empty())
+            .collect();
+        let numwidth = rows
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0)
+            .max(1)
+            .to_string()
+            .len();
+        let namewidth = named
+            .iter()
+            .map(|(n, _)| n.chars().count())
+            .max()
+            .unwrap_or(0);
+        let mut lines = vec![format!("record: {}", record_as_approximate_text(rows))];
+        for (rownum, row) in rows.iter().enumerate().map(|(i, r)| (i + 1, r)) {
+            if rows.len() > 1 {
+                lines.push(format!("row {rownum}:"));
+            }
+            let suffix = if rownum > 1 {
+                format!("_{rownum}")
+            } else {
+                String::new()
+            };
+            let slen = suffix.chars().count();
+            for (i, v) in row.iter().enumerate().map(|(i, v)| (i + 1, v)) {
+                let name = named
+                    .iter()
+                    .find(|(_, ix)| *ix == i)
+                    .map_or(String::new(), |(n, _)| format!("{n}{suffix}"));
+                lines.push(format!(
+                    "  {} {}  {v}",
+                    justify_left(numwidth + 1 + slen, &format!("%{i}{suffix}")),
+                    justify_left(namewidth + slen, &name)
+                ));
+            }
+        }
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        text.trim_end_matches(is_space).to_string()
+    }
+
+    /// The assignments in effect for each hledger field, each with the
+    /// earlier ones it overrides, ending with a newline (showRules).
+    pub fn show_rules(&self, record: &[CsvRecord]) -> String {
+        let mut out = String::from("hledger field assignment rules:\n");
+        for f in journal_field_names() {
+            let assignments = self.field_assignments(record, f);
+            let Some(((a, _), overridden)) = assignments.split_last() else {
+                continue;
+            };
+            let label = format!("{} ", justify_left(14, &format!("  {f}:")));
+            out.push_str(&with_rules_pos(
+                &format!("{label}{}", a.template.text),
+                &a.pos,
+            ));
+            out.push('\n');
+            for (o, _) in overridden.iter().rev() {
+                let line = with_rules_pos(&format!("    (overrides: {}", o.template.text), &o.pos);
+                out.push_str(&format!("{line})\n"));
+            }
+        }
+        out
+    }
+}
+
+/// A line of text with a rules file position after it, `(FILE:LINE)`, at
+/// column 45 or after (withRulesPos).
+pub fn with_rules_pos(text: &str, pos: &RulesPos) -> String {
+    match pos {
+        Some((f, l)) => format!("{}  ({f}:{l})", justify_left(43, text)),
+        None => text.to_string(),
+    }
+}
+
+/// Text padded with spaces on the right to this many characters
+/// (Data.Text's justifyLeft).
+fn justify_left(width: usize, s: &str) -> String {
+    let n = s.chars().count();
+    format!("{s}{}", " ".repeat(width.saturating_sub(n)))
 }
 
 /// A record group's field values joined by commas, approximating the

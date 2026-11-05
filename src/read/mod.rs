@@ -221,10 +221,16 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
     let format = prefix
         .or(iopts.format.as_deref())
         .unwrap_or_else(|| format_from_extension(f));
-    if format != "journal" {
-        return Err(format!(
-            "reading {format} files is not supported yet (hledgers milestone 7): {f}"
-        ));
+    match format {
+        "journal" => {}
+        "csv" => return csv::read_csv_file(iopts, f, ','),
+        "ssv" => return csv::read_csv_file(iopts, f, ';'),
+        "tsv" => return csv::read_csv_file(iopts, f, '\t'),
+        _ => {
+            return Err(format!(
+                "reading {format} files is not supported yet (hledgers milestone 7): {f}"
+            ));
+        }
     }
     let text = if f == "-" {
         let mut bytes = Vec::new();
