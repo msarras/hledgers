@@ -8,5 +8,6 @@ pub mod decimal;
 pub mod model;
 pub mod parse;
 pub mod query;
+pub mod read;
 pub mod regex;
 pub mod text;
