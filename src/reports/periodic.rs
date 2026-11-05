@@ -724,32 +724,20 @@ fn mark_account_boring(spec: &ReportSpec, acct: &mut AccountTree<BalanceData>) {
 /// The report from the account tree: its rows, sorted by amount or by
 /// declaration, the totals row from the root's balances including
 /// subaccounts, then percentages with --percent, and averages of counts
-/// shown with one decimal place (generateMultiBalanceReport,
-/// generatePeriodicReport).
+/// shown with one decimal place (generateMultiBalanceReport).
 pub fn generate_multi_balance_report(
     ropts: &ReportOpts,
     colspans: Option<&DayPartition>,
-    mut acct: AccountTree<BalanceData>,
+    acct: AccountTree<BalanceData>,
 ) -> Result<MultiBalanceReport, String> {
-    let rows = match (ropts.account_list_mode, ropts.sort_amount) {
-        (AccountListMode::Tree, true) => {
-            sort_tree_by_amount(ropts, &mut acct);
-            build_report_rows(ropts, &acct)
-        }
-        (AccountListMode::Flat, true) => {
-            sort_flat_by_amount(ropts, build_report_rows(ropts, &acct))
-        }
-        _ => {
-            acct.sort_by_declaration();
-            build_report_rows(ropts, &acct)
-        }
-    };
-    let totals = make_row(ropts, |b| &b.incl, (), &acct.root().data);
-    let mut report = PeriodicReport {
-        dates: maybe_day_partition_to_date_spans(colspans),
-        rows,
-        totals,
-    };
+    let mut report = generate_periodic_report(
+        ropts,
+        colspans,
+        acct,
+        |balance, data| make_row(ropts, balance, data),
+        |b: &BalanceData| b.incl.clone(),
+        MixedAmount::clone,
+    );
     if ropts.percent {
         report = report_percent(ropts, report)?;
     }
@@ -763,23 +751,69 @@ pub fn generate_multi_balance_report(
     Ok(report)
 }
 
+/// Which of an account's balances in a period a row shows: including or
+/// excluding its subaccounts' (bdincludingsubs, bdexcludingsubs).
+pub type Balance = fn(&BalanceData) -> &MixedAmount;
+
+fn incl(b: &BalanceData) -> &MixedAmount {
+    &b.incl
+}
+
+fn excl(b: &BalanceData) -> &MixedAmount {
+    &b.excl
+}
+
+/// A periodic report from an account tree whose accounts have data of
+/// type `T` in each period: its rows, made by `make_row` from an account's
+/// period data and the balance to show, sorted by amount (the amount
+/// `tree_amount` reads from an account's data in tree mode, or
+/// `flat_amount` from a row's total in list mode) or by declaration; the
+/// totals row from the root's balances including subaccounts
+/// (generatePeriodicReport).
+pub fn generate_periodic_report<T, C>(
+    ropts: &ReportOpts,
+    colspans: Option<&DayPartition>,
+    mut acct: AccountTree<T>,
+    make_row: impl Fn(Balance, &PeriodData<T>) -> PeriodicReportRow<(), C>,
+    tree_amount: impl Fn(&T) -> MixedAmount,
+    flat_amount: impl Fn(&C) -> MixedAmount,
+) -> PeriodicReport<DisplayName, C> {
+    let rows = match (ropts.account_list_mode, ropts.sort_amount) {
+        (AccountListMode::Tree, true) => {
+            sort_tree_by_amount(ropts, &mut acct, tree_amount);
+            build_report_rows(ropts, &acct, &make_row)
+        }
+        (AccountListMode::Flat, true) => sort_flat_by_amount(
+            ropts,
+            build_report_rows(ropts, &acct, &make_row),
+            flat_amount,
+        ),
+        _ => {
+            acct.sort_by_declaration();
+            build_report_rows(ropts, &acct, &make_row)
+        }
+    };
+    let totals = make_row(incl, &acct.root().data);
+    PeriodicReport {
+        dates: maybe_day_partition_to_date_spans(colspans),
+        rows,
+        totals,
+    }
+}
+
 /// Each account's subaccounts sorted by amount, largest first (or for
 /// normally negative accounts, smallest first), then by name: the sum of
-/// their balances including subaccounts, or for accumulated balances the
-/// last (sortTreeByAmount).
-fn sort_tree_by_amount(ropts: &ReportOpts, acct: &mut AccountTree<BalanceData>) {
-    let amount = |a: &Account<BalanceData>| -> MixedAmount {
+/// the amounts `amount` reads from their period data, or for accumulated
+/// balances the last (sortTreeByAmount).
+fn sort_tree_by_amount<T>(
+    ropts: &ReportOpts,
+    acct: &mut AccountTree<T>,
+    amount: impl Fn(&T) -> MixedAmount,
+) {
+    let amount = |a: &Account<T>| -> MixedAmount {
         let m = match ropts.balance_accum {
-            BalanceAccumulation::PerPeriod => a
-                .data
-                .periods
-                .values()
-                .map(|b| &b.incl)
-                .sum::<MixedAmount>(),
-            _ => a
-                .data
-                .last()
-                .map_or_else(MixedAmount::null, |b| b.incl.clone()),
+            BalanceAccumulation::PerPeriod => a.data.periods.values().map(&amount).sum(),
+            _ => a.data.last().map_or_else(MixedAmount::null, &amount),
         };
         m.strip_costs()
     };
@@ -791,13 +825,15 @@ fn sort_tree_by_amount(ropts: &ReportOpts, acct: &mut AccountTree<BalanceData>) 
     }
 }
 
-/// The rows sorted by total, largest first (or for normally negative
-/// accounts, smallest first), then by full name (sortFlatByAmount).
-fn sort_flat_by_amount(
+/// The rows sorted by the amount `amount` reads from their totals, largest
+/// first (or for normally negative accounts, smallest first), then by full
+/// name (sortFlatByAmount).
+fn sort_flat_by_amount<C>(
     ropts: &ReportOpts,
-    mut rows: Vec<MultiBalanceReportRow>,
-) -> Vec<MultiBalanceReportRow> {
-    let amount = |r: &MultiBalanceReportRow| r.total.clone().strip_costs();
+    mut rows: Vec<PeriodicReportRow<DisplayName, C>>,
+    amount: impl Fn(&C) -> MixedAmount,
+) -> Vec<PeriodicReportRow<DisplayName, C>> {
+    let amount = |r: &PeriodicReportRow<DisplayName, C>| amount(&r.total).strip_costs();
     match ropts.normal_balance {
         Some(NormalSign::NormallyNegative) => {
             rows.sort_by_cached_key(|r| (amount(r), r.name.full.clone()))
@@ -812,58 +848,61 @@ fn sort_flat_by_amount(
 /// their names (in tree mode) prefixed to their first interesting
 /// subaccount's, and the accounts --drop drops left out
 /// (buildReportRows).
-fn build_report_rows(
+fn build_report_rows<T, C>(
     ropts: &ReportOpts,
-    acct: &AccountTree<BalanceData>,
-) -> Vec<MultiBalanceReportRow> {
+    acct: &AccountTree<T>,
+    make_row: &impl Fn(Balance, &PeriodData<T>) -> PeriodicReportRow<(), C>,
+) -> Vec<PeriodicReportRow<DisplayName, C>> {
     let mut rows = Vec::new();
-    add_rows(
+    let mut add = RowAdder {
         ropts,
         acct,
-        &mut rows,
-        true,
-        -(ropts.drop as isize),
-        0,
-        ROOT,
-    );
+        make_row,
+        rows: &mut rows,
+    };
+    add.rows(true, -(ropts.drop as isize), 0, ROOT);
     rows
 }
 
-/// Add the rows of an account at this depth, below this many boring
-/// parents, and of its subaccounts (buildReportRows' mkRows).
-fn add_rows(
-    ropts: &ReportOpts,
-    acct: &AccountTree<BalanceData>,
-    rows: &mut Vec<MultiBalanceReportRow>,
-    is_root: bool,
-    d: isize,
-    boring_parents: usize,
-    i: usize,
-) {
-    fn all_boring(acct: &AccountTree<BalanceData>, i: usize) -> bool {
+/// What adding the rows of an account and its subaccounts needs
+/// (buildReportRows' mkRows).
+struct RowAdder<'a, T, C, F> {
+    ropts: &'a ReportOpts,
+    acct: &'a AccountTree<T>,
+    make_row: &'a F,
+    rows: &'a mut Vec<PeriodicReportRow<DisplayName, C>>,
+}
+
+impl<T, C, F: Fn(Balance, &PeriodData<T>) -> PeriodicReportRow<(), C>> RowAdder<'_, T, C, F> {
+    /// Add the rows of an account at this depth, below this many boring
+    /// parents, and of its subaccounts (mkRows).
+    fn rows(&mut self, is_root: bool, d: isize, boring_parents: usize, i: usize) {
+        fn all_boring<T>(acct: &AccountTree<T>, i: usize) -> bool {
+            let a = &acct.accounts[i];
+            a.boring && a.subs.iter().all(|&s| all_boring(acct, s))
+        }
+        let (ropts, acct) = (self.ropts, self.acct);
         let a = &acct.accounts[i];
-        a.boring && a.subs.iter().all(|&s| all_boring(acct, s))
-    }
-    let a = &acct.accounts[i];
-    let tree = ropts.account_list_mode == AccountListMode::Tree;
-    let can_omit_parents = !tree || !ropts.no_elide;
-    let (sub_d, sub_boring_parents) = if all_boring(acct, i) {
-        return;
-    } else if a.boring && is_root {
-        (d, 0)
-    } else if a.boring && d < 0 {
-        (d + 1, 0)
-    } else if a.boring && can_omit_parents {
-        (d, boring_parents + 1)
-    } else {
-        let name = displayed_name(ropts, d, boring_parents, &a.name);
-        let balance: fn(&BalanceData) -> &MixedAmount =
-            if tree { |b| &b.incl } else { |b| &b.excl };
-        rows.push(make_row(ropts, balance, name, &a.data));
-        (d + 1, 0)
-    };
-    for &s in &a.subs {
-        add_rows(ropts, acct, rows, false, sub_d, sub_boring_parents, s);
+        let tree = ropts.account_list_mode == AccountListMode::Tree;
+        let can_omit_parents = !tree || !ropts.no_elide;
+        let (sub_d, sub_boring_parents) = if all_boring(acct, i) {
+            return;
+        } else if a.boring && is_root {
+            (d, 0)
+        } else if a.boring && d < 0 {
+            (d + 1, 0)
+        } else if a.boring && can_omit_parents {
+            (d, boring_parents + 1)
+        } else {
+            let name = displayed_name(ropts, d, boring_parents, &a.name);
+            let balance = if tree { incl } else { excl };
+            let row = (self.make_row)(balance, &a.data).map_name(|()| name);
+            self.rows.push(row);
+            (d + 1, 0)
+        };
+        for &s in &a.subs {
+            self.rows(false, sub_d, sub_boring_parents, s);
+        }
     }
 }
 
@@ -899,12 +938,11 @@ fn displayed_name(
 /// A report row from an account's period data: its amounts, their total
 /// (or for accumulated balances, the last) and their average
 /// (makeMultiBalanceReportRow, makePeriodicReportRow).
-fn make_row<N>(
+fn make_row(
     ropts: &ReportOpts,
-    balance: fn(&BalanceData) -> &MixedAmount,
-    name: N,
+    balance: Balance,
     data: &PeriodData<BalanceData>,
-) -> PeriodicReportRow<N, MixedAmount> {
+) -> PeriodicReportRow<(), MixedAmount> {
     let amounts: Vec<MixedAmount> = data.periods.values().map(|b| balance(b).clone()).collect();
     let (sum, average) = MixedAmount::sum_and_average(&amounts);
     let total = match ropts.balance_accum {
@@ -912,7 +950,7 @@ fn make_row<N>(
         _ => amounts.last().cloned().unwrap_or_default(),
     };
     PeriodicReportRow {
-        name,
+        name: (),
         amounts,
         total,
         average,
