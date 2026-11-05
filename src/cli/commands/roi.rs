@@ -611,8 +611,14 @@ impl Roi<'_> {
         let show_cash_flow = opts.raw.bool("cashflow");
         let (irr_details, irr) =
             self.internal_rate_of_return(show_cash_flow, &flow_details, &span)?;
-        let (twr_details, twr) =
-            self.time_weighted_return(show_cash_flow, &show_quantity, &sv, &span)?;
+        // upstream's TWR is lazy: its errors (eg amounts in several
+        // commodities) surface only when its details are shown, or when the
+        // IRR was found and the row needs it
+        let (twr_details, twr) = if show_cash_flow || irr.is_ok() {
+            self.time_weighted_return(show_cash_flow, &show_quantity, &sv, &span)?
+        } else {
+            (String::new(), Err(String::new()))
+        };
         let cash_flow_amount = -span.cash_flow.iter().map(|(_, m)| m).sum::<MixedAmount>();
         let small_is_zero = |x: f64| if x.abs() < 0.01 { 0.0 } else { x };
         let percent = |x: f64| format!("{}%", show_ffloat(2, small_is_zero(x)));
