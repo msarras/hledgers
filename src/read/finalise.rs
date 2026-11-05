@@ -103,9 +103,10 @@ pub fn journal_add_account_types(j: &mut Journal) {
         .collect();
     let declared_types: BTreeSet<AccountType> = j.declared_account_types.keys().copied().collect();
     let names = journal_account_names(j);
-    // each account's type and whether it was declared (inherited or not)
+    // each account's type and whether it was declared (inherited or not),
+    // for all the names and their parents, parents first (accountNameTreeFrom)
     let mut types: BTreeMap<&str, (AccountType, bool)> = BTreeMap::new();
-    for a in names.iter().map(|a| &**a) {
+    for a in expand_account_names(names.iter().map(|a| &**a)) {
         let parent = a.rfind(':').and_then(|i| types.get(&a[..i]).copied());
         let t = declared
             .get(a)
@@ -125,8 +126,8 @@ pub fn journal_add_account_types(j: &mut Journal) {
         .collect();
 }
 
-/// The account names declared or posted to, with all their parents, sorted
-/// (journalAccountNamesDeclaredOrImplied).
+/// The account names declared, or posted to or implied as parents by the
+/// postings, sorted (journalAccountNamesDeclaredOrImplied).
 pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
     let used: BTreeSet<&str> = j
         .txns
@@ -788,6 +789,10 @@ mod tests {
         // a type declared for one account is not inferred for others
         let j = read("account a  ; type:X\n2000-01-01\n  expenses:x  1\n  a  -1\n");
         assert_eq!(j.account_types.get("expenses:x"), None);
+        // there, a declared account inherits its undeclared parent's inferred type
+        let j = read("account trade  ; type:V\naccount equity:conversion\n");
+        let t = j.account_types.get("equity:conversion").copied();
+        assert_eq!(t, Some(AccountType::Equity));
     }
 
     #[test]
