@@ -12,8 +12,12 @@ use std::sync::Arc;
 use super::InputOpts;
 use super::journal::ParseState;
 use crate::account::{AccountName, AccountType, account_name_infer_type, expand_account_names};
-use crate::amount::{Amount, CommodityStyles, Rounding, add_amount_style, styles_with_rounding};
-use crate::model::{Journal, Tag};
+use crate::amount::{
+    Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, Precision,
+    Rounding, Sym, add_amount_style, styles_with_rounding,
+};
+use crate::decimal::Decimal;
+use crate::model::{Commodity, CommodityAliases, Journal, Posting, Tag};
 
 /// Finalise a journal parsed from this file and text (journalFinalise).
 pub fn journal_finalise(
@@ -182,11 +186,233 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
     }
 }
 
-/// Convert amounts in commodity aliases to their commodity
-/// (journalApplyCommodityAliases).
-// M2c: commodity aliases; the journal is unchanged until then.
-fn journal_apply_commodity_aliases(j: Journal) -> Result<Journal, String> {
+/// Convert the amounts written in a commodity alias to its commodity
+/// (journalApplyCommodityAliases): posting amounts with their costs, cost
+/// bases and balance assertions, the postings of periodic transaction and
+/// auto posting rules (a multiplier's symbol is just renamed), and price
+/// directives. For an alias with a quantity other than 1, quantities are
+/// divided by it and unit costs, cost bases and prices multiplied by it;
+/// when that is inexact, a unit cost becomes the exact total cost. A
+/// converted posting keeps its original form, for print. An alias declared
+/// on two commodities, or a commodity with aliases that is itself an
+/// alias, is an error.
+fn journal_apply_commodity_aliases(mut j: Journal) -> Result<Journal, String> {
+    let excerpt = |c: &Commodity| {
+        let (f, l, ex) = super::errors::commodity_tag_error_excerpt(c);
+        format!("{f}:{l}:\n{ex}")
+    };
+    let mut declaring: BTreeMap<&Sym, Vec<&Commodity>> = BTreeMap::new();
+    for c in j.declared_commodities.values() {
+        for (a, _) in &c.aliases {
+            declaring.entry(&a.commodity).or_default().insert(0, c);
+        }
+    }
+    if let Some((a, cs)) = declaring.iter().find(|(_, cs)| cs.len() > 1) {
+        let mut msg = format!("Alias '{a}' is declared on more than one commodity:\n\n");
+        for c in cs {
+            msg.push_str(&excerpt(c));
+            msg.push('\n');
+        }
+        return Err(msg);
+    }
+    let aliases = j.commodity_aliases();
+    if let Some(c) = j
+        .declared_commodities
+        .values()
+        .find(|c| !c.aliases.is_empty() && aliases.contains_key(&c.symbol))
+    {
+        return Err(format!(
+            "Commodity '{}' has aliases, but is also an alias of another commodity:\n\n{}\n",
+            c.symbol,
+            excerpt(c)
+        ));
+    }
+    if aliases.is_empty() {
+        return Ok(j);
+    }
+    let conv = AliasConverter { aliases: &aliases };
+    for t in &mut j.txns {
+        for p in &mut t.postings {
+            conv.posting(p);
+        }
+    }
+    for pt in &mut j.periodic_txns {
+        for p in &mut pt.postings {
+            conv.posting(p);
+        }
+    }
+    for tm in &mut j.txn_modifiers {
+        for r in &mut tm.rules {
+            if r.is_multiplier {
+                r.posting.amount = r
+                    .posting
+                    .amount
+                    .map(|a| convert_alias_amount(&aliases, a).0);
+            } else {
+                conv.posting(&mut r.posting);
+            }
+        }
+    }
+    for pd in &mut j.price_directives {
+        match aliases.get(&pd.commodity) {
+            None => pd.amount = conv.exact(&pd.amount),
+            Some((c, q, _)) => {
+                pd.commodity = c.clone();
+                pd.amount = scale_by(q, conv.exact(&pd.amount));
+            }
+        }
+    }
     Ok(j)
+}
+
+/// An amount written in one of these commodity aliases converted to its
+/// commodity, with the alias quantity (or 1). It gets the commodity's
+/// style; from a plain alias it keeps its precision, otherwise it gets the
+/// commodity's precision, or more if needed to show an exact conversion,
+/// or if that is unknown, all its decimals up to 8 (convertAliasAmount).
+pub fn convert_alias_amount(aliases: &CommodityAliases, a: &Amount) -> (Amount, Decimal) {
+    let one = Decimal::from_i64(1);
+    let Some((c, q, style)) = aliases.get(&a.commodity) else {
+        return (a.clone(), one);
+    };
+    if *q == one {
+        let style = style.as_ref().map_or_else(
+            || a.style.clone(),
+            |s| {
+                Arc::new(AmountStyle {
+                    precision: a.style.precision,
+                    ..(**s).clone()
+                })
+            },
+        );
+        let a = Amount {
+            commodity: c.clone(),
+            style,
+            ..a.clone()
+        };
+        return (a, one);
+    }
+    let converted = Amount {
+        commodity: c.clone(),
+        quantity: &a.quantity / q,
+        ..a.clone()
+    };
+    let digits = converted.internal_precision();
+    let exact = &converted.quantity * q == a.quantity;
+    let (style, precision) = match style {
+        Some(s) => match s.precision {
+            Precision::Fixed(n) => ((**s).clone(), if exact { n.max(digits) } else { n }),
+            Precision::Natural => ((**s).clone(), digits.min(DEFAULT_MAX_DISPLAY_PRECISION)),
+        },
+        None => (
+            (*a.style).clone(),
+            digits.min(DEFAULT_MAX_DISPLAY_PRECISION),
+        ),
+    };
+    let style = Arc::new(AmountStyle {
+        precision: Precision::Fixed(precision),
+        ..style
+    });
+    (Amount { style, ..converted }, q.clone())
+}
+
+/// A calculated amount with all its decimal digits shown, up to 8, but no
+/// trailing zeros (withAllDigits).
+fn with_all_digits(a: Amount) -> Amount {
+    let quantity = a.quantity.normalize();
+    let places = quantity.places().min(DEFAULT_MAX_DISPLAY_PRECISION);
+    Amount { quantity, ..a }.with_precision(Precision::Fixed(places))
+}
+
+/// A per-unit price multiplied by an alias quantity (scaleBy).
+fn scale_by(q: &Decimal, a: Amount) -> Amount {
+    if *q == Decimal::from_i64(1) {
+        return a;
+    }
+    with_all_digits(Amount {
+        quantity: &a.quantity * q,
+        ..a
+    })
+}
+
+/// The conversions of journalApplyCommodityAliases.
+struct AliasConverter<'a> {
+    aliases: &'a CommodityAliases,
+}
+
+impl AliasConverter<'_> {
+    fn is_alias(&self, a: &Amount) -> bool {
+        self.aliases.contains_key(&a.commodity)
+    }
+
+    /// A cost, price or assertion amount converted, with all its digits
+    /// shown if it was divided (convertExactAmount).
+    fn exact(&self, a: &Amount) -> Amount {
+        match convert_alias_amount(self.aliases, a) {
+            (c, q) if q == Decimal::from_i64(1) => c,
+            (c, _) => with_all_digits(c),
+        }
+    }
+
+    /// Whether converting an amount from an alias rounds its quantity
+    /// (isInexact).
+    fn is_inexact(&self, a: &Amount) -> bool {
+        let (c, q) = convert_alias_amount(self.aliases, a);
+        q != Decimal::from_i64(1) && &c.quantity * &q != a.quantity
+    }
+
+    /// An amount converted, with its cost and cost basis (convertAmount).
+    fn amount(&self, a: &Amount) -> Amount {
+        let (mut c, q) = convert_alias_amount(self.aliases, a);
+        c.cost = a.cost.as_ref().map(|cost| match cost {
+            AmountCost::Unit(u) if self.is_inexact(a) || self.is_inexact(u) => {
+                let total = Amount {
+                    quantity: &a.quantity.abs() * &u.quantity,
+                    ..(**u).clone()
+                };
+                AmountCost::Total(Box::new(with_all_digits(
+                    convert_alias_amount(self.aliases, &total).0,
+                )))
+            }
+            AmountCost::Unit(u) => AmountCost::Unit(Box::new(scale_by(&q, self.exact(u)))),
+            AmountCost::Total(t) => AmountCost::Total(Box::new(self.exact(t))),
+        });
+        c.cost_basis = a.cost_basis.as_ref().map(|b| {
+            Box::new(crate::amount::CostBasis {
+                cost: b
+                    .cost
+                    .as_ref()
+                    .map(|k| Box::new(scale_by(&q, self.exact(k)))),
+                ..(**b).clone()
+            })
+        });
+        c
+    }
+
+    /// A posting with its amounts and assertion converted, if any is in an
+    /// alias, keeping its original form (convertPosting).
+    fn posting(&self, p: &mut Posting) {
+        let has_alias = |a: &Amount| {
+            self.is_alias(a)
+                || a.and_cost().skip(1).any(|c| self.is_alias(c))
+                || a.cost_basis
+                    .as_ref()
+                    .and_then(|b| b.cost.as_deref())
+                    .is_some_and(|c| self.is_alias(c))
+        };
+        if !(p.amount.amounts_raw().iter().any(has_alias)
+            || p.assertion
+                .as_ref()
+                .is_some_and(|ba| self.is_alias(&ba.amount)))
+        {
+            return;
+        }
+        p.original = Some(Box::new(p.original().clone()));
+        p.amount = p.amount.map(|a| self.amount(a));
+        if let Some(ba) = &mut p.assertion {
+            ba.amount = self.exact(&ba.amount);
+        }
+    }
 }
 
 /// Add forecast transactions, if --forecast is given (journalAddForecast).
@@ -227,13 +453,16 @@ fn journal_postings_add_account_tags(j: &mut Journal) {
 /// Tag equity conversion postings and redundant costs, and with
 /// `infer_costs`, infer costs from equity postings
 /// (journalTagCostsAndEquityAndMaybeInferCosts).
-// M2c: cost and equity tagging and cost inference; the journal is unchanged until then.
 fn journal_tag_costs_and_equity_and_maybe_infer_costs(
-    _iopts: &InputOpts,
-    _infer_costs: bool,
+    iopts: &InputOpts,
+    infer_costs: bool,
     j: Journal,
 ) -> Result<Journal, String> {
-    Ok(j)
+    super::costs::journal_tag_costs_and_equity_and_maybe_infer_costs(
+        iopts.verbose_tags,
+        infer_costs,
+        j,
+    )
 }
 
 /// Infer cost bases from lot subaccount names
@@ -340,9 +569,8 @@ fn journal_postings_add_commodity_tags(j: &mut Journal) {
 
 /// Infer market prices from the costs in transactions
 /// (journalInferMarketPricesFromTransactions).
-// M2c: market prices from transactions; the journal is unchanged until then.
 fn journal_infer_market_prices_from_transactions(j: Journal) -> Journal {
-    j
+    super::costs::journal_infer_market_prices_from_transactions(j)
 }
 
 /// Number the account declarations in order across all files
@@ -363,9 +591,8 @@ fn journal_calculate_and_check_lots(j: Journal) -> Result<Journal, String> {
 }
 
 /// Infer equity postings from costs (journalInferEquityFromCosts).
-// M2c: equity inference; the journal is unchanged until then.
-fn journal_infer_equity_from_costs(_iopts: &InputOpts, j: Journal) -> Journal {
-    j
+fn journal_infer_equity_from_costs(iopts: &InputOpts, j: Journal) -> Journal {
+    super::costs::journal_infer_equity_from_costs(iopts.verbose_tags, j)
 }
 
 /// Number the transactions from 1 and record in each posting its

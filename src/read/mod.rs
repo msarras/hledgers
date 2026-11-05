@@ -4,6 +4,7 @@
 pub mod amount;
 pub mod balancing;
 pub mod common;
+pub mod costs;
 pub mod errors;
 pub mod finalise;
 pub mod journal;

@@ -634,6 +634,11 @@ pub enum JournalItem {
     Blank,
 }
 
+/// Each commodity alias, with its commodity, the number of alias units in
+/// one unit of the commodity, and the commodity's style if known
+/// (CommodityAliases).
+pub type CommodityAliases = BTreeMap<Sym, (Sym, Decimal, Option<Arc<AmountStyle>>)>;
+
 /// A journal: what was read from one or more files, finalised.
 #[derive(Clone, Debug, Default)]
 pub struct Journal {
@@ -752,6 +757,25 @@ impl Journal {
             .filter(|(_, t)| **t == AccountType::Conversion)
             .map(|(a, _)| a.clone())
             .collect()
+    }
+
+    /// The commodity aliases declared with `alias:` tags on commodity
+    /// directives: each alias symbol, with its commodity, the number of its
+    /// units in one of the commodity, and the commodity's display style if
+    /// known (journalCommodityAliases).
+    pub fn commodity_aliases(&self) -> CommodityAliases {
+        let styles = self.commodity_styles();
+        let mut aliases = CommodityAliases::new();
+        for c in self.declared_commodities.values() {
+            for (a, _) in &c.aliases {
+                let style = styles.get(&c.symbol).cloned();
+                aliases.insert(
+                    a.commodity.clone(),
+                    (c.symbol.clone(), a.quantity.clone(), style),
+                );
+            }
+        }
+        aliases
     }
 
     /// The commodities declared with a `lots:` tag (journalLotfulCommodities).

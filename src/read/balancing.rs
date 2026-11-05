@@ -7,6 +7,7 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::BalancingOpts;
+use super::finalise::convert_alias_amount;
 use crate::account::{AccountName, Realness, is_account_name_prefix_of, lot_base_account};
 use crate::amount::render::{
     AmountFormat, show_amount_b, show_amounts_distinctly, show_mixed_amount_b,
@@ -17,8 +18,8 @@ use crate::amount::{
 };
 use crate::decimal::Decimal;
 use crate::model::{
-    COST_POSTING_TAG, GENERATED_POSTING_TAG, IMBALANCE_POSTING_TAG, Journal, Posting, Transaction,
-    source_pos_pair_pretty,
+    COST_POSTING_TAG, CommodityAliases, GENERATED_POSTING_TAG, IMBALANCE_POSTING_TAG, Journal,
+    Posting, Transaction, source_pos_pair_pretty,
 };
 use crate::regex::regex_escape;
 use crate::text::quote_for_command_line;
@@ -716,6 +717,11 @@ pub fn journal_balance_transactions(
             .collect(),
         bopts,
         mode,
+        aliases: j
+            .commodity_aliases()
+            .into_iter()
+            .filter(|(_, (_, q, _))| *q != Decimal::from_i64(1))
+            .collect(),
         balances: BTreeMap::new(),
         deferred: None,
     };
@@ -727,7 +733,7 @@ pub fn journal_balance_transactions(
                 if p.has_amount() {
                     let mut p = p.clone();
                     p.amount = std::mem::take(&mut p.amount).strip_costs();
-                    let new = state.add(&p.account, &p.amount);
+                    let new = state.add(&p.account, &state.running_balance_amount(&p));
                     state.check_or_defer(t, &p, new)?;
                 }
             }
@@ -780,6 +786,9 @@ struct Balancer {
     /// posting rules post to them.
     unassignable: BTreeSet<AccountName>,
     mode: Assertions,
+    /// The commodity aliases with a quantity other than 1, whose amounts the
+    /// running balances keep as written, converting them when they are used.
+    aliases: CommodityAliases,
     /// Each account's running balance, excluding subaccounts.
     balances: BTreeMap<AccountName, MixedAmount>,
     /// The first assertion failure, when deferring.
@@ -787,25 +796,61 @@ struct Balancer {
 }
 
 impl Balancer {
+    /// An amount with the amounts in commodity aliases converted, each
+    /// alias's total divided only once, so that the result is exact when it
+    /// can be (maConvertAliases).
+    fn convert(&self, m: MixedAmount) -> MixedAmount {
+        if self.aliases.is_empty() {
+            return m;
+        }
+        m.strip_costs()
+            .amounts_raw()
+            .iter()
+            .map(|a| MixedAmount::from_amount(convert_alias_amount(&self.aliases, a).0))
+            .sum()
+    }
+
+    /// The amount a posting adds to its account's running balance: an
+    /// amount converted from an alias with a quantity stays as written,
+    /// without costs (postingRunningBalanceAmount).
+    fn running_balance_amount(&self, p: &Posting) -> MixedAmount {
+        if self.aliases.is_empty() {
+            return p.amount.clone();
+        }
+        let written = p.original().amount.clone().strip_costs();
+        let in_alias = written
+            .amounts_raw()
+            .iter()
+            .any(|a| self.aliases.contains_key(&a.commodity));
+        let stripped = p.amount.clone().strip_costs();
+        if in_alias && (&self.convert(written.clone()) - &stripped).is_zero() {
+            written
+        } else {
+            p.amount.clone()
+        }
+    }
+
     /// An account's running balance (getRunningBalanceB).
     fn balance(&self, a: &str) -> MixedAmount {
-        self.balances.get(a).cloned().unwrap_or_default()
+        self.convert(self.balances.get(a).cloned().unwrap_or_default())
     }
 
     /// An account's running balance including its subaccounts'
     /// (getInclusiveRunningBalanceB).
     fn inclusive_balance(&self, a: &str) -> MixedAmount {
-        self.balances
-            .iter()
-            .filter(|(b, _)| &***b == a || is_account_name_prefix_of(a, b))
-            .map(|(_, m)| m)
-            .sum()
+        self.convert(
+            self.balances
+                .iter()
+                .filter(|(b, _)| &***b == a || is_account_name_prefix_of(a, b))
+                .map(|(_, m)| m)
+                .sum(),
+        )
     }
 
     /// Add an amount to an account's running balance, returning the new
     /// balance (addToRunningBalanceB).
     fn add(&mut self, a: &AccountName, amount: &MixedAmount) -> MixedAmount {
-        let new = &self.balance(a) + amount;
+        let new = &self.balances.get(a).cloned().unwrap_or_default() + amount;
         self.balances.insert(a.clone(), new.clone());
         new
     }
@@ -817,19 +862,20 @@ impl Balancer {
             .balances
             .insert(a.clone(), amount.clone())
             .unwrap_or_default();
-        &amount - &old
+        &amount - &self.convert(old)
     }
 
     /// Set an account's running balance so that, with its subaccounts', it
     /// is this amount, returning the change (setInclusiveRunningBalanceB).
     fn set_inclusive(&mut self, a: &AccountName, amount: MixedAmount) -> MixedAmount {
         let old = self.balance(a);
-        let subs: MixedAmount = self
-            .balances
-            .iter()
-            .filter(|(b, _)| is_account_name_prefix_of(a, b))
-            .map(|(_, m)| m)
-            .sum();
+        let subs = self.convert(
+            self.balances
+                .iter()
+                .filter(|(b, _)| is_account_name_prefix_of(a, b))
+                .map(|(_, m)| m)
+                .sum(),
+        );
         let new = &amount - &subs;
         self.balances.insert(a.clone(), new.clone());
         &new - &old
@@ -867,7 +913,7 @@ impl Balancer {
     /// (addOrAssignAmountAndCheckAssertionB).
     fn add_or_assign(&mut self, t: &Transaction, mut p: Posting) -> Result<Posting, String> {
         if p.has_amount() {
-            let new = self.add(&p.account, &p.amount);
+            let new = self.add(&p.account, &self.running_balance_amount(&p));
             self.check_or_defer(t, &p, new)?;
         } else if let Some(ba) = p.assertion.clone() {
             let current = if ba.inclusive {
@@ -902,6 +948,7 @@ impl Balancer {
         p: &Posting,
         new: MixedAmount,
     ) -> Result<(), String> {
+        let new = self.convert(new);
         match self.mode {
             Assertions::DontCheck => Ok(()),
             Assertions::Check => self.check_balance_assertion(t, p, &new),
