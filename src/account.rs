@@ -582,8 +582,8 @@ pub fn account_name_to_account_only_regex_ci(a: &str) -> Regexp {
 /// components to two characters each as needed, then eliding the end with
 /// `..`; register's ` (split)` names are shortened in parts
 /// (elideAccountName).
-pub fn elide_account_name(width: usize, s: &str) -> String {
-    fn elide_parts(w: usize, parts: &[&str]) -> String {
+pub fn elide_account_name(width: isize, s: &str) -> String {
+    fn elide_parts(w: isize, parts: &[&str]) -> String {
         let mut done: Vec<&str> = Vec::new();
         let mut rest = parts;
         loop {
@@ -593,19 +593,19 @@ pub fn elide_account_name(width: usize, s: &str) -> String {
                 .copied()
                 .collect::<Vec<_>>()
                 .join(":");
-            if display_width(&joined) <= w || rest.len() <= 1 {
+            if display_width(&joined) as isize <= w || rest.len() <= 1 {
                 return joined;
             }
             done.push(take_width(2, rest[0]));
             rest = &rest[1..];
         }
     }
-    let fit = |t: &str| fit_text(None, Some(width as isize), true, false, t);
+    let fit = |t: &str| fit_text(None, Some(width), true, false, t);
     match s.strip_suffix(" (split)") {
         Some(names) => {
             let names: Vec<&str> = names.split(", ").collect();
             let n = names.len().max(1);
-            let per = (width as isize - 8 - 2 * (n as isize - 1)).max(0) as usize / names.len();
+            let per = (width - 8 - 2 * (n as isize - 1)).max(0) / names.len() as isize;
             let parts: Vec<String> = names
                 .iter()
                 .map(|s| elide_parts(per, &s.split(ACCT_SEP).collect::<Vec<_>>()))

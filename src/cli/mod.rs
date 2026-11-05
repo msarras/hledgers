@@ -132,6 +132,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "notes" => commands::notes::notes,
         "payees" => |o, j| commands::payees::payees(o, &j),
         "print" => commands::print::print,
+        "register" => |o, j| commands::register::register(o, &j),
         "check" => |o, j| commands::check::check(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),

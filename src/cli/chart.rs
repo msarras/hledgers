@@ -5,18 +5,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::account::{AccountType, parent_account_names};
+use crate::account::{AccountName, AccountType, parent_account_names};
 use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
+use crate::cli::commands::balance::report_period_name;
 use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::opts::CliOpts;
+use crate::dates::{DateSpan, Period};
 use crate::decimal::Decimal;
-use crate::model::{Commodity, SourcePos};
+use crate::model::{Commodity, Posting, SourcePos};
 use crate::read::amount::{AmountCtx, parse_amount_with};
 use crate::reports::opts::{BalanceAccumulation, ReportOpts};
 use crate::reports::periodic::{
     BalanceReport, CompoundPeriodicReport, DisplayName, MultiBalanceReport, MultiBalanceReportRow,
     PeriodicReportRow,
 };
+use crate::reports::postings::PostingsReportItem;
 use crate::write::chart::{
     BarLayout, Chart, ChartLabel, MAX_TINTS, Mark, Panel, Series, SeriesRole, Summary, SummaryKind,
     XAxis, chart_as_csv, main_account_type, set_chart_layout, set_chart_scales,
@@ -509,6 +512,243 @@ type Section = (
     i32,
     Vec<MultiBalanceReportRow>,
 );
+
+/// A postings report's chart (postingsReportAsChart). With a report
+/// interval, each account's amount in each period as stacked bars, with
+/// the period's total as a marker, at most 8 series, the smallest
+/// combined into "other". Otherwise the running total (or average) after
+/// each posting as a line by date; with postings to several accounts (and
+/// not --average), also each account's own running total, from its balance
+/// before the report period (`start_bals`), in its account type's colour.
+/// A panel per commodity, most used first.
+pub fn postings_report_as_chart(
+    account_type: &dyn Fn(&str) -> Option<AccountType>,
+    start_bals: &BTreeMap<AccountName, MixedAmount>,
+    ropts: &ReportOpts,
+    title: &str,
+    items: &[PostingsReportItem],
+) -> Chart {
+    let label = |a: &str| ChartLabel {
+        full: a.to_string(),
+        short: a.to_string(),
+        indent: 0,
+        typ: account_type(a),
+        account: true,
+    };
+    let series =
+        |label: ChartLabel, role: SeriesRole, mark: Mark, values: Vec<Option<Decimal>>| Series {
+            label,
+            role,
+            mark,
+            values,
+            group: 0,
+            sign: 0,
+        };
+    let panel = |unit: Amount, series: Vec<Series>| Panel {
+        unit,
+        series,
+        group_names: Vec::new(),
+        scale: None,
+        layout: BarLayout::Diverging,
+        counts: false,
+        summary: Vec::new(),
+        value_labels: Vec::new(),
+    };
+    let periods: BTreeSet<Period> = items.iter().filter_map(|i| i.period).collect();
+    if periods.is_empty() {
+        let totals: Vec<&MixedAmount> = items.iter().map(|i| &i.total).collect();
+        let total_amounts: Vec<&Amount> = totals.iter().flat_map(|m| m.amounts_raw()).collect();
+        let postings: Vec<&Posting> = items.iter().map(|i| &i.posting).collect();
+        let types: Vec<Option<AccountType>> =
+            postings.iter().map(|p| account_type(&p.account)).collect();
+        let main_types: BTreeSet<AccountType> = types
+            .iter()
+            .flatten()
+            .map(|t| main_account_type(*t))
+            .collect();
+        let common_type = match main_types.len() {
+            1 if types.iter().all(Option::is_some) => main_types.first().copied(),
+            _ => None,
+        };
+        let start_in = |c: &Sym, a: &str| {
+            start_bals
+                .get(a)
+                .map_or(Decimal::ZERO, |m| quantity_in(c, m))
+        };
+        let total_series = |c: &Sym, role: SeriesRole| {
+            let values = totals.iter().map(|m| Some(quantity_in(c, m))).collect();
+            let label = ChartLabel {
+                typ: common_type,
+                ..ChartLabel::plain("Total")
+            };
+            series(label, role, Mark::Line, values)
+        };
+        // the accounts with postings, or a starting balance, in this
+        // commodity, with their total absolute amount (for ranking)
+        let account_sizes = |c: &Sym| -> BTreeMap<&str, Decimal> {
+            let mut sizes: BTreeMap<&str, Decimal> = BTreeMap::new();
+            for p in &postings {
+                let q = quantity_in(c, &p.amount).abs();
+                let s = sizes.entry(&p.account).or_insert(Decimal::ZERO);
+                *s = &q + s;
+            }
+            for a in start_bals.keys() {
+                let q = start_in(c, a);
+                if !q.is_zero() {
+                    let s = sizes.entry(a).or_insert(Decimal::ZERO);
+                    *s = &*s + &q.abs();
+                }
+            }
+            sizes.retain(|_, q| !q.is_zero());
+            sizes
+        };
+        // the running total of the matching accounts' postings, from their
+        // starting balances
+        let running_total = |c: &Sym, matches: &dyn Fn(&str) -> bool| -> Vec<Option<Decimal>> {
+            let start = (start_bals.keys())
+                .filter(|a| matches(a))
+                .fold(Decimal::ZERO, |s, a| &s + &start_in(c, a));
+            let mut total = start;
+            (postings.iter())
+                .map(|p| {
+                    if matches(&p.account) {
+                        total = &total + &quantity_in(c, &p.amount);
+                    }
+                    Some(total.clone())
+                })
+                .collect()
+        };
+        let account_running_totals = |c: &Sym| -> Vec<Series> {
+            let sizes: Vec<(&str, Decimal)> = account_sizes(c).into_iter().collect();
+            let typed: Vec<(Option<AccountType>, Decimal)> = (sizes.iter())
+                .map(|(a, q)| (account_type(a).map(main_account_type), q.clone()))
+                .collect();
+            let (kept, other_groups) = choose_series(MAX_SERIES, &typed);
+            let mut out: Vec<Series> = (kept.iter())
+                .map(|i| {
+                    let a = sizes[*i].0;
+                    series(
+                        label(a),
+                        SeriesRole::Item,
+                        Mark::Line,
+                        running_total(c, &|x| x == a),
+                    )
+                })
+                .collect();
+            let nothers = other_groups.len();
+            for grp in other_groups {
+                let names: Vec<&str> = grp.iter().map(|i| sizes[*i].0).collect();
+                let l = ChartLabel {
+                    typ: names.first().and_then(|a| account_type(a)),
+                    ..other_label(nothers, &names)
+                };
+                let values = running_total(c, &|x| names.contains(&x));
+                out.push(series(l, SeriesRole::Other, Mark::Line, values));
+            }
+            out
+        };
+        let lines_panel = |c: Sym| {
+            let unit = unit_amount(&c, &total_amounts);
+            if ropts.average {
+                return panel(unit, vec![total_series(&c, SeriesRole::Item)]);
+            }
+            let accounts: Vec<&str> = account_sizes(&c).into_keys().collect();
+            match accounts.as_slice() {
+                [a] => {
+                    let s = Series {
+                        label: label(a),
+                        ..total_series(&c, SeriesRole::Item)
+                    };
+                    panel(unit, vec![s])
+                }
+                [] => panel(unit, vec![total_series(&c, SeriesRole::Item)]),
+                _ => {
+                    let mut ss = account_running_totals(&c);
+                    ss.push(total_series(&c, SeriesRole::Total));
+                    panel(unit, ss)
+                }
+            }
+        };
+        return Chart {
+            title: title.to_string(),
+            x_axis: XAxis::Dates(
+                (items.iter())
+                    .map(|i| ropts.posting_date(&i.posting, i.txn))
+                    .collect(),
+            ),
+            panels: commodities_by_use(&totals)
+                .into_iter()
+                .map(lines_panel)
+                .collect(),
+        };
+    }
+    let periods: Vec<Period> = periods.into_iter().collect();
+    let spans: Vec<DateSpan> = periods.iter().map(Period::as_date_span).collect();
+    let name_ropts = ReportOpts {
+        balance_accum: BalanceAccumulation::PerPeriod,
+        ..ropts.clone()
+    };
+    // each account's amount in each period
+    let mut account_amounts: BTreeMap<&str, BTreeMap<Period, MixedAmount>> = BTreeMap::new();
+    for i in items {
+        if let Some(per) = i.period {
+            let m = account_amounts.entry(&i.posting.account).or_default();
+            let amt = match m.remove(&per) {
+                Some(prev) => &i.posting.amount + &prev,
+                None => i.posting.amount.clone(),
+            };
+            m.insert(per, amt);
+        }
+    }
+    let null = MixedAmount::null();
+    let rows: Vec<(&str, Vec<&MixedAmount>)> = (account_amounts.iter())
+        .map(|(a, m)| {
+            (
+                *a,
+                periods.iter().map(|p| m.get(p).unwrap_or(&null)).collect(),
+            )
+        })
+        .collect();
+    let cells: Vec<&MixedAmount> = rows.iter().flat_map(|(_, ms)| ms.iter().copied()).collect();
+    let all_amounts: Vec<&Amount> = cells.iter().flat_map(|m| m.amounts_raw()).collect();
+    let bars_panel = |c: Sym| -> Option<Panel> {
+        let quantities: Vec<(&str, Vec<Decimal>)> = (rows.iter())
+            .map(|(a, ms)| (*a, ms.iter().map(|m| quantity_in(&c, m)).collect()))
+            .collect();
+        let shown: Vec<(ChartLabel, Vec<Decimal>)> = (quantities.iter())
+            .filter(|(_, qs)| qs.iter().any(|q| !q.is_zero()))
+            .map(|(a, qs)| (label(a), qs.clone()))
+            .collect();
+        let mut ss = limit_series(MAX_SERIES, Mark::Bar, shown);
+        if ss.is_empty() {
+            return None;
+        }
+        if ss.len() > 1 {
+            let totals = (0..periods.len())
+                .map(|j| Some((quantities.iter()).fold(Decimal::ZERO, |s, (_, qs)| &s + &qs[j])))
+                .collect();
+            ss.push(series(
+                ChartLabel::plain("Total"),
+                SeriesRole::Total,
+                Mark::Marker,
+                totals,
+            ));
+        }
+        Some(panel(unit_amount(&c, &all_amounts), ss))
+    };
+    Chart {
+        title: title.to_string(),
+        x_axis: XAxis::Periods(
+            (spans.iter())
+                .map(|s| (*s, report_period_name(&name_ropts, &spans, s)))
+                .collect(),
+        ),
+        panels: commodities_by_use(&cells)
+            .into_iter()
+            .filter_map(bars_panel)
+            .collect(),
+    }
+}
 
 /// Whether a report's values are counts (balanceCalcIsCount).
 fn is_count(ropts: &ReportOpts) -> bool {

@@ -13,6 +13,7 @@ pub mod payees;
 pub mod prices;
 pub mod print;
 pub mod quickref;
+pub mod register;
 pub mod rewrite;
 pub mod stats;
 pub mod tags;
@@ -50,7 +51,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &payees::MODE,
     &prices::MODE,
     &print::MODE,
-    &command("register", &["reg"]),
+    &register::MODE,
     &rewrite::MODE,
     &command("roi", &[]),
     &command("run", &[]),

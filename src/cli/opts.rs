@@ -4,6 +4,7 @@
 use super::args::{Arity, Flag, RawOpts};
 use crate::amount::CommodityStyles;
 use crate::dates::{DateSpan, Day, Interval, fix_smart_date_str_ef, parse_period_expr};
+use crate::parse::{PResult, ParseError, Parser};
 use crate::read::{BalancingOpts, InputOpts};
 use crate::reports::opts::{ReportOpts, ReportSpec, usage_error};
 use crate::valuation::ConversionOp;
@@ -283,6 +284,38 @@ impl CliOpts {
             available_width: 80,
             start_time: std::time::Instant::now(),
             raw,
+        })
+    }
+
+    /// The width of a register's lines, and of its description column if
+    /// given: --width's `W` or `W,D`, or the available width
+    /// (registerWidthsFromOpts). A malformed --width is an error.
+    pub fn register_widths(&self) -> Result<(isize, Option<isize>), String> {
+        let Some(w) = &self.width else {
+            return Ok((self.available_width as isize, None));
+        };
+        // `read` of digits, which wraps around beyond Int's range
+        let number = |p: &mut Parser| -> PResult<isize> {
+            let digits = p.take_while1(Some("digit"), |c| c.is_ascii_digit())?;
+            Ok(digits.bytes().fold(0isize, |n, b| {
+                n.wrapping_mul(10).wrapping_add(isize::from(b - b'0'))
+            }))
+        };
+        let mut p = Parser::new(w);
+        let widths = (|| {
+            let total = number(&mut p)?;
+            let desc = p.optional(|p| {
+                p.char(',')?;
+                number(p)
+            })?;
+            p.eof()?;
+            Ok((total, desc))
+        })();
+        widths.map_err(|e: ParseError| {
+            usage_error(&format!(
+                "could not parse width option: {}",
+                e.pretty("(unknown)", w)
+            ))
         })
     }
 

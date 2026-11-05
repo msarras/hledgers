@@ -991,22 +991,25 @@ fn perdivide(a: &MixedAmount, b: &MixedAmount) -> Result<MixedAmount, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::usd;
     use crate::read::InputOpts;
 
-    fn read(s: &str) -> Journal {
+    /// The journal of this text, finalised.
+    pub(crate) fn read(s: &str) -> Journal {
         let iopts = InputOpts {
             today: Day::from_ymd(2026, 1, 1).unwrap(),
             ..InputOpts::default()
         };
         let (j, st) = crate::read::journal::parse_journal(&iopts, "f.j", s).unwrap();
-        crate::read::finalise::journal_finalise(&iopts, "f.j", s, j, st).unwrap()
+        let mut j = crate::read::finalise::journal_finalise(&iopts, "f.j", s, j, st).unwrap();
+        crate::read::finalise::journal_number_and_tie_transactions(&mut j);
+        j
     }
 
     /// samplejournal: examples/sample.journal plus a loan taken and paid off.
-    fn sample_journal() -> Journal {
+    pub(crate) fn sample_journal() -> Journal {
         read(concat!(
             "2008/01/01 income\n    assets:bank:checking  $1\n    income:salary\n\n",
             "2008/06/01 gift\n    assets:bank:checking  $1\n    income:gifts\n\n",
