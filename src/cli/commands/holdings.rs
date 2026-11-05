@@ -1736,9 +1736,12 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             sheets.insert("Holdings".to_string(), ((1, 0), html()));
             crate::write::fods::print_fods(crate::write::fods::locale_encoding_name(), &sheets)
         }
-        "json" => crate::write::json::to_json_text(&JsonValue(Value::Array(
-            records.iter().map(|h| holding_json(h)).collect(),
-        ))),
+        // upstream adds a newline to toJsonText's
+        "json" => {
+            crate::write::json::to_json_text(&JsonValue(Value::Array(
+                records.iter().map(|h| holding_json(h)).collect(),
+            ))) + "\n"
+        }
         f => return Err(unsupported_output_format_error(f)),
     })
 }
@@ -1930,7 +1933,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
                     })
                 })
                 .collect();
-            crate::write::json::to_json_text(&JsonValue(Value::Array(items)))
+            crate::write::json::to_json_text(&JsonValue(Value::Array(items))) + "\n"
         }
         f => return Err(unsupported_output_format_error(f)),
     })
