@@ -156,7 +156,7 @@ fn pretty_bytes(e: &ParseError, name: &str, b: &[u8]) -> String {
 pub fn read_csv_file(iopts: &InputOpts, f: &str, sep: char) -> Result<Journal, String> {
     let rules_file = rules_file_for(f, iopts.rules_file.as_deref())?;
     let (rules, _) = super::rules::read_rules(&rules_file)?;
-    let text = read_data(f)?;
+    let text = read_data(f, &rules_file, &rules)?;
     let (j, context) = read_journal_from_csv(iopts, &rules_file, &rules, f, &text, Some(sep))?;
     finalise_csv_journal(iopts, f, j, &context)
 }
@@ -172,15 +172,243 @@ pub fn rules_file_for(csv: &str, given: Option<&str>) -> Result<String, String> 
     }
 }
 
-/// A data file's text, or standard input's (hGetContentsPortably).
-fn read_data(f: &str) -> Result<String, String> {
-    if f == "-" {
+/// A data file's text, or standard input's, decoded in the encoding the
+/// rules name, or else as UTF-8 without a byte order mark; CRLF line endings
+/// made LF (hGetContentsPortably).
+fn read_data(f: &str, rules_file: &str, rules: &CsvRules) -> Result<String, String> {
+    let encoding = rules_encoding(rules_file, rules)?;
+    let Some(encoding) = encoding else {
+        return if f == "-" {
+            super::read_stdin_portably()
+        } else {
+            super::read_file_portably(f)
+        }
+        .map_err(super::with_decoding_hint);
+    };
+    let bytes = if f == "-" {
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes)
             .map_err(|e| format!("<stdin>: hGetContents: {e}"))?;
-        super::decode_portably(bytes).map_err(|e| format!("<stdin>: hGetContents: {e}"))
+        bytes
     } else {
-        super::read_file_portably(f).map_err(|e| format!("{f}: openFile: {e}"))
+        std::fs::read(f).map_err(|e| format!("{f}: openFile: {}", super::io_error_text(&e)))?
+    };
+    Ok(super::crlf_to_lf(&decode(encoding, &bytes)?))
+}
+
+/// A text encoding named by an encoding rule, as the encoding package
+/// (which upstream uses) decodes it.
+#[derive(Clone, Copy, Debug)]
+enum TextEncoding {
+    /// ASCII or ISO-8859-1: each byte is the character with its code.
+    Latin1,
+    /// UTF-8, decoded leniently: a sequence's leading byte decides its
+    /// length, and the bits of the bytes after it are used, whatever they are.
+    Utf8,
+    /// UTF-16 or UTF-32: big-endian unless a byte order mark (which is
+    /// dropped) says otherwise.
+    Utf16,
+    Utf32,
+    /// An encoding as encoding_rs decodes it; with `true`, a single-byte
+    /// one with extra characters in 0x80-0x9F, which are control characters
+    /// in the ISO-8859 encoding wanted (windows-1252 for ISO-8859-1...).
+    Rs(&'static encoding_rs::Encoding, bool),
+}
+
+/// The encoding an encoding rule names, if any; an unknown name is an error
+/// (rulesEncoding).
+fn rules_encoding(rules_file: &str, rules: &CsvRules) -> Result<Option<TextEncoding>, String> {
+    let Some(name) = rules.directive("encoding") else {
+        return Ok(None);
+    };
+    match encoding_from_name(name) {
+        Some(Ok(e)) => Ok(Some(e)),
+        Some(Err(())) => Err(format!(
+            "{rules_file}: encoding {name} is not supported by hledgers yet"
+        )),
+        None => Err(format!("{rules_file}: Invalid encoding: {name}")),
+    }
+}
+
+/// The encoding with this name, ignoring case and with runs of other
+/// characters than ASCII letters and digits read as `_`; an error for one
+/// that is known but not supported (encodingFromStringExplicit).
+fn encoding_from_name(name: &str) -> Option<Result<TextEncoding, ()>> {
+    use encoding_rs::*;
+    let mut normal = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            normal.push(c.to_ascii_lowercase());
+        } else if !normal.ends_with('_') || normal.is_empty() {
+            normal.push('_');
+        }
+    }
+    let rs = |e: &'static encoding_rs::Encoding| Some(Ok(TextEncoding::Rs(e, false)));
+    let c1 = |e: &'static encoding_rs::Encoding| Some(Ok(TextEncoding::Rs(e, true)));
+    match normal.as_str() {
+        "ascii" | "646" | "ansi_x3_4_1968" | "cp367" | "csascii" | "ibm367" | "iso646_us"
+        | "iso_ir_6" | "us" | "us_ascii" => Some(Ok(TextEncoding::Latin1)),
+        "utf_8" | "u8" | "utf" | "utf8" | "utf8_ucs2" | "utf8_ucs4" => Some(Ok(TextEncoding::Utf8)),
+        "utf_16" | "u16" | "utf16" => Some(Ok(TextEncoding::Utf16)),
+        "utf_32" => Some(Ok(TextEncoding::Utf32)),
+        "koi8_r" | "cskoi8r" => rs(KOI8_R),
+        "koi8_u" => rs(KOI8_U),
+        "iso_8859_1" | "iso8859_1" | "8859" | "cp819" | "csisolatin1" | "ibm819" | "iso8859"
+        | "iso_8859_1_1987" | "iso_ir_100" | "l1" | "latin" | "latin1" => {
+            Some(Ok(TextEncoding::Latin1))
+        }
+        "iso_8859_2" | "iso8859_2" | "csisolatin2" | "iso_8859_2_1987" | "iso_ir_101" | "l2"
+        | "latin2" => rs(ISO_8859_2),
+        "iso_8859_3" | "iso8859_3" | "csisolatin3" | "iso_8859_3_1988" | "iso_ir_109" | "l3"
+        | "latin3" => rs(ISO_8859_3),
+        "iso_8859_4" | "iso8859_4" | "csisolatin4" | "iso_8859_4_1988" | "iso_ir_110" | "l4"
+        | "latin4" => rs(ISO_8859_4),
+        "iso_8859_5" | "iso8859_5" | "csisolatincyrillic" | "cyrillic" | "iso_8859_5_1988"
+        | "iso_ir_144" => rs(ISO_8859_5),
+        "iso_8859_6" | "iso8859_6" | "arabic" | "asmo_708" | "csisolatinarabic" | "ecma_114"
+        | "iso_8859_6_1987" | "iso_ir_127" => rs(ISO_8859_6),
+        "iso_8859_7" | "iso8859_7" | "csisolatingreek" | "ecma_118" | "elot_928" | "greek"
+        | "greek8" | "iso_8859_7_1987" | "iso_ir_126" => rs(ISO_8859_7),
+        "iso_8859_8" | "iso8859_8" | "csisolatinhebrew" | "hebrew" | "iso_8859_8_1988"
+        | "iso_ir_138" => rs(ISO_8859_8),
+        "iso_8859_9" | "iso8859_9" | "csisolatin5" | "iso_8859_9_1989" | "iso_ir_148" | "l5"
+        | "latin5" => c1(WINDOWS_1254),
+        "iso_8859_10" | "iso8859_10" | "csisolatin6" | "iso_8859_10_1992" | "iso_ir_157" | "l6"
+        | "latin6" => rs(ISO_8859_10),
+        "iso_8859_11" | "iso8859_11" | "thai" | "iso_8859_11_2001" => c1(WINDOWS_874),
+        "iso_8859_13" | "iso8859_13" => rs(ISO_8859_13),
+        "iso_8859_14" | "iso8859_14" | "iso_8859_14_1998" | "iso_celtic" | "iso_ir_199" | "l8"
+        | "latin8" => rs(ISO_8859_14),
+        "iso_8859_15" | "iso8859_15" | "latin9" | "l9" => rs(ISO_8859_15),
+        "iso_8859_16" | "iso8859_16" | "iso_8859_16_2001" | "iso_ir_226" | "l10" | "latin10" => {
+            rs(ISO_8859_16)
+        }
+        "cp1250" | "windows_1250" => rs(WINDOWS_1250),
+        "cp1251" | "windows_1251" => rs(WINDOWS_1251),
+        "cp1252" | "windows_1252" => rs(WINDOWS_1252),
+        "cp1253" | "windows_1253" => rs(WINDOWS_1253),
+        "cp1254" | "windows_1254" => rs(WINDOWS_1254),
+        "cp1255" | "windows_1255" => rs(WINDOWS_1255),
+        "cp1256" | "windows_1256" => rs(WINDOWS_1256),
+        "cp1257" | "windows_1257" => rs(WINDOWS_1257),
+        "cp1258" | "windows_1258" => rs(WINDOWS_1258),
+        "gb18030" | "gb18030_2000" => rs(GB18030),
+        "macintosh" => rs(MACINTOSH),
+        "iso_2022_jp" => rs(ISO_2022_JP),
+        "shift_jis" | "sjis" | "cp932" => rs(SHIFT_JIS),
+        "cp866" => rs(IBM866),
+        "cp874" => rs(WINDOWS_874),
+        "jis_x_0201" | "jis_x_0208" | "cp437" | "cp737" | "cp775" | "cp850" | "cp852" | "cp855"
+        | "cp857" | "cp860" | "cp861" | "cp862" | "cp863" | "cp864" | "cp865" | "cp869" => {
+            Some(Err(()))
+        }
+        _ => None,
+    }
+}
+
+/// Bytes decoded in an encoding, or the encoding package's error.
+fn decode(encoding: TextEncoding, b: &[u8]) -> Result<String, String> {
+    let illegal = |byte: u8| format!("IllegalCharacter {byte}");
+    let end = || "UnexpectedEnd".to_string();
+    let from_code = |v: u32| char::from_u32(v).unwrap_or('\u{fffd}');
+    match encoding {
+        TextEncoding::Latin1 => Ok(b.iter().map(|&c| char::from(c)).collect()),
+        TextEncoding::Utf8 => {
+            let mut out = String::with_capacity(b.len());
+            let mut i = 0;
+            while i < b.len() {
+                let w1 = b[i];
+                let (n, lead) = match w1 {
+                    0..=0x7f => (1, u32::from(w1)),
+                    0x80..=0xbf => return Err(illegal(w1)),
+                    0xc0..=0xdf => (2, u32::from(w1 & 0x1f)),
+                    0xe0..=0xef => (3, u32::from(w1 & 0x0f)),
+                    0xf0..=0xf7 => (4, u32::from(w1 & 0x07)),
+                    _ => return Err(illegal(w1)),
+                };
+                let rest = b.get(i + 1..i + n).ok_or_else(end)?;
+                let v = rest
+                    .iter()
+                    .fold(lead, |v, &w| (v << 6) | u32::from(w & 0x3f));
+                if v > 0x10ffff {
+                    return Err(format!("IllegalRepresentation {:?}", &b[i..i + n]));
+                }
+                out.push(from_code(v));
+                i += n;
+            }
+            Ok(out)
+        }
+        TextEncoding::Utf16 => {
+            let (be, start) = match b {
+                [0xfe, 0xff, ..] => (true, 2),
+                [0xff, 0xfe, ..] => (false, 2),
+                _ => (true, 0),
+            };
+            let words: Vec<u16> = b[start..]
+                .chunks(2)
+                .map(|w| match w {
+                    [x, y] if be => Ok(u16::from_be_bytes([*x, *y])),
+                    [x, y] => Ok(u16::from_le_bytes([*x, *y])),
+                    _ => Err(end()),
+                })
+                .collect::<Result<_, _>>()?;
+            let mut out = String::new();
+            let mut it = words.into_iter();
+            while let Some(w1) = it.next() {
+                match w1 {
+                    0xd800..=0xdbff => {
+                        let w2 = it.next().ok_or_else(end)?;
+                        if !(0xdc00..=0xdfff).contains(&w2) {
+                            return Err(illegal((w2 >> 8) as u8));
+                        }
+                        let v = ((u32::from(w1) & 0x3ff) << 10 | (u32::from(w2) & 0x3ff)) + 0x10000;
+                        out.push(from_code(v));
+                    }
+                    0xdc00..=0xdfff => return Err(illegal((w1 >> 8) as u8)),
+                    _ => out.push(from_code(u32::from(w1))),
+                }
+            }
+            Ok(out)
+        }
+        TextEncoding::Utf32 => {
+            let words: Vec<u32> = b
+                .chunks(4)
+                .map(|w| {
+                    <[u8; 4]>::try_from(w)
+                        .map(u32::from_be_bytes)
+                        .map_err(|_| end())
+                })
+                .collect::<Result<_, _>>()?;
+            let (le, words) = match words.first() {
+                Some(0x0000_feff) => (false, &words[1..]),
+                Some(0xfffe_0000) => (true, &words[1..]),
+                _ => (false, &words[..]),
+            };
+            words
+                .iter()
+                .map(|&w| {
+                    let v = if le { w.swap_bytes() } else { w };
+                    char::from_u32(v).ok_or_else(|| "Prelude.chr: bad argument".to_string())
+                })
+                .collect()
+        }
+        TextEncoding::Rs(e, c1_controls) => {
+            let (text, _) = e.decode_without_bom_handling(b);
+            if !c1_controls {
+                return Ok(text.into_owned());
+            }
+            // a single-byte encoding: one character per byte
+            Ok(b.iter()
+                .zip(text.chars())
+                .map(|(&byte, c)| {
+                    if (0x80..0xa0).contains(&byte) {
+                        char::from(byte)
+                    } else {
+                        c
+                    }
+                })
+                .collect())
+        }
     }
 }
 
@@ -1044,5 +1272,28 @@ mod tests {
             "f:1:7:\n  |\n1 | a,Ã©ð\u{9f}\u{8e}\u{85}B\"\n  |       ^\nunexpected '\"'\n\
              expecting ',', end of input, end of line, or unescaped character\n"
         );
+    }
+
+    #[test]
+    fn encodings_as_the_encoding_package_decodes_them() {
+        let enc = |n: &str| encoding_from_name(n).unwrap().unwrap();
+        // UTF-8 is decoded leniently: here e9 63 6c is one character
+        assert_eq!(decode(enc("UTF-8"), b"\xe9clair").unwrap(), "\u{98ec}air");
+        assert_eq!(
+            decode(enc("utf8"), b"\x80").unwrap_err(),
+            "IllegalCharacter 128"
+        );
+        assert_eq!(
+            decode(enc("iso8859-1"), b"\xe9\x85").unwrap(),
+            "\u{e9}\u{85}"
+        );
+        assert_eq!(decode(enc("ascii"), b"\xe9").unwrap(), "\u{e9}");
+        assert_eq!(decode(enc("latin5"), b"\x80\xfd").unwrap(), "\u{80}\u{131}");
+        assert_eq!(decode(enc("cp1252"), b"\x80").unwrap(), "\u{20ac}");
+        assert_eq!(decode(enc("utf-16"), b"\xff\xfea\x00").unwrap(), "a");
+        assert_eq!(decode(enc("UTF16"), b"\x00a").unwrap(), "a");
+        assert_eq!(decode(enc("utf_32"), b"\x00\x00\x00a").unwrap(), "a");
+        assert!(encoding_from_name("cp437").unwrap().is_err());
+        assert!(encoding_from_name("nosuch").is_none());
     }
 }

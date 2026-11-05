@@ -239,7 +239,7 @@ impl CsvRules {
 /// Read a rules file and the rules files it includes, returning the rules
 /// and the paths of the files read; or an error (readRules).
 pub fn read_rules(f: &str) -> Result<(CsvRules, Vec<String>), String> {
-    let text = super::read_file_portably(f).map_err(|e| format!("{f}: openFile: {e}"))?;
+    let text = super::read_file_portably(f).map_err(super::with_decoding_hint)?;
     let (expanded, sources) = expand_includes(f, &text)?;
     let rules = parse_and_validate_rules(f, &sources, &expanded)?;
     let mut files = vec![f.to_string()];
@@ -321,7 +321,7 @@ fn expand_lines(
             return Err(include_error_msg(file, lnum, line, &msg));
         }
         let text = super::read_file_portably(&included).map_err(|e| {
-            let msg = format!("Could not read this included file:\n{included}: openFile: {e}");
+            let msg = format!("Could not read this included file:\n{e}");
             include_error_msg(file, lnum, line, &msg)
         })?;
         let mut ancestors2 = vec![canonical];

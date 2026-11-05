@@ -624,7 +624,7 @@ impl<'a> JournalParser<'a, '_> {
             return Err(Failure::Here(ParseError::fail_at(self.c.src, off, msg)));
         }
         let text = super::read_file_portably(file).map_err(|e| {
-            let msg = format!("failed to read a file:\n{file}: openFile: {e}");
+            let msg = format!("failed to read a file:\n{e}");
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
         self.j.files.push((file.to_string(), text.clone()));

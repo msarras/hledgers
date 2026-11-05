@@ -233,13 +233,11 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
         }
     }
     let text = if f == "-" {
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes)
-            .map_err(|e| format!("<stdin>: hGetContents: {e}"))?;
-        decode_portably(bytes).map_err(|e| format!("<stdin>: hGetContents: {e}"))?
+        read_stdin_portably()
     } else {
-        read_file_portably(f).map_err(|e| format!("{f}: openFile: {e}"))?
-    };
+        read_file_portably(f)
+    }
+    .map_err(with_decoding_hint)?;
     let (j, st) = journal::parse_journal(iopts, f, &text)?;
     finalise::journal_finalise(iopts, f, &text, j, st)
 }
@@ -268,21 +266,55 @@ fn format_from_extension(f: &str) -> &'static str {
 }
 
 /// A file's text, decoded as UTF-8, without a byte order mark, with CRLF
-/// line endings made LF (readFilePortably).
+/// line endings made LF (readFilePortably); or the error as GHC shows it,
+/// after the file's name and the operation that failed.
 pub fn read_file_portably(f: &str) -> Result<String, String> {
-    let bytes = std::fs::read(f).map_err(|e| io_error_text(&e))?;
-    decode_portably(bytes)
+    let bytes = std::fs::read(f).map_err(|e| format!("{f}: openFile: {}", io_error_text(&e)))?;
+    decode_portably(bytes).map_err(|e| format!("{f}: hGetContents: {e}"))
 }
 
+/// Standard input's text, as [`read_file_portably`] reads a file's.
+pub fn read_stdin_portably() -> Result<String, String> {
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes)
+        .map_err(|e| format!("<stdin>: hGetContents: {e}"))?;
+    decode_portably(bytes).map_err(|e| format!("<stdin>: hGetContents: {e}"))
+}
+
+/// Bytes decoded as UTF-8, without a byte order mark, with CRLF line
+/// endings made LF; or GHC's error about the first byte that can not be
+/// decoded (hGetContentsPortably).
 fn decode_portably(bytes: Vec<u8>) -> Result<String, String> {
-    let text = String::from_utf8(bytes)
-        .map_err(|_| "invalid argument (cannot decode byte sequence)".to_string())?;
+    let text = String::from_utf8(bytes).map_err(|e| {
+        let b = e.as_bytes()[e.utf8_error().valid_up_to()];
+        format!("invalid argument (cannot decode byte sequence starting from {b})")
+    })?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    Ok(if text.contains("\r\n") {
+    Ok(crlf_to_lf(text))
+}
+
+/// Text with its CRLF line endings made LF.
+fn crlf_to_lf(text: &str) -> String {
+    if text.contains("\r\n") {
         text.replace("\r\n", "\n")
     } else {
         text.to_string()
-    })
+    }
+}
+
+/// An error reading a file, with the advice upstream's top-level handler
+/// adds when text could not be decoded (exitUnicode).
+pub fn with_decoding_hint(msg: String) -> String {
+    if msg.contains("cannot decode byte sequence") {
+        format!(
+            "{msg}\nSome text could not be decoded with the system's text encoding, UTF-8\n\
+             (or, the text encoding specified by CSV rules).\n\
+             Please either convert the text to this encoding,\n\
+             or configure a system locale which can decode this text."
+        )
+    } else {
+        msg
+    }
 }
 
 /// An I/O error as GHC shows it, after the file name and operation.
