@@ -99,6 +99,9 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         .map(|(_, a)| a.clone())
         .collect();
     let mut raw = args::process(mode, &rest)?;
+    if mode.name == "check" {
+        commands::check::validate_check_args(&raw)?;
+    }
     if cmd.is_some() {
         raw.0
             .insert(0, ("command".to_string(), mode.name.to_string()));
