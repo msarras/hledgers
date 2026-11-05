@@ -960,17 +960,18 @@ fn make_row(
 /// The report with each value as a percentage of its column's total
 /// (reportPercent). Upstream calculates a percentage when it is shown, so
 /// one that cannot be calculated is an error only then; here the values
-/// a report does not show are left null instead: the period values with
-/// --summary-only (unless the bare-wide layout lists their commodities),
-/// the row totals unless the report has one period (the single-column
-/// report shows its totals) or a row total column, and the averages
-/// without --average.
+/// a report does not show are left null instead: unless the output shows
+/// every value, the period values with --summary-only (unless the
+/// bare-wide layout lists their commodities), the row totals unless the
+/// report has one period (the single-column report shows its totals) or a
+/// row total column, and the averages without --average.
 fn report_percent(
     ropts: &ReportOpts,
     report: MultiBalanceReport,
 ) -> Result<MultiBalanceReport, String> {
-    let shown_periods = !ropts.summary_only || ropts.layout == Ok(Layout::BareWide);
-    let shown_total = report.dates.len() <= 1 || ropts.has_totals_column();
+    let all = ropts.all_values_shown;
+    let shown_periods = all || !ropts.summary_only || ropts.layout == Ok(Layout::BareWide);
+    let shown_total = all || report.dates.len() <= 1 || ropts.has_totals_column();
     let t = &report.totals;
     let percent = |amounts: &[MixedAmount], total: &MixedAmount, average: &MixedAmount| {
         let amounts = if shown_periods {
@@ -985,7 +986,7 @@ fn report_percent(
         } else {
             MixedAmount::null()
         };
-        let average = if ropts.average {
+        let average = if all || ropts.average {
             perdivide(average, &t.average)?
         } else {
             MixedAmount::null()

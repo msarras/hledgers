@@ -20,6 +20,7 @@ use crate::write::csv::{print_csv, print_tsv};
 use crate::write::journal::{
     ItemRenderer, PostingLayout, journal_items_as_text, show_account_name, show_transaction,
 };
+use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
     Cell, CellType, add_header_borders, add_row_span_header, cell_from_amount, integer_cell,
     raw_table_content,
@@ -257,8 +258,12 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
                 print_tsv(&rows)
             })
         }
+        "json" => Ok(to_json_text(&style_all(
+            entries_report(&opts.spec, j)?,
+            &styles,
+        ))),
         "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
-        "json" | "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
+        "html" | "fods" => Err(not_yet(&format!("print -O {fmt}"), "5")),
         _ => Err(unsupported_output_format_error(&fmt)),
     }
 }

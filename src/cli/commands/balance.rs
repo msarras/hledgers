@@ -2,9 +2,9 @@
 //! Hledger.Cli.Commands.Balance.Internal): accounts with their balance
 //! changes or balances, in one column (a Ledger-style list or tree, lines
 //! laid out by a --format line format), or with a report interval, in a
-//! table with a column per period; or a budget report. Text, csv and tsv
-//! output; the other output formats and charts come later in hledgers
-//! milestone 5c.
+//! table with a column per period; or a budget report. Text, csv, tsv and
+//! json output; the other output formats and charts come later in
+//! hledgers milestone 5c.
 
 use std::collections::BTreeSet;
 
@@ -26,6 +26,7 @@ use crate::model::Journal;
 use crate::reports::budget::{BudgetCell, BudgetReport, budget_report};
 use crate::reports::opts::{
     AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, PeriodTitles, ReportOpts,
+    ReportSpec,
 };
 use crate::reports::periodic::{
     BalanceReport, DisplayName, MultiBalanceReport, PeriodicReportRow, balance_report,
@@ -34,6 +35,7 @@ use crate::reports::periodic::{
 use crate::text::{Wide, format_text};
 use crate::valuation::{ConversionOp, ValuationType};
 use crate::write::csv::{print_csv, print_tsv};
+use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
     self as spr, Border, CellType, Emphasis, Lines, Style, add_header_borders, add_row_span_header,
     cell_from_amount, cell_from_mixed_amount, cells_from_mixed_amount, horizontal_span,
@@ -130,8 +132,16 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         ropts.interval != Interval::NoInterval || (layout == Layout::Tidy && delimited);
     let styles = balance_report_styles(&ropts, j);
     let other_format = |fmt: &str| match fmt {
-        "html" | "json" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
+        "html" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
         _ => unsupported_output_format_error(fmt),
+    };
+    // json shows every value of the report
+    let spec = ReportSpec {
+        opts: ReportOpts {
+            all_values_shown: fmt == "json",
+            ..ropts0.clone()
+        },
+        ..opts.spec.clone()
     };
     let delimited_text = |records: Vec<Vec<String>>| {
         if fmt == "csv" {
@@ -142,14 +152,15 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     };
     if budget {
         warn_if_large_multi_period_report(opts, j);
-        if !matches!(fmt.as_str(), "txt" | "csv" | "tsv") {
+        if !matches!(fmt.as_str(), "txt" | "csv" | "tsv" | "json") {
             return Err(other_format(&fmt));
         }
-        let (span, _) = opts.spec.report_span(j);
-        let mut report = budget_report(&opts.spec, &opts.input.balancing, span, j)?;
+        let (span, _) = spec.report_span(j);
+        let mut report = budget_report(&spec, &opts.input.balancing, span, j)?;
         report.style_amounts(&styles);
         match fmt.as_str() {
             "txt" => budget_report_as_text(&ropts, layout, &report),
+            "json" => Ok(to_json_text(&report) + "\n"),
             _ => {
                 let fmt = AmountFormat::MACHINE;
                 let (_, rows) = budget_report_as_spreadsheet(&fmt, &ropts, layout, &report)?;
@@ -158,23 +169,25 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         }
     } else if multiperiod {
         warn_if_large_multi_period_report(opts, j);
-        let mut report = multi_balance_report(&opts.spec, j)?;
+        let mut report = multi_balance_report(&spec, j)?;
         report.style_amounts(&styles);
         match fmt.as_str() {
             "txt" => Ok(multi_balance_report_as_text(&ropts, layout, &report)),
+            "json" => Ok(to_json_text(&report) + "\n"),
             "csv" | "tsv" => Ok(delimited_text(multi_balance_report_as_csv(
                 &ropts, layout, &report,
             ))),
             f => Err(other_format(f)),
         }
     } else {
-        let mut report = balance_report(&opts.spec, j)?;
+        let mut report = balance_report(&spec, j)?;
         report.style_amounts(&styles);
         match fmt.as_str() {
             "txt" => Ok(with_title(
                 opts,
                 balance_report_as_text(&ropts, layout, &report)?,
             )),
+            "json" => Ok(to_json_text(&report) + "\n"),
             "csv" | "tsv" => {
                 let rows =
                     balance_report_as_spreadsheet(&AmountFormat::MACHINE, &ropts, layout, &report);

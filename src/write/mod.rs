@@ -3,6 +3,7 @@
 
 pub mod csv;
 pub mod journal;
+pub mod json;
 pub mod spreadsheet;
 pub mod string_format;
 pub mod table;

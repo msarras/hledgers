@@ -2,7 +2,7 @@
 //! Hledger.Cli.Commands.Balancesheet, Balancesheetequity, Incomestatement
 //! and Cashflow): a multi-period balance report in sections (assets and
 //! liabilities, revenues and expenses, ...), each with its own totals, and
-//! the net totals, all amounts normally positive. Text, csv and tsv
+//! the net totals, all amounts normally positive. Text, csv, tsv and json
 //! output; the other output formats and charts come later in hledgers
 //! milestone 5c.
 
@@ -37,6 +37,7 @@ use crate::reports::periodic::{
 };
 use crate::text::Wide;
 use crate::write::csv::{print_csv, print_tsv};
+use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{self as spr, Emphasis, Style, horizontal_span, raw_table_content};
 use crate::write::table::{Header, Line, Table, concat_tables};
 
@@ -206,8 +207,8 @@ pub fn compound_balance_command(
         return Err(not_yet(&format!("{command} --chart"), "5c"));
     }
     match fmt.as_str() {
-        "txt" | "csv" | "tsv" => {}
-        "html" | "fods" | "json" => {
+        "txt" | "csv" | "tsv" | "json" => {}
+        "html" | "fods" => {
             return Err(not_yet(&format!("{command} -O {fmt}"), "5c"));
         }
         f => return Err(unsupported_output_format_error(f)),
@@ -216,6 +217,8 @@ pub fn compound_balance_command(
     let accum_override = balance_accumulation_override(&opts.raw, ropts.balance_calc);
     let ropts1 = ReportOpts {
         balance_accum: accum_override.unwrap_or(cbc.accum),
+        // json shows every value of the report
+        all_values_shown: fmt == "json",
         ..ropts.clone()
     };
     let layout = ropts1.layout.clone()?;
@@ -231,6 +234,7 @@ pub fn compound_balance_command(
     Ok(match fmt.as_str() {
         "csv" => print_csv(&compound_balance_report_as_csv(&ropts1, layout, &cbr)),
         "tsv" => print_tsv(&compound_balance_report_as_csv(&ropts1, layout, &cbr)),
+        "json" => to_json_text(&cbr),
         _ => compound_balance_report_as_text(&ropts1, layout, &cbr),
     })
 }

@@ -137,6 +137,10 @@ pub struct ReportOpts {
     /// An explicit `--title`, perhaps empty to suppress the report's own.
     pub title: Option<String>,
     pub subreport_titles: Option<String>,
+    /// Whether the output shows every value of the report, as json does,
+    /// so that --percent calculates every percentage, not just those the
+    /// other formats show (upstream calculates each when it is shown).
+    pub all_values_shown: bool,
 }
 
 impl Default for ReportOpts {
@@ -184,6 +188,7 @@ impl Default for ReportOpts {
             period_titles: PeriodTitles::Compact,
             title: None,
             subreport_titles: None,
+            all_values_shown: false,
         }
     }
 }
