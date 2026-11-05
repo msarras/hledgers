@@ -808,15 +808,18 @@ impl<'a> JournalParser<'a, '_> {
     /// Add a commodity declaration; a commodity declared again adds to its
     /// earlier declaration (addCommodityDeclaration, commodityRedeclare).
     fn add_commodity(&mut self, new: Commodity) {
+        // the later declaration's tags come first (union), so they win when a
+        // tag is looked up by its first value
         if !new.tags.is_empty() {
             let existing = self
                 .j
                 .declared_commodity_tags
                 .entry(new.symbol.clone())
                 .or_default();
-            for t in &new.tags {
-                if !existing.contains(t) {
-                    existing.push(t.clone());
+            let earlier = std::mem::replace(existing, new.tags.clone());
+            for t in earlier {
+                if !existing.contains(&t) {
+                    existing.push(t);
                 }
             }
         }
@@ -1790,6 +1793,27 @@ mod tests {
 
     fn periodic(s: &str) -> PeriodicTransaction {
         parse(s).unwrap().periodic_txns.remove(0)
+    }
+
+    // A commodity declared again adds to its earlier declaration, the later
+    // tags first (commodityRedeclare, addCommodityDeclaration).
+    #[test]
+    fn redeclared_commodity_tags_later_first() {
+        let j = parse(
+            "commodity 1000. kt  ; alias: 1e-3 Mt, t: 1
+commodity kt  ; alias: 10 users
+",
+        )
+        .unwrap();
+        let tags = |ts: &[Tag]| ts.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            tags(&j.declared_commodity_tags["kt"]),
+            ["10 users", "1e-3 Mt", "1"]
+        );
+        assert_eq!(
+            tags(&j.declared_commodities["kt"].tags),
+            ["10 users", "1e-3 Mt", "1"]
+        );
     }
 
     #[test]
