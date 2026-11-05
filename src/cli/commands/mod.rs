@@ -5,6 +5,7 @@ pub mod activity;
 pub mod aregister;
 pub mod balance;
 pub mod check;
+pub mod close;
 pub mod codes;
 pub mod commodities;
 pub mod compound;
@@ -38,7 +39,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &compound::BALANCESHEET.mode,
     &compound::CASHFLOW.mode,
     &check::MODE,
-    &command("close", &["equity"]),
+    &close::MODE,
     &codes::MODE,
     &commodities::MODE,
     &descriptions::MODE,

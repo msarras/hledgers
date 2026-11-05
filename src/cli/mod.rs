@@ -136,6 +136,7 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "print" => commands::print::print,
         "register" => |o, j| commands::register::register(o, &j),
         "check" => |o, j| commands::check::check(o, &j),
+        "close" => |o, j| commands::close::close(o, &j),
         "files" => |o, j| commands::files::files(o, &j),
         "prices" => |o, j| commands::prices::prices(o, &j),
         "rewrite" => commands::rewrite::rewrite,

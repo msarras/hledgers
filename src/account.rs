@@ -592,6 +592,11 @@ pub fn account_name_to_account_regex_ci(a: &str) -> Regexp {
     re(&format!("^{}(:|$)", escape_name(a)))
 }
 
+/// A regex matching just this account (accountNameToAccountOnlyRegex).
+pub fn account_name_to_account_only_regex(a: &str) -> Regexp {
+    crate::regex::to_regex(&format!("^{}$", escape_name(a))).expect("a valid regular expression")
+}
+
 /// A case-insensitive regex matching just this account
 /// (accountNameToAccountOnlyRegexCI).
 pub fn account_name_to_account_only_regex_ci(a: &str) -> Regexp {
