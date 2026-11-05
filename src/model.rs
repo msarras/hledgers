@@ -722,6 +722,58 @@ impl Journal {
     pub fn declared_account_names(&self) -> impl Iterator<Item = &AccountName> {
         self.declared_accounts.iter().map(|(a, _)| a)
     }
+
+    /// The account to use for postings hledger generates to an account of
+    /// this type: the first declared with it, or else the alphabetically
+    /// first having it, or else the default (journalAccountForType).
+    pub fn account_for_type<'a>(&'a self, default: &'a str, atype: AccountType) -> &'a str {
+        let declared = |a: &str| {
+            self.declared_account_types
+                .iter()
+                .find(|(_, accts)| accts.iter().any(|b| &**b == a))
+                .map(|(t, _)| *t)
+        };
+        self.declared_account_names()
+            .find(|a| declared(a) == Some(atype))
+            .or_else(|| {
+                self.account_types
+                    .iter()
+                    .find(|(_, t)| **t == atype)
+                    .map(|(a, _)| a)
+            })
+            .map_or(default, |a| &**a)
+    }
+
+    /// The accounts declared or inferred to be conversion accounts
+    /// (journalConversionAccounts).
+    pub fn conversion_accounts(&self) -> Vec<AccountName> {
+        self.account_types
+            .iter()
+            .filter(|(_, t)| **t == AccountType::Conversion)
+            .map(|(a, _)| a.clone())
+            .collect()
+    }
+
+    /// The commodities declared with a `lots:` tag (journalLotfulCommodities).
+    pub fn lotful_commodities(&self) -> std::collections::BTreeSet<Sym> {
+        self.declared_commodity_tags
+            .iter()
+            .filter(|(_, tags)| tags.iter().any(|(n, _)| n.to_lowercase() == "lots"))
+            .map(|(c, _)| c.clone())
+            .collect()
+    }
+
+    /// Each account's declared `lots:` tag value, the first if there are
+    /// several (journalAccountLotsTags).
+    pub fn account_lots_tags(&self) -> BTreeMap<AccountName, String> {
+        self.declared_account_tags
+            .iter()
+            .filter_map(|(a, tags)| {
+                let v = tags.iter().find(|(n, _)| n.to_lowercase() == "lots")?;
+                Some((a.clone(), v.1.clone()))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

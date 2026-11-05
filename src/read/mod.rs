@@ -2,7 +2,9 @@
 //! and the parsers for amounts and journal files.
 
 pub mod amount;
+pub mod balancing;
 pub mod common;
+pub mod errors;
 pub mod finalise;
 pub mod journal;
 
@@ -100,6 +102,17 @@ pub struct InputOpts {
     pub old_timeclock: bool,
     /// The main journal file's directory.
     pub journal_dir: Option<String>,
+    /// The program's command-line arguments, which can ask for checks
+    /// that are done while reading (progArgs).
+    pub prog_args: Vec<String>,
+}
+
+impl InputOpts {
+    /// Whether the command line is a check command naming this check
+    /// (journalFinalise's checking).
+    pub fn checking(&self, name: &str) -> bool {
+        self.prog_args.iter().any(|a| a == "check") && self.prog_args.iter().any(|a| a == name)
+    }
 }
 
 impl Default for InputOpts {
@@ -128,6 +141,7 @@ impl Default for InputOpts {
             today: crate::dates::null_date(),
             old_timeclock: false,
             journal_dir: None,
+            prog_args: Vec::new(),
         }
     }
 }

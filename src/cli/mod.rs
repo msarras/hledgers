@@ -75,8 +75,8 @@ fn local_utc_offset_seconds(_utc_secs: i64) -> i64 {
     0
 }
 
-fn dispatch(args: &[String]) -> Result<(), String> {
-    let args = ensure_debug_flag_has_value(replace_numeric_flags(args));
+fn dispatch(prog_args: &[String]) -> Result<(), String> {
+    let args = ensure_debug_flag_has_value(replace_numeric_flags(prog_args));
     let cmd = args::command_index(&args);
     let mode = match cmd {
         None => &commands::MAIN_MODE,
@@ -98,7 +98,8 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         raw.0
             .insert(0, ("command".to_string(), mode.name.to_string()));
     }
-    let opts = CliOpts::from_raw_opts(raw, current_day(), false)?;
+    let mut opts = CliOpts::from_raw_opts(raw, current_day(), false)?;
+    opts.input.prog_args = prog_args.to_vec();
     if opts.raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
     }

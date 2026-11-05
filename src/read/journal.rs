@@ -1233,19 +1233,21 @@ impl<'a> JournalParser<'a, '_> {
             postings.push(p);
         }
         let end_pos = self.pos();
-        Ok(transaction_round_calculated_amounts(Transaction {
-            index: 0,
-            preceding_comment: String::new(),
-            pos: (start_pos, end_pos),
-            date,
-            date2,
-            status,
-            code,
-            description,
-            comment,
-            tags,
-            postings,
-        }))
+        Ok(super::balancing::transaction_round_calculated_amounts(
+            Transaction {
+                index: 0,
+                preceding_comment: String::new(),
+                pos: (start_pos, end_pos),
+                date,
+                date2,
+                status,
+                code,
+                description,
+                comment,
+                tags,
+                postings,
+            },
+        ))
     }
 
     /// A posting, or an auto posting rule's posting (which may have a `*`
@@ -1405,17 +1407,11 @@ fn parse_account_type_code(s: &str) -> Result<AccountType, String> {
     })
 }
 
-/// Round the amounts calculated with `*` or `/` in a transaction's posting
-/// amount expressions (transactionRoundCalculatedAmounts).
-// M2c: rounding of calculated amounts; the transaction is unchanged until then.
-fn transaction_round_calculated_amounts(t: Transaction) -> Transaction {
-    t
-}
-
 /// Round a periodic or auto posting rule's posting amounts calculated with
-/// `*` or `/` to their own precision (postingRoundCalculatedAmounts).
-// M2c: rounding of calculated amounts; the posting is unchanged until then.
-fn posting_round_calculated_amounts(p: Posting) -> Posting {
+/// `*` or `/` to their own precision (postingRoundCalculatedAmounts with no
+/// styles).
+fn posting_round_calculated_amounts(mut p: Posting) -> Posting {
+    super::balancing::posting_round_calculated_amounts(&Default::default(), &mut p);
     p
 }
 

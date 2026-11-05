@@ -1145,6 +1145,12 @@ impl<'a> Sum<&'a MixedAmount> for MixedAmount {
     }
 }
 
+impl Sum<MixedAmount> for MixedAmount {
+    fn sum<I: Iterator<Item = MixedAmount>>(iter: I) -> MixedAmount {
+        iter.fold(MixedAmount::null(), |total, m| &total + &m)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -279,13 +279,36 @@ fn journal_check_ordereddates(j: Journal) -> Result<Journal, String> {
 /// Balance the transactions, inferring missing amounts and balance
 /// assignments, and check balance assertions, returning the first
 /// assertion failure separately so that later errors are reported first
-/// (journalBalanceTransactionsAndDeferAssertions).
-// M2c: balancing, amount inference, assertions and assignments; the journal is unchanged until then.
+/// (journalBalanceTransactionsAndDeferAssertions). Assertions are checked
+/// unless `-I` is given without `--strict` or `check assertions`.
 fn journal_balance_transactions_and_defer_assertions(
-    _iopts: &InputOpts,
+    iopts: &InputOpts,
     j: Journal,
 ) -> Result<(Journal, Option<String>), String> {
-    Ok((j, None))
+    let check_assertions =
+        !iopts.balancing.ignore_assertions || iopts.strict || iopts.checking("assertions");
+    let bopts = super::BalancingOpts {
+        ignore_assertions: !check_assertions,
+        account_types: j.account_types.clone(),
+        lotful_commodities: j.lotful_commodities(),
+        account_lots_tags: j.account_lots_tags(),
+        lenient_lots: lenient_lots(iopts),
+        verbose_balancing_tags: iopts.verbose_tags,
+        imbalance_account: j
+            .account_for_type(
+                crate::account::DEFAULT_IMBALANCE_ACCOUNT,
+                AccountType::Imbalance,
+            )
+            .to_string(),
+        ..iopts.balancing.clone()
+    };
+    super::balancing::journal_balance_transactions(&bopts, j, true)
+}
+
+/// Whether lot errors are skipped: with `--ignore-lots`, unless `--strict`
+/// or `check lots` asks for them (lenientlots).
+fn lenient_lots(iopts: &InputOpts) -> bool {
+    iopts.ignore_lots && !iopts.strict && !iopts.checking("lots")
 }
 
 /// Detect and classify lot postings (journalClassifyLotPostings).
@@ -455,7 +478,7 @@ mod tests {
     fn account_types() {
         let j = read(concat!(
             "account myassets  ; type:A\n",
-            "2000-01-01\n  myassets:bank  1\n  revenues:gain  -1\n  expenses:food\n  other\n",
+            "2000-01-01\n  myassets:bank  1\n  revenues:gain  -1\n  expenses:food  0\n  other\n",
         ));
         let t = |a: &str| j.account_types.get(a).copied();
         assert_eq!(t("myassets:bank"), Some(AccountType::Asset));
