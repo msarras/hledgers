@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::account::account_name_drop;
+use crate::account::{UNBUDGETED_ACCOUNT_NAME, account_name_drop};
 use crate::amount::render::{
     AmountFormat, show_mixed_amount_b, show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
 };
@@ -20,7 +20,9 @@ use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
 use crate::dates::{DateSpan, Interval, prevday};
+use crate::decimal::Decimal;
 use crate::model::Journal;
+use crate::reports::budget::{BudgetCell, BudgetReport, budget_report};
 use crate::reports::opts::{
     AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, PeriodTitles, ReportOpts,
 };
@@ -97,16 +99,18 @@ pub const CHART_WIDTH_FLAG: Flag = Flag::new(
 )
 .short(&['w']);
 
-/// Run the balance command (balance): a multi-period report with a report
-/// interval, otherwise a single-column one.
+/// Run the balance command (balance): a budget report with --budget, a
+/// multi-period report with a report interval, otherwise a single-column
+/// one.
 pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let fmt = opts.output_format();
-    if opts.raw.string("chart").is_some() || fmt == "svg" {
-        return Err(not_yet("balance --chart", "5c"));
-    }
     let ropts0 = &opts.spec.opts;
-    if ropts0.balance_calc == BalanceCalculation::Budget {
-        return Err(not_yet("balance --budget", "5b"));
+    let budget = ropts0.balance_calc == BalanceCalculation::Budget;
+    if opts.raw.string("chart").is_some() || fmt == "svg" {
+        if budget {
+            return Err("--chart does not yet support --budget".to_string());
+        }
+        return Err(not_yet("balance --chart", "5c"));
     }
     let layout = ropts0.layout.clone()?;
     // a tidy report has no totals
@@ -122,7 +126,16 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         "csv" | "tsv" | "html" | "json" | "fods" => not_yet(&format!("balance -O {fmt}"), "5c"),
         _ => unsupported_output_format_error(fmt),
     };
-    if multiperiod {
+    if budget {
+        warn_if_large_multi_period_report(opts, j);
+        if fmt != "txt" {
+            return Err(other_format(&fmt));
+        }
+        let (span, _) = opts.spec.report_span(j);
+        let mut report = budget_report(&opts.spec, &opts.input.balancing, span, j)?;
+        report.style_amounts(&styles);
+        budget_report_as_text(&ropts, layout, &report)
+    } else if multiperiod {
         warn_if_large_multi_period_report(opts, j);
         let mut report = multi_balance_report(&opts.spec, j)?;
         report.style_amounts(&styles);
@@ -829,6 +842,369 @@ pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan], span: &DateSpa
     }
 }
 
+// Budget reports
+
+/// A budget cell's values shown on one line: the actual amount, and if
+/// there is a goal, it and the percentage of it reached, if there is one
+/// (BudgetDisplayCell).
+type BudgetDisplayCell = (Wide, Option<(Wide, Option<Wide>)>);
+
+/// A budget report as text: its title, then the table
+/// (budgetReportAsText).
+pub fn budget_report_as_text(
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &BudgetReport,
+) -> Result<String, String> {
+    let default = format!(
+        "Budget performance in {}{}:",
+        report.span(),
+        valuation_description(ropts, false)
+    );
+    let title = ropts.effective_title(&default);
+    let mut out = if title.is_empty() {
+        String::new()
+    } else {
+        format!("{title}\n\n")
+    };
+    let table = budget_report_as_table(ropts, layout, report)?;
+    out.push_str(&multi_balance_report_table_as_text(ropts, layout, &table));
+    Ok(out)
+}
+
+/// A budget report as a table of text (budgetReportAsTable): a line for
+/// each row, or with the tall and bare layouts, for each commodity of the
+/// row; each cell the actual amount and, if there is a goal, `[PERCENT% of
+/// GOAL]`, each part in a column as wide as the widest of its kind; the
+/// totals row below a line unless --no-total; the bare layout's commodity
+/// column first; transposed with --transpose. The wide, tall and bare
+/// layouts only.
+fn budget_report_as_table(
+    ropts: &ReportOpts,
+    layout: Layout,
+    report: &BudgetReport,
+) -> Result<Table<String, String, Wide>, String> {
+    let layout_name = match layout {
+        Layout::Wide(_) | Layout::Tall | Layout::Bare => None,
+        Layout::BareWide => Some("LayoutBareWide"),
+        Layout::Tidy => Some("LayoutTidy"),
+    };
+    if let Some(name) = layout_name {
+        return Err(format!(
+            "{name} not supported for the chosen output format."
+        ));
+    }
+    let cells = |row| row_to_budget_cells(ropts, row);
+    let total_cells = row_to_budget_cells(ropts, &report.totals);
+    let show_cell = |cs: &[Sym], cell: &BudgetCell| show_budget_cell(ropts, layout, cs, cell);
+    // the column widths of the actual amounts, goals and percentages, over
+    // every line of every row, the totals' included; with --transpose,
+    // each line's
+    let widths: Vec<(usize, usize, usize)> = {
+        let cell_widths = |cells: &[BudgetCell]| -> Vec<Vec<(usize, usize, usize)>> {
+            let cs = budget_cells_commodities(cells);
+            (cells.iter())
+                .map(|c| {
+                    (show_cell(&cs, c).iter())
+                        .map(|(actual, goal)| {
+                            let (gw, pw) = goal.as_ref().map_or((0, 0), |(g, p)| {
+                                (g.width, p.as_ref().map_or(0, |p| p.width))
+                            });
+                            (actual.width, gw, pw)
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        let rows: Vec<Vec<Vec<(usize, usize, usize)>>> = (report.rows.iter())
+            .map(|r| cell_widths(&cells(r)))
+            .chain(std::iter::once(cell_widths(&total_cells)))
+            .collect();
+        let ncols = rows.iter().map(Vec::len).min().unwrap_or(0);
+        let columns: Vec<Vec<(usize, usize, usize)>> = (0..ncols)
+            .map(|i| rows.iter().flat_map(|r| r[i].iter().copied()).collect())
+            .collect();
+        let columns = if ropts.transpose {
+            transpose(&columns)
+        } else {
+            columns
+        };
+        (columns.iter())
+            .map(|c| {
+                let max =
+                    |f: fn(&(usize, usize, usize)) -> usize| c.iter().map(f).max().unwrap_or(0);
+                (max(|w| w.0), max(|w| w.1), max(|w| w.2))
+            })
+            .collect()
+    };
+    // a row's lines: the commodity and the cells' values; for a row with
+    // no amounts or goals, which may be needed to show the tree, one line
+    // of zeros, except for the unbudgeted row (showrow)
+    let show_row =
+        |unbudgeted: bool, cells: &[BudgetCell]| -> Vec<(Wide, Vec<BudgetDisplayCell>)> {
+            let mut cs = budget_cells_commodities(cells);
+            if cs.is_empty() && !unbudgeted {
+                cs.push(Sym::from(""));
+            }
+            let columns: Vec<Vec<BudgetDisplayCell>> =
+                cells.iter().map(|c| show_cell(&cs, c)).collect();
+            (cs.iter().map(|c| Wide::new(c)))
+                .zip(transpose(&columns))
+                .collect()
+        };
+    let mut accounts = Vec::new();
+    let mut commodities = Vec::new();
+    let mut lines = Vec::new();
+    for row in &report.rows {
+        let unbudgeted = &*row.name.full == UNBUDGETED_ACCOUNT_NAME;
+        let name = render_balance_acct(ropts, " ", &row.name);
+        for (c, line) in show_row(unbudgeted, &cells(row)) {
+            accounts.push(name.clone());
+            commodities.push(c);
+            lines.push(line);
+        }
+    }
+    let (total_commodities, total_lines): (Vec<Wide>, Vec<Vec<BudgetDisplayCell>>) =
+        show_row(false, &total_cells).into_iter().unzip();
+    let total_widths = if ropts.transpose {
+        widths.get(lines.len()..).unwrap_or_default()
+    } else {
+        &widths[..]
+    };
+    // the lines' cells shown with the widths of their columns (showcells)
+    let show_cells = |widths: &[(usize, usize, usize)], lines: &[Vec<BudgetDisplayCell>]| {
+        let show = |cells: &[BudgetDisplayCell]| -> Vec<Wide> {
+            (cells.iter().zip(widths))
+                .map(|(c, w)| show_budget_display_cell(*w, c))
+                .collect()
+        };
+        if ropts.transpose {
+            let shown: Vec<Vec<Wide>> = transpose(lines).iter().map(|c| show(c)).collect();
+            transpose(&shown)
+        } else {
+            lines.iter().map(|l| show(l)).collect()
+        }
+    };
+    // the bare layout's commodity column
+    let with_commodities = |cs: Vec<Wide>, rows: Vec<Vec<Wide>>| -> Vec<Vec<Wide>> {
+        if layout == Layout::Bare {
+            (cs.into_iter().zip(rows))
+                .map(|(c, mut row)| {
+                    row.insert(0, c);
+                    row
+                })
+                .collect()
+        } else {
+            rows
+        }
+    };
+    let rows = with_commodities(commodities, show_cells(&widths, &lines));
+    let total_rows = with_commodities(total_commodities, show_cells(total_widths, &total_lines));
+    let mut col_headings: Vec<String> = Vec::new();
+    if layout == Layout::Bare {
+        col_headings.push("Commodity".to_string());
+    }
+    if !ropts.summary_only {
+        col_headings
+            .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
+    }
+    if ropts.row_total {
+        col_headings.push("  Total".to_string());
+    }
+    if ropts.average {
+        col_headings.push("Average".to_string());
+    }
+    let pretty_line = if ropts.pretty {
+        Line::SingleLine
+    } else {
+        Line::NoLine
+    };
+    let mut table = Table {
+        row_headers: Header::Group(
+            Line::NoLine,
+            accounts.into_iter().map(Header::Leaf).collect(),
+        ),
+        col_headers: Header::Group(
+            pretty_line,
+            col_headings.into_iter().map(Header::Leaf).collect(),
+        ),
+        rows,
+    };
+    if !ropts.no_total {
+        let headers = std::iter::repeat_n(String::new(), total_rows.len().max(1));
+        let totals = Table {
+            row_headers: Header::Group(Line::NoLine, headers.map(Header::Leaf).collect()),
+            col_headers: Header::Leaf(()),
+            rows: total_rows,
+        };
+        table = concat_tables(Line::SingleLine, table, totals);
+    }
+    if ropts.transpose {
+        table = Table {
+            row_headers: table.col_headers,
+            col_headers: table.row_headers,
+            rows: transpose(&table.rows),
+        };
+    }
+    Ok(table)
+}
+
+/// A budget report row's cells: the periods' unless --summary-only, then
+/// its total and average if wanted (rowToBudgetCells).
+fn row_to_budget_cells<N>(
+    ropts: &ReportOpts,
+    row: &PeriodicReportRow<N, BudgetCell>,
+) -> Vec<BudgetCell> {
+    let mut cells = Vec::new();
+    if !ropts.summary_only {
+        cells.extend(row.amounts.iter().cloned());
+    }
+    if ropts.row_total && !row.amounts.is_empty() {
+        cells.push(row.total.clone());
+    }
+    if ropts.average && !row.amounts.is_empty() {
+        cells.push(row.average.clone());
+    }
+    cells
+}
+
+/// The commodities of these cells' actual amounts and goals, sorted
+/// (budgetCellsCommodities).
+fn budget_cells_commodities(cells: &[BudgetCell]) -> Vec<Sym> {
+    (cells.iter())
+        .flat_map(|(actual, goal)| actual.iter().chain(goal))
+        .flat_map(MixedAmount::commodities)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// A budget cell's values shown as the layout says: on one line (wide), or
+/// a line for each of the row's commodities (tall, and bare without the
+/// symbols), with the percentage of the goal reached on each line where
+/// it can be calculated (showcell, mkBudgetDisplayFns).
+fn show_budget_cell(
+    ropts: &ReportOpts,
+    layout: Layout,
+    cs: &[Sym],
+    (actual, goal): &BudgetCell,
+) -> Vec<BudgetDisplayCell> {
+    let show = |m: &MixedAmount| -> Vec<Wide> {
+        match layout {
+            Layout::Wide(width) => vec![show_mixed_amount_b(
+                &AmountFormat {
+                    max_width: width.map(|w| w as isize),
+                    colour: ropts.color,
+                    ..AmountFormat::ONE_LINE_NO_COST
+                },
+                m,
+            )],
+            _ => show_mixed_amount_lines_b(
+                &AmountFormat {
+                    commodity: layout != Layout::Bare,
+                    commodity_order: Some(cs.to_vec()),
+                    min_width: None,
+                    colour: ropts.color,
+                    ..AmountFormat::NO_COST
+                },
+                m,
+            ),
+        }
+    };
+    let null = MixedAmount::null();
+    let actual = actual.as_ref().unwrap_or(&null);
+    let actuals = show(actual);
+    let Some(goal) = goal else {
+        return actuals.into_iter().map(|a| (a, None)).collect();
+    };
+    let percentages: Vec<Option<Decimal>> = match layout {
+        Layout::Wide(_) => vec![budget_percentage(ropts, actual, goal)],
+        _ => (cs.iter())
+            .map(|c| {
+                let find = |m: &MixedAmount| m.amounts().into_iter().find(|a| &a.commodity == c);
+                match (find(actual), find(goal)) {
+                    (Some(a), Some(g)) => budget_percentage(
+                        ropts,
+                        &MixedAmount::from_amount(a),
+                        &MixedAmount::from_amount(g),
+                    ),
+                    _ => None,
+                }
+            })
+            .collect(),
+    };
+    let goals = (show(goal).into_iter()).zip(percentages).map(|(g, p)| {
+        let p = p.map(|p| Wide::new(&p.round_to(0).to_string()));
+        Some((g, p))
+    });
+    actuals.into_iter().zip(goals).collect()
+}
+
+/// The percentage of the goal the actual amount reaches, if they are in
+/// one commodity (or the actual amount is zero) and the goal is not zero;
+/// with -B or --value=transacted, of their costs (percentage).
+fn budget_percentage(
+    ropts: &ReportOpts,
+    actual: &MixedAmount,
+    goal: &MixedAmount,
+) -> Option<Decimal> {
+    let costed = |m: &MixedAmount| match ropts.conversion_op {
+        Some(ConversionOp::ToCost) => m.clone().to_cost_basis().amounts(),
+        Some(ConversionOp::ToTransactedCost) => m.clone().to_cost().amounts(),
+        _ => m.clone().strip_costs().amounts(),
+    };
+    match (costed(actual).as_slice(), costed(goal).as_slice()) {
+        ([a], [g]) if (a.commodity == g.commodity || a.looks_zero()) && !g.looks_zero() => {
+            Some(&(&Decimal::from_i64(100) * &a.quantity) / &g.quantity)
+        }
+        _ => None,
+    }
+}
+
+/// A budget cell's values in columns of these widths: the actual amount
+/// right-aligned, then `[PERCENT% of GOAL]` with the percentage and goal
+/// right-aligned, or spaces where there is no goal or percentage
+/// (showBudgetDisplayCell).
+fn show_budget_display_cell(
+    (actual_width, goal_width, percent_width): (usize, usize, usize),
+    (actual, goal): &BudgetDisplayCell,
+) -> Wide {
+    let pad = |w: usize, text: &Wide| " ".repeat(w.saturating_sub(text.width));
+    let percent_total = if percent_width == 0 {
+        0
+    } else {
+        percent_width + 5
+    };
+    let goal_total = if goal_width == 0 {
+        0
+    } else {
+        goal_width + percent_total + 3
+    };
+    let mut s = pad(actual_width, actual);
+    s.push_str(&actual.s);
+    match goal {
+        None => s.push_str(&" ".repeat(goal_total)),
+        Some((goal, percent)) => {
+            s.push_str(" [");
+            match percent {
+                None => s.push_str(&" ".repeat(percent_total)),
+                Some(p) => {
+                    s.push_str(&pad(percent_width, p));
+                    s.push_str(&p.s);
+                    s.push_str("% of ");
+                }
+            }
+            s.push_str(&pad(goal_width, goal));
+            s.push_str(&goal.s);
+            s.push(']');
+        }
+    }
+    Wide {
+        s,
+        width: actual_width + goal_total,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,6 +1227,23 @@ mod tests {
         assert_eq!(
             balance_report_as_text(&ropts, Layout::Wide(None), &report).unwrap(),
             "                -100  актив:наличные\n                 100  расходы:покупки\n"
+        );
+    }
+    // showBudgetDisplayCell: the actual amount, then the percentage and
+    // goal, each right-aligned in its column, or spaces in their place.
+    #[test]
+    fn budget_display_cells() {
+        let w = |s: &str| Wide::new(s);
+        let show = |cell: BudgetDisplayCell| show_budget_display_cell((4, 4, 3), &cell).s;
+        assert_eq!(
+            show((w("$10"), Some((w("$25"), Some(w("40")))))),
+            " $10 [ 40% of  $25]"
+        );
+        assert_eq!(show((w("0"), Some((w("0"), None)))), "   0 [           0]");
+        assert_eq!(show((w("$5"), None)), format!("  $5{}", " ".repeat(15)));
+        assert_eq!(
+            show_budget_display_cell((2, 0, 0), &(w("$5"), None)).width,
+            2
         );
     }
 }
