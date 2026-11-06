@@ -323,6 +323,11 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
         io::print_stdout(&format!("{}\n", version::progname_and_version(progname)));
         return Ok(0);
     }
+    // or --write-lang: write a catalog to start translating from
+    if let Some(lang) = raw.string("write-lang").filter(|_| !isaddoncmd) {
+        io::print_stdout(&crate::i18n::write_lang(lang)?);
+        return Ok(0);
+    }
     // 6.3 no command: the quick reference
     if nocmdprovided {
         quickref()?;

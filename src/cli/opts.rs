@@ -307,7 +307,11 @@ impl CliOpts {
         };
         let ropts = ReportOpts::from_raw_opts(today, color, &raw)?;
         let input = input_opts_from_raw_opts(today, &raw, &ropts)?;
-        let spec = ReportSpec::new(today, ropts)?;
+        let mut spec = ReportSpec::new(today, ropts)?;
+        spec.opts.translations = std::sync::Arc::new(crate::i18n::translations_for_lang_option(
+            raw.string("lang"),
+            &[],
+        )?);
         let yn = |name: &str| -> Result<Option<bool>, String> {
             match raw.string(name).map(str::to_lowercase).as_deref() {
                 None => Ok(None),

@@ -141,6 +141,8 @@ pub struct ReportOpts {
     /// so that --percent calculates every percentage, not just those the
     /// other formats show (upstream calculates each when it is shown).
     pub all_values_shown: bool,
+    /// The language of the report's text (--lang).
+    pub translations: std::sync::Arc<crate::i18n::Translations>,
 }
 
 impl Default for ReportOpts {
@@ -189,6 +191,7 @@ impl Default for ReportOpts {
             title: None,
             subreport_titles: None,
             all_values_shown: false,
+            translations: std::sync::Arc::new(crate::i18n::Translations::none()),
         }
     }
 }

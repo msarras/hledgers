@@ -7,6 +7,7 @@
 //! report interval, the totals at each period's end; in every output
 //! format, or as a chart.
 
+use crate::i18n::Translations;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -1297,7 +1298,7 @@ impl crate::write::json::ToJson for JsonValue {
 }
 
 /// The column headings (the cost one as the report says).
-fn col_headings(rpt: &Report) -> Vec<String> {
+fn col_headings(t: &Translations, rpt: &Report) -> Vec<String> {
     [
         "Date",
         "Age",
@@ -1313,7 +1314,7 @@ fn col_headings(rpt: &Report) -> Vec<String> {
         "XIRR",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(|s| t.tr(s).to_string())
     .collect()
 }
 
@@ -1420,6 +1421,7 @@ fn holding_bar_parts(h: &Holding) -> (Vec<Amount>, Vec<Amount>, Vec<Amount>) {
 /// value, or the cost basis without a market price; the values marked,
 /// and the gain percents as value labels (holdingsBarsChart).
 fn holdings_bars_chart(
+    t: &Translations,
     styles: &CommodityStyles,
     title: &str,
     x_axis: XAxis,
@@ -1497,8 +1499,8 @@ fn holdings_bars_chart(
                 })
                 .map(|((name, typ, role, mark), values)| Series {
                     label: ChartLabel {
-                        full: name.to_string(),
-                        short: name.to_string(),
+                        full: t.tr(name).to_string(),
+                        short: t.tr(name).to_string(),
                         indent: 0,
                         typ: *typ,
                         account: false,
@@ -1568,9 +1570,14 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let show_lots = opts.raw.bool("lots");
     let rpt = holdings_report(show_lots, rounding, &opts.spec, j)?;
     let title = ropts
-        .effective_title(&format!("Holdings on {}", rpt.date))
+        .effective_title(
+            &ropts
+                .translations
+                .trf("Holdings on {date}", &[("date", &rpt.date.to_string())]),
+        )
         .to_string();
-    let col_heads = col_headings(&rpt);
+    let t = &ropts.translations;
+    let col_heads = col_headings(t, &rpt);
     let line_cells = |l: &HLine| match l {
         HLine::Heading { totals, .. } => totals_cell_parts(&rpt.styles, totals),
         HLine::Position { holding, .. } => holding_cell_parts(&rpt.styles, holding),
@@ -1578,7 +1585,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let total_parts = (!ropts.no_total).then(|| totals_cell_parts(&rpt.styles, &rpt.totals));
     let html = || {
         let mut rows = vec![add_header_borders(
-            std::iter::once("Account")
+            std::iter::once(t.tr("Account"))
                 .chain(col_heads.iter().map(String::as_str))
                 .zip(COL_CLASSES)
                 .map(|(t, cls)| head_cell(t, cls))
@@ -1613,7 +1620,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             let mut row = vec![body_cell(
                 0,
                 "account coltotal",
-                &["Total:".to_string()],
+                &[t.tr("Total:").to_string()],
                 false,
             )];
             for (i, parts) in tot.iter().enumerate() {
@@ -1665,7 +1672,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             .iter()
             .map(|(_, _, h)| holding_bar_parts(h))
             .collect();
-        let chart = holdings_bars_chart(&rpt.styles, &title, XAxis::Categories(labels), &parts);
+        let chart = holdings_bars_chart(t, &rpt.styles, &title, XAxis::Categories(labels), &parts);
         return render_chart(opts, chart, || {
             Ok(crate::write::html::titled_table_html(&title, &html()) + "\n")
         });
@@ -1679,7 +1686,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
                 format!("{title}\n\n")
             };
             if rpt.rows.is_empty() {
-                out.push_str("(no holdings)\n");
+                out.push_str(&format!("{}\n", ropts.translations.tr("(no holdings)")));
                 return Ok(out);
             }
             let tree = ropts.account_list_mode == AccountListMode::Tree && !ropts.full_names;
@@ -1741,7 +1748,10 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         "html" => crate::write::html::titled_table_html(&title, &html()) + "\n",
         "fods" => {
             let mut sheets = BTreeMap::new();
-            sheets.insert("Holdings".to_string(), ((1, 0), html()));
+            sheets.insert(
+                ropts.translations.tr("Holdings").to_string(),
+                ((1, 0), html()),
+            );
             crate::write::fods::print_fods(crate::write::fods::locale_encoding_name(), &sheets)
         }
         // upstream adds a newline to toJsonText's
@@ -1773,8 +1783,11 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
     }
     let dates: Vec<Day> = reports.iter().map(|(_, r)| r.date).collect();
     let default_title = match (dates.iter().min(), dates.iter().max()) {
-        (Some(lo), Some(hi)) => format!("Holdings at period ends, {lo}..{hi}"),
-        _ => "Holdings at period ends".to_string(),
+        (Some(lo), Some(hi)) => ropts.translations.trf(
+            "Holdings at period ends, {dates}",
+            &[("dates", &format!("{lo}..{hi}"))],
+        ),
+        _ => ropts.translations.tr("Holdings at period ends").to_string(),
     };
     let title = ropts.effective_title(&default_title).to_string();
     let col_heads: Vec<String> = [
@@ -1786,7 +1799,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
         "XIRR",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(|s| ropts.translations.tr(s).to_string())
     .collect();
     let period_cells = |r: &Report| -> Vec<Vec<String>> {
         totals_cell_parts(&r.styles, &r.totals)
@@ -1808,7 +1821,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
     let amount_cols = [true, true, true, false, true, false];
     let html = || {
         let mut rows = vec![add_header_borders(
-            std::iter::once("Date")
+            std::iter::once(ropts.translations.tr("Date"))
                 .chain(col_heads.iter().map(String::as_str))
                 .zip(classes)
                 .map(|(t, cls)| head_cell(t, cls))
@@ -1850,7 +1863,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
                 acc
             })
             .collect();
-        let chart = holdings_bars_chart(&styles, &title, x, &parts);
+        let chart = holdings_bars_chart(&ropts.translations, &styles, &title, x, &parts);
         return render_chart(opts, chart, || {
             Ok(crate::write::html::titled_table_html(&title, &html()) + "\n")
         });
@@ -1865,7 +1878,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
                 format!("{title}\n\n")
             };
             if reports.is_empty() {
-                out.push_str("(no holdings)\n");
+                out.push_str(&format!("{}\n", ropts.translations.tr("(no holdings)")));
                 return Ok(out);
             }
             let row_heads = dates.iter().map(|d| d.to_string()).collect();
@@ -1921,7 +1934,10 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
         "html" => crate::write::html::titled_table_html(&title, &html()) + "\n",
         "fods" => {
             let mut sheets = BTreeMap::new();
-            sheets.insert("Holdings".to_string(), ((1, 0), html()));
+            sheets.insert(
+                ropts.translations.tr("Holdings").to_string(),
+                ((1, 0), html()),
+            );
             crate::write::fods::print_fods(crate::write::fods::locale_encoding_name(), &sheets)
         }
         "json" => {

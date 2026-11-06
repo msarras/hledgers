@@ -12,6 +12,7 @@ use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::opts::CliOpts;
 use crate::dates::{DateSpan, Day, Period};
 use crate::decimal::Decimal;
+use crate::i18n::Translations;
 use crate::model::{Commodity, Posting, SourcePos, Transaction};
 use crate::read::amount::{AmountCtx, parse_amount_with};
 use crate::reports::account_txns::AccountTransactionsReportItem;
@@ -180,7 +181,10 @@ pub fn render_chart(
         "tsv" => print_tsv(&chart_as_csv(&chart)),
         "json" => to_json_text(&chart) + "\n",
         // without the dark variant, since the html is always light
-        _ => chart_as_svg(false, &chart) + &collapsed_html("Report details", &report_html()?),
+        _ => {
+            let label = opts.spec.opts.translations.tr("Report details");
+            chart_as_svg(false, &chart) + &collapsed_html(label, &report_html()?)
+        }
     })
 }
 
@@ -260,6 +264,7 @@ pub fn multi_balance_report_as_chart(
         .filter_map(|c| {
             let unit = unit_amount(&c, &allamts);
             let series = limit_series(
+                &ropts.translations,
                 MAX_SERIES,
                 mark,
                 (rows.iter())
@@ -278,7 +283,7 @@ pub fn multi_balance_report_as_chart(
             let mut all = series;
             if all.len() > 1 && !ropts.no_total && !ropts.percent {
                 all.push(Series {
-                    label: ChartLabel::plain("Total"),
+                    label: ChartLabel::plain(ropts.translations.tr("Total")),
                     role: SeriesRole::Total,
                     mark: if flow { Mark::Marker } else { Mark::Line },
                     values: (report.totals.amounts.iter())
@@ -332,7 +337,7 @@ pub fn balance_report_as_chart(
         .map(|c| Panel {
             unit: unit_amount(&c, &allamts),
             series: vec![Series {
-                label: ChartLabel::plain("Balance"),
+                label: ChartLabel::plain(ropts.translations.tr("Balance")),
                 role: SeriesRole::Item,
                 mark: Mark::Bar,
                 values: (report.items.iter())
@@ -428,7 +433,10 @@ pub fn compound_balance_report_as_chart(
     };
     let nettotals = &cbr.totals.amounts;
     let showtotal = !ropts.no_total && !ropts.percent;
-    let netlabel = "Net:".trim_end_matches([':', '\u{ff1a}']);
+    let netlabel = ropts
+        .translations
+        .tr("Net:")
+        .trim_end_matches([':', '\u{ff1a}']);
     let cells: Vec<&MixedAmount> = (sections.iter())
         .flat_map(|(_, _, rows)| rows.iter().flat_map(|r| &r.amounts))
         .chain(nettotals)
@@ -449,7 +457,7 @@ pub fn compound_balance_report_as_chart(
                             .then(|| (section_label(section, r), qs))
                     })
                     .collect();
-                for s in limit_series(MAX_SECTION_SERIES, Mark::Bar, accts) {
+                for s in limit_series(&ropts.translations, MAX_SECTION_SERIES, Mark::Bar, accts) {
                     series.push(Series {
                         group: k,
                         sign: usual_sign(section, *sign),
@@ -623,7 +631,7 @@ pub fn postings_report_as_chart(
             let values = totals.iter().map(|m| Some(quantity_in(c, m))).collect();
             let label = ChartLabel {
                 typ: common_type,
-                ..ChartLabel::plain("Total")
+                ..ChartLabel::plain(ropts.translations.tr("Total"))
             };
             series(label, role, Mark::Line, values)
         };
@@ -689,7 +697,7 @@ pub fn postings_report_as_chart(
                 let names: Vec<&str> = grp.iter().map(|i| sizes[*i].0).collect();
                 let l = ChartLabel {
                     typ: names.first().and_then(|a| account_type(a)),
-                    ..other_label(nothers, &names)
+                    ..other_label(&ropts.translations, nothers, &names)
                 };
                 let values = running_total(c, &|x| names.contains(&x));
                 out.push(series(l, SeriesRole::Other, Mark::Line, values));
@@ -768,7 +776,7 @@ pub fn postings_report_as_chart(
             .filter(|(_, qs)| qs.iter().any(|q| !q.is_zero()))
             .map(|(a, qs)| (label(a), qs.clone()))
             .collect();
-        let mut ss = limit_series(MAX_SERIES, Mark::Bar, shown);
+        let mut ss = limit_series(&ropts.translations, MAX_SERIES, Mark::Bar, shown);
         if ss.is_empty() {
             return None;
         }
@@ -777,7 +785,7 @@ pub fn postings_report_as_chart(
                 .map(|j| Some((quantities.iter()).fold(Decimal::ZERO, |s, (_, qs)| &s + &qs[j])))
                 .collect();
             ss.push(series(
-                ChartLabel::plain("Total"),
+                ChartLabel::plain(ropts.translations.tr("Total")),
                 SeriesRole::Total,
                 Mark::Marker,
                 totals,
@@ -808,7 +816,12 @@ fn is_count(ropts: &ReportOpts) -> bool {
 /// At most this many series: if there are more, the largest (by total
 /// absolute value) in their order, and the rest combined in a final
 /// "other" series per account type (limitSeries).
-fn limit_series(maxn: usize, mark: Mark, items: Vec<(ChartLabel, Vec<Decimal>)>) -> Vec<Series> {
+fn limit_series(
+    t: &Translations,
+    maxn: usize,
+    mark: Mark,
+    items: Vec<(ChartLabel, Vec<Decimal>)>,
+) -> Vec<Series> {
     let sizes: Vec<(Option<AccountType>, Decimal)> = (items.iter())
         .map(|(l, qs)| {
             let size = qs.iter().fold(Decimal::ZERO, |a, q| &a + &q.abs());
@@ -846,7 +859,7 @@ fn limit_series(maxn: usize, mark: Mark, items: Vec<(ChartLabel, Vec<Decimal>)>)
         series.push(Series {
             label: ChartLabel {
                 typ: members.first().and_then(|(l, _)| l.typ),
-                ..other_label(nothers, &names)
+                ..other_label(t, nothers, &names)
             },
             role: SeriesRole::Other,
             mark,
@@ -916,7 +929,7 @@ fn choose_series(
 
 /// The label of an "other" series combining these accounts, naming their
 /// common parent when there are several "other" series (otherLabel).
-fn other_label(nothers: usize, accts: &[&str]) -> ChartLabel {
+fn other_label(t: &Translations, nothers: usize, accts: &[&str]) -> ChartLabel {
     let n = accts.len();
     let parent = match accts.split_first() {
         None => String::new(),
@@ -934,11 +947,16 @@ fn other_label(nothers: usize, accts: &[&str]) -> ChartLabel {
             common.join(":")
         }
     };
-    let accounts = if n == 1 { "account" } else { "accounts" };
+    let n = n as i64;
     if nothers > 1 && !parent.is_empty() {
-        ChartLabel::plain(&format!("other {parent} ({n} {accounts})"))
+        let l = t.trn(
+            n,
+            "other {parent} ({n} account)",
+            "other {parent} ({n} accounts)",
+        );
+        ChartLabel::plain(&l.replace("{parent}", &parent))
     } else {
-        ChartLabel::plain(&format!("other ({n} {accounts})"))
+        ChartLabel::plain(&t.trn(n, "other ({n} account)", "other ({n} accounts)"))
     }
 }
 
@@ -1026,14 +1044,20 @@ fn row_summaries<N>(
     if ropts.row_total {
         summary.push(Summary {
             kind: SummaryKind::Total,
-            label: "Total".to_string(),
+            label: ropts
+                .translations
+                .trc("column heading", "Total")
+                .to_string(),
             value: amount_in(&totals.total),
         });
     }
     if ropts.average {
         summary.push(Summary {
             kind: SummaryKind::Average,
-            label: "Average".to_string(),
+            label: ropts
+                .translations
+                .trc("column heading", "Average")
+                .to_string(),
             value: amount_in(&totals.average),
         });
     }
