@@ -698,7 +698,11 @@ impl<'a> Session<'a> {
             "Ready for hledger or !shell commands. For help: h or h -h. To exit: q or ctrl-d."
         );
         let prompt = format!("{base}> ");
-        let mut editor = rustyline::DefaultEditor::new().map_err(|e| e.to_string())?;
+        // haskeline's default settings complete file names
+        let mut editor = rustyline::Editor::new().map_err(|e| e.to_string())?;
+        editor.set_helper(Some(FileNames(
+            rustyline::completion::FilenameCompleter::new(),
+        )));
         loop {
             match editor.readline(&prompt) {
                 Ok(input) => {
@@ -755,6 +759,29 @@ impl<'a> Session<'a> {
         }
     }
 }
+
+/// Completion of file names, as haskeline's default.
+struct FileNames(rustyline::completion::FilenameCompleter);
+
+impl rustyline::completion::Completer for FileNames {
+    type Candidate = rustyline::completion::Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<rustyline::completion::Pair>)> {
+        self.0.complete(line, pos, ctx)
+    }
+}
+
+impl rustyline::hint::Hinter for FileNames {
+    type Hint = String;
+}
+impl rustyline::highlight::Highlighter for FileNames {}
+impl rustyline::validate::Validator for FileNames {}
+impl rustyline::Helper for FileNames {}
 
 /// A file's modification time, if it is a file that exists
 /// (maybeFileModificationTime).
