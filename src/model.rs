@@ -905,13 +905,17 @@ impl Journal {
     /// first with the most frequent ISO 4217 code (the first seen winning
     /// ties), and that code (journalBaseCurrency).
     pub fn base_currency(&self) -> Option<(&str, &str)> {
-        fn pick(syms: Vec<&str>) -> Option<(&str, &str)> {
+        fn pick<'a>(syms: Vec<&'a str>) -> Option<(&'a str, &'a str)> {
+            // each symbol's code, looked up once
+            let mut codes: std::collections::HashMap<&str, &str> = Default::default();
+            let mut code_of =
+                |s: &'a str| -> &'a str { codes.entry(s).or_insert_with(|| to_currency_code(s)) };
             let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
             for (i, s) in syms.iter().enumerate() {
-                stats.entry(to_currency_code(s)).or_insert((0, i)).0 -= 1;
+                stats.entry(code_of(s)).or_insert((0, i)).0 -= 1;
             }
             let code = stats.into_iter().min_by_key(|(_, s)| *s)?.0;
-            let sym = syms.into_iter().find(|s| to_currency_code(s) == code)?;
+            let sym = syms.into_iter().find(|s| code_of(s) == code)?;
             Some((sym, code))
         }
         let price_targets = self.price_directives.iter().map(|pd| &*pd.amount.commodity);
