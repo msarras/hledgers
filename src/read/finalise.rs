@@ -169,9 +169,7 @@ pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
 pub fn journal_style_amounts(j: &mut Journal) -> Result<(), String> {
     journal_infer_commodity_styles(j);
     let styles = styles_with_rounding(Rounding::No, &j.commodity_styles());
-    for t in &mut j.txns {
-        t.style_amounts(&styles);
-    }
+    crate::par::for_each_mut(&mut j.txns, |t| t.style_amounts(&styles));
     Ok(())
 }
 
