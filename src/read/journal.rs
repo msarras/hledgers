@@ -85,11 +85,106 @@ pub fn parse_journal(
     };
     let mut j = Journal::default();
     let mut stack = vec![(file.to_string(), canonical_path(&absolute_path(file)))];
+    if let Some(parsed) = parse_in_parts(iopts, &st, &stack, file, text) {
+        return Ok(parsed);
+    }
     match parse_file(iopts, &mut st, &mut stack, &mut j, file, text) {
         Ok(()) => Ok((j, st)),
         Err(Failure::Here(e)) => Err(e.pretty(file, text)),
         Err(Failure::Included(msg) | Failure::Unlocated(msg)) => Err(msg),
     }
+}
+
+/// The smallest text worth parsing in parts.
+const PARTS_MIN_SIZE: usize = 1 << 18;
+
+/// A large file parsed in parts, if it can be: its directives and the
+/// items among them first, then the rest, transactions, price directives
+/// and comment lines only, which no directive comes between to change how
+/// they read, in parts starting at a transaction after an empty line, the
+/// parts read with `par` (on all cores with the parallel feature) and
+/// joined in order. None if the file is small, has a multi-line comment,
+/// or a part has an error, which the whole file is then parsed again to
+/// report as usual.
+fn parse_in_parts(
+    iopts: &InputOpts,
+    st: &ParseState,
+    stack: &[(String, PathBuf)],
+    file: &str,
+    text: &str,
+) -> Option<(Journal, ParseState)> {
+    const PARTS: usize = 64;
+    if text.len() < PARTS_MIN_SIZE {
+        return None;
+    }
+    // where a transaction follows an empty line, after the last directive,
+    // with its line number
+    let mut starts: Vec<(usize, usize)> = Vec::new();
+    let (mut off, mut line, mut empty_before) = (0, 1, false);
+    while off < text.len() {
+        let end = text[off..].find('\n').map_or(text.len(), |i| off + i);
+        match text.as_bytes()[off] {
+            b'0'..=b'9' if empty_before => starts.push((off, line)),
+            b'0'..=b'9' | b'P' | b' ' | b'\t' | b'\n' | b';' | b'#' | b'*' => {}
+            _ if text[off..].starts_with("comment") => return None,
+            _ => starts.clear(),
+        }
+        empty_before = end == off;
+        (off, line) = (end + 1, line + 1);
+    }
+    let &(header_end, _) = starts.first()?;
+    let step = (text.len() - header_end).div_ceil(PARTS);
+    let mut parts: Vec<(usize, usize, usize)> = Vec::new();
+    for &(start, line) in &starts {
+        if parts.last().is_none_or(|&(s, _, _)| start >= s + step) {
+            if let Some(last) = parts.last_mut() {
+                last.1 = start;
+            }
+            parts.push((start, text.len(), line));
+        }
+    }
+    let (mut st, mut stack) = (st.clone(), stack.to_vec());
+    let mut j = Journal::default();
+    parse_file(
+        iopts,
+        &mut st,
+        &mut stack,
+        &mut j,
+        file,
+        &text[..header_end],
+    )
+    .ok()?;
+    let file: Arc<str> = Arc::from(file);
+    let declared = &j.declared_commodities;
+    let parsed = crate::par::map_owned(parts, |(start, end, line)| {
+        let (mut st, mut stack) = (st.clone(), stack.clone());
+        let mut part = Journal {
+            declared_commodities: declared.clone(),
+            ..Journal::default()
+        };
+        let mut p = JournalParser {
+            c: Cursor {
+                src: &text[..end],
+                pos: start,
+            },
+            file: file.clone(),
+            st: &mut st,
+            stack: &mut stack,
+            j: &mut part,
+            iopts,
+            anchor: (start, line, start),
+            interned: RefCell::default(),
+        };
+        p.journalp().ok()?;
+        Some((part.items, part.txns, part.price_directives))
+    });
+    for part in parsed {
+        let (items, txns, prices) = part?;
+        j.items.extend(items);
+        j.txns.extend(txns);
+        j.price_directives.extend(prices);
+    }
+    Some((j, st))
 }
 
 /// An auto posting rule's posting written alone, `ACCOUNT  AMOUNT` or
