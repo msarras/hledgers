@@ -9,6 +9,7 @@ pub mod conf;
 pub mod docs;
 pub mod io;
 pub mod opts;
+pub mod selftest;
 pub mod version;
 
 use std::ffi::OsString;
@@ -322,6 +323,15 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     if raw.bool("version") && !isaddoncmd && doc_flag.is_none() {
         io::print_stdout(&format!("{}\n", version::progname_and_version(progname)));
         return Ok(0);
+    }
+    // or --test: run the self-tests, if no command is given
+    if let Some(pattern) = raw.string("test").filter(|_| !isaddoncmd) {
+        if nocmdprovided {
+            return Ok(selftest::run_unit_tests(pattern));
+        }
+        return Err(format!(
+            "--test can't be used with a command ({cmdarg}); to select tests, use --test=PATTERN"
+        ));
     }
     // or --write-lang: write a catalog to start translating from
     if let Some(lang) = raw.string("write-lang").filter(|_| !isaddoncmd) {

@@ -1123,133 +1123,218 @@ fn lang_prefs_from_env(env: &[(String, String)]) -> Vec<String> {
     prefs.iter().filter_map(|p| normalize_lang_tag(p)).collect()
 }
 
+// Self-tests (tests_I18n), run by --test and by cargo test.
+
+/// A failed check's message.
+macro_rules! check {
+    ($cond:expr) => {
+        if !$cond {
+            return Err(format!(
+                "{}:{}: check failed: {}",
+                file!(),
+                line!(),
+                stringify!($cond)
+            ));
+        }
+    };
+}
+
+macro_rules! check_eq {
+    ($a:expr, $b:expr) => {
+        match (&$a, &$b) {
+            (a, b) => {
+                if a != b {
+                    return Err(format!(
+                        "{}:{}: expected {:?}, got {:?}",
+                        file!(),
+                        line!(),
+                        b,
+                        a
+                    ));
+                }
+            }
+        }
+    };
+}
+
+// The sample catalog of upstream's tests_I18n.
+const SAMPLE_PO: &str = "# A sample catalog.\nmsgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Plural-Forms: nplurals=2; plural=(n != 1);\\n\"\n\nmsgid \"Balance Sheet\"\nmsgstr \"Bilanz\"\n\nmsgid \"Untranslated\"\nmsgstr \"\"\n\nmsgid \"Empty\"\nmsgstr \"\"\n\n#, fuzzy\nmsgid \"Fuzzy\"\nmsgstr \"Unscharf\"\n\n#~ msgid \"Obsolete\"\n#~ msgstr \"Veraltet\"\n\nmsgctxt \"column heading\"\nmsgid \"Total\"\nmsgstr \"Summe\"\n\nmsgid \"Multi\"\nmsgstr \"\"\n\"line one\\n\"\n\"line two \\\"quoted\\\" \\\\ \\374 \\x41\"\n\nmsgid \"{n} day\"\nmsgid_plural \"{n} days\"\nmsgstr[0] \"{n} Tag\"\nmsgstr[1] \"{n} Tage\"\n\nmsgid \"Balance changes in {period}:\"\nmsgstr \"Saldoänderungen in {period}:\"\n";
+
+/// A self-test: a check that fails with a message.
+pub type SelfTest = fn() -> Result<(), String>;
+
+/// The module's self-tests, by upstream's names.
+pub const SELF_TESTS: &[(&str, SelfTest)] = &[
+    ("substitutePlaceholders", test_substitute_placeholders),
+    ("placeholders", test_placeholders),
+    ("parsePo", test_parse_po),
+    ("parsePo errors", test_parse_po_errors),
+    ("parsePo tolerates", test_parse_po_tolerates),
+    ("plural rules", test_plural_rules),
+    ("normalizeLangTag", test_normalize_lang_tag),
+    ("shortLangTag", test_short_lang_tag),
+    ("resolveLang", test_resolve_lang),
+    ("langPrefsFromEnv", test_lang_prefs_from_env),
+    ("built-in catalogs", test_builtin_catalogs),
+];
+
+fn test_substitute_placeholders() -> Result<(), String> {
+    check_eq!(substitute_placeholders(&[("a", "1")], "x {a} y"), "x 1 y");
+    check_eq!(
+        substitute_placeholders(&[("a", "{b}"), ("b", "2")], "{a}{b}"),
+        "{b}2"
+    );
+    check_eq!(
+        substitute_placeholders(&[], "{unknown} { }"),
+        "{unknown} { }"
+    );
+    check_eq!(substitute_placeholders(&[("a", "1")], "{a}{a}"), "11");
+    Ok(())
+}
+
+fn test_placeholders() -> Result<(), String> {
+    let ps: Vec<&str> = placeholders("a {x} {y_1} {bad name} { {z}")
+        .into_iter()
+        .collect();
+    check_eq!(ps, ["x", "y_1", "z"]);
+    check!(placeholders("").is_empty());
+    Ok(())
+}
+
+fn test_parse_po() -> Result<(), String> {
+    let t = parse_po("de", SAMPLE_PO)?;
+    check_eq!(t.lang, "de");
+    check_eq!(t.tr("Balance Sheet"), "Bilanz");
+    check_eq!(t.tr("Untranslated"), "Untranslated");
+    check_eq!(t.tr("Empty"), "Empty");
+    check_eq!(t.tr("Fuzzy"), "Fuzzy");
+    check_eq!(t.tr("Obsolete"), "Obsolete");
+    check_eq!(t.trc("column heading", "Total"), "Summe");
+    check_eq!(t.tr("Total"), "Total");
+    check_eq!(t.tr("Multi"), "line one\nline two \"quoted\" \\ \u{fc} A");
+    check_eq!(t.trn(1, "{n} day", "{n} days"), "1 Tag");
+    check_eq!(t.trn(2, "{n} day", "{n} days"), "2 Tage");
+    check_eq!(t.trn(0, "{n} day", "{n} days"), "0 Tage");
+    check_eq!(t.tr("{n} day"), "{n} Tag");
+    check_eq!(
+        t.trf("Balance changes in {period}:", &[("period", "2024")]),
+        "Saldoänderungen in 2024:"
+    );
+    Ok(())
+}
+
+fn test_parse_po_errors() -> Result<(), String> {
+    for s in [
+        "msgid \"a\"\nmsgstr \"b\"\nmsgid \"a\"\nmsgstr \"c\"\n",
+        "garbage\n",
+        "msgid \"a\"\nmsgstr \"b\n",
+        "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=ISO-8859-1\\n\"\n",
+        "msgid \"\"\nmsgstr \"Plural-Forms: nplurals=2; plural=(n +);\\n\"\n",
+    ] {
+        check!(parse_po("de", s).is_err());
+    }
+    Ok(())
+}
+
+fn test_parse_po_tolerates() -> Result<(), String> {
+    for s in [
+        "",
+        "# just a comment\n",
+        "\u{feff}msgid \"a\"\r\nmsgstr \"b\"\r\n",
+        "#~ msgid \"old\"\n#~ msgstr \"alt\"\n",
+        "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=CHARSET\\n\"\n",
+    ] {
+        check!(parse_po("de", s).is_ok());
+    }
+    Ok(())
+}
+
+fn test_plural_rules() -> Result<(), String> {
+    let rule = |s: &str| {
+        let e = parse_plural_forms(s);
+        move |n: i64| e.as_ref().map_or(-1, |e| e.eval(n))
+    };
+    let en = rule("nplurals=2; plural=(n != 1);");
+    let fr = rule("nplurals=2; plural=(n > 1);");
+    let ru = rule(
+        "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);",
+    );
+    let zh = rule("nplurals=1; plural=0;");
+    let ar = rule(
+        "nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5);",
+    );
+    let pl = rule(
+        "nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);",
+    );
+    check_eq!([0, 1, 2].map(en), [1, 0, 1]);
+    check_eq!([0, 1, 2].map(fr), [0, 0, 1]);
+    check_eq!([1, 2, 5, 11, 21, 22, 25].map(ru), [0, 1, 2, 2, 0, 1, 2]);
+    check_eq!([0, 1, 5].map(zh), [0, 0, 0]);
+    check_eq!([0, 1, 2, 3, 11, 100].map(ar), [0, 1, 2, 3, 4, 5]);
+    check_eq!([1, 2, 5, 22, 25].map(pl), [0, 1, 2, 1, 2]);
+    Ok(())
+}
+
+fn test_normalize_lang_tag() -> Result<(), String> {
+    let n = |s: &str| normalize_lang_tag(s);
+    check_eq!(n("de_DE.UTF-8@euro").as_deref(), Some("de-DE"));
+    check_eq!(n("pt-br").as_deref(), Some("pt-BR"));
+    check_eq!(n("zh_CN").as_deref(), Some("zh-Hans"));
+    check_eq!(n("sr@latin").as_deref(), Some("sr-Latn"));
+    check_eq!(n("C"), None);
+    check_eq!(n(""), None);
+    Ok(())
+}
+
+fn test_short_lang_tag() -> Result<(), String> {
+    check_eq!(short_lang_tag("zh-Hans"), "zh");
+    check_eq!(short_lang_tag("pt-BR"), "pt-BR");
+    Ok(())
+}
+
+fn test_resolve_lang() -> Result<(), String> {
+    let avail: Vec<String> = ["de", "en", "pt-BR"].map(String::from).to_vec();
+    let prefs = |ps: &[&str]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+    check_eq!(
+        resolve_lang(&avail, &prefs(&["de-CH", "en"])).as_deref(),
+        Some("de")
+    );
+    check_eq!(resolve_lang(&avail, &prefs(&["pt"])), None);
+    Ok(())
+}
+
+fn test_lang_prefs_from_env() -> Result<(), String> {
+    let env = |vs: &[(&str, &str)]| -> Vec<(String, String)> {
+        vs.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    check_eq!(
+        lang_prefs_from_env(&env(&[("LANGUAGE", "de"), ("LC_ALL", "C")])),
+        Vec::<String>::new()
+    );
+    check_eq!(
+        lang_prefs_from_env(&env(&[("LANGUAGE", "fr:de"), ("LANG", "es_ES.UTF-8")])),
+        ["fr", "de", "es-ES"]
+    );
+    Ok(())
+}
+
+fn test_builtin_catalogs() -> Result<(), String> {
+    for (lang, src) in BUILTIN_CATALOGS {
+        parse_po(lang, src).map_err(|e| format!("{lang}: {e}"))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // The sample catalog of upstream's tests_I18n.
-    const SAMPLE_PO: &str = "# A sample catalog.\nmsgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Plural-Forms: nplurals=2; plural=(n != 1);\\n\"\n\nmsgid \"Balance Sheet\"\nmsgstr \"Bilanz\"\n\nmsgid \"Untranslated\"\nmsgstr \"\"\n\nmsgid \"Empty\"\nmsgstr \"\"\n\n#, fuzzy\nmsgid \"Fuzzy\"\nmsgstr \"Unscharf\"\n\n#~ msgid \"Obsolete\"\n#~ msgstr \"Veraltet\"\n\nmsgctxt \"column heading\"\nmsgid \"Total\"\nmsgstr \"Summe\"\n\nmsgid \"Multi\"\nmsgstr \"\"\n\"line one\\n\"\n\"line two \\\"quoted\\\" \\\\ \\374 \\x41\"\n\nmsgid \"{n} day\"\nmsgid_plural \"{n} days\"\nmsgstr[0] \"{n} Tag\"\nmsgstr[1] \"{n} Tage\"\n\nmsgid \"Balance changes in {period}:\"\nmsgstr \"Saldoänderungen in {period}:\"\n";
-
     #[test]
-    fn substitute_placeholders_and_placeholders() {
-        assert_eq!(substitute_placeholders(&[("a", "1")], "x {a} y"), "x 1 y");
-        assert_eq!(
-            substitute_placeholders(&[("a", "{b}"), ("b", "2")], "{a}{b}"),
-            "{b}2"
-        );
-        assert_eq!(
-            substitute_placeholders(&[], "{unknown} { }"),
-            "{unknown} { }"
-        );
-        assert_eq!(substitute_placeholders(&[("a", "1")], "{a}{a}"), "11");
-        let ps: Vec<&str> = placeholders("a {x} {y_1} {bad name} { {z}")
-            .into_iter()
-            .collect();
-        assert_eq!(ps, ["x", "y_1", "z"]);
-        assert!(placeholders("").is_empty());
-    }
-
-    #[test]
-    fn parse_po_sample() {
-        let t = parse_po("de", SAMPLE_PO).unwrap();
-        assert_eq!(t.lang, "de");
-        assert_eq!(t.tr("Balance Sheet"), "Bilanz");
-        assert_eq!(t.tr("Untranslated"), "Untranslated");
-        assert_eq!(t.tr("Empty"), "Empty");
-        assert_eq!(t.tr("Fuzzy"), "Fuzzy");
-        assert_eq!(t.tr("Obsolete"), "Obsolete");
-        assert_eq!(t.trc("column heading", "Total"), "Summe");
-        assert_eq!(t.tr("Total"), "Total");
-        assert_eq!(t.tr("Multi"), "line one\nline two \"quoted\" \\ \u{fc} A");
-        assert_eq!(t.trn(1, "{n} day", "{n} days"), "1 Tag");
-        assert_eq!(t.trn(2, "{n} day", "{n} days"), "2 Tage");
-        assert_eq!(t.trn(0, "{n} day", "{n} days"), "0 Tage");
-        assert_eq!(t.tr("{n} day"), "{n} Tag");
-        assert_eq!(
-            t.trf("Balance changes in {period}:", &[("period", "2024")]),
-            "Saldoänderungen in 2024:"
-        );
-    }
-
-    #[test]
-    fn parse_po_errors_and_tolerances() {
-        let bad = |s: &str| assert!(parse_po("de", s).is_err(), "{s:?}");
-        bad("msgid \"a\"\nmsgstr \"b\"\nmsgid \"a\"\nmsgstr \"c\"\n");
-        bad("garbage\n");
-        bad("msgid \"a\"\nmsgstr \"b\n");
-        bad("msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=ISO-8859-1\\n\"\n");
-        bad("msgid \"\"\nmsgstr \"Plural-Forms: nplurals=2; plural=(n +);\\n\"\n");
-        let ok = |s: &str| assert!(parse_po("de", s).is_ok(), "{s:?}");
-        ok("");
-        ok("# just a comment\n");
-        ok("\u{feff}msgid \"a\"\r\nmsgstr \"b\"\r\n");
-        ok("#~ msgid \"old\"\n#~ msgstr \"alt\"\n");
-        ok("msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=CHARSET\\n\"\n");
-    }
-
-    #[test]
-    fn plural_rules() {
-        let rule = |s: &str| {
-            let e = parse_plural_forms(s);
-            move |n: i64| e.as_ref().map_or(-1, |e| e.eval(n))
-        };
-        let en = rule("nplurals=2; plural=(n != 1);");
-        let fr = rule("nplurals=2; plural=(n > 1);");
-        let ru = rule(
-            "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);",
-        );
-        let zh = rule("nplurals=1; plural=0;");
-        let ar = rule(
-            "nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5);",
-        );
-        let pl = rule(
-            "nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);",
-        );
-        assert_eq!([0, 1, 2].map(en), [1, 0, 1]);
-        assert_eq!([0, 1, 2].map(fr), [0, 0, 1]);
-        assert_eq!([1, 2, 5, 11, 21, 22, 25].map(ru), [0, 1, 2, 2, 0, 1, 2]);
-        assert_eq!([0, 1, 5].map(zh), [0, 0, 0]);
-        assert_eq!([0, 1, 2, 3, 11, 100].map(ar), [0, 1, 2, 3, 4, 5]);
-        assert_eq!([1, 2, 5, 22, 25].map(pl), [0, 1, 2, 1, 2]);
-    }
-
-    #[test]
-    fn language_tags() {
-        let n = |s: &str| normalize_lang_tag(s);
-        assert_eq!(n("de_DE.UTF-8@euro").as_deref(), Some("de-DE"));
-        assert_eq!(n("pt-br").as_deref(), Some("pt-BR"));
-        assert_eq!(n("zh_CN").as_deref(), Some("zh-Hans"));
-        assert_eq!(n("sr@latin").as_deref(), Some("sr-Latn"));
-        assert_eq!(n("C"), None);
-        assert_eq!(n(""), None);
-        assert_eq!(short_lang_tag("zh-Hans"), "zh");
-        assert_eq!(short_lang_tag("pt-BR"), "pt-BR");
-        let avail: Vec<String> = ["de", "en", "pt-BR"].map(String::from).to_vec();
-        let prefs = |ps: &[&str]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            resolve_lang(&avail, &prefs(&["de-CH", "en"])).as_deref(),
-            Some("de")
-        );
-        assert_eq!(resolve_lang(&avail, &prefs(&["pt"])), None);
-        let env = |vs: &[(&str, &str)]| -> Vec<(String, String)> {
-            vs.iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
-        };
-        assert_eq!(
-            lang_prefs_from_env(&env(&[("LANGUAGE", "de"), ("LC_ALL", "C")])),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            lang_prefs_from_env(&env(&[("LANGUAGE", "fr:de"), ("LANG", "es_ES.UTF-8")])),
-            ["fr", "de", "es-ES"]
-        );
-    }
-
-    #[test]
-    fn builtin_catalogs_parse() {
-        for (lang, src) in BUILTIN_CATALOGS {
-            assert!(parse_po(lang, src).is_ok(), "{lang}");
+    fn self_tests_pass() {
+        for (name, t) in super::SELF_TESTS {
+            if let Err(e) = t() {
+                panic!("{name}: {e}");
+            }
         }
     }
 }
