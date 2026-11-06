@@ -1133,6 +1133,15 @@ impl Add<&MixedAmount> for MixedAmount {
     }
 }
 
+/// The two sums merged, reusing the right one's amounts (maPlus).
+impl Add<MixedAmount> for &MixedAmount {
+    type Output = MixedAmount;
+
+    fn add(self, rhs: MixedAmount) -> MixedAmount {
+        merged(self.0.iter().cloned(), rhs.0.into_iter())
+    }
+}
+
 /// The two sums merged, reusing their amounts (maPlus).
 impl Add for MixedAmount {
     type Output = MixedAmount;

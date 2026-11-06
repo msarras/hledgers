@@ -65,6 +65,19 @@ impl Add for &BalanceData {
     }
 }
 
+/// The sum, reusing the amounts of the right one.
+impl Add<BalanceData> for &BalanceData {
+    type Output = BalanceData;
+
+    fn add(self, other: BalanceData) -> BalanceData {
+        BalanceData {
+            excl: &self.excl + other.excl,
+            incl: &self.incl + other.incl,
+            postings: self.postings + other.postings,
+        }
+    }
+}
+
 /// The sum, reusing the amounts of both.
 impl Add for BalanceData {
     type Output = BalanceData;
@@ -182,6 +195,25 @@ impl PeriodData<BalanceData> {
                     self.periods.insert(d, b);
                 }
             },
+        }
+    }
+
+    /// These values plus the other's, period by period, a period only one
+    /// has keeping its value (PeriodData's Semigroup), reusing the other's
+    /// amounts.
+    pub fn plus(&self, mut other: PeriodData<BalanceData>) -> PeriodData<BalanceData> {
+        let mut periods = BTreeMap::new();
+        for (d, a) in &self.periods {
+            let v = match other.periods.remove(d) {
+                Some(b) => a + b,
+                None => a.clone(),
+            };
+            periods.insert(*d, v);
+        }
+        periods.extend(other.periods);
+        PeriodData {
+            pre: &self.pre + other.pre,
+            periods,
         }
     }
 
@@ -490,9 +522,7 @@ impl AccountTree<BalanceData> {
         for i in (0..self.accounts.len()).rev() {
             let mut subtotals = PeriodData::default();
             for &s in self.accounts[i].subs.iter().rev() {
-                let mut sub = self.accounts[s].data.clone();
-                sub.add(&subtotals);
-                subtotals = sub;
+                subtotals = self.accounts[s].data.plus(subtotals);
             }
             let this = std::mem::take(&mut self.accounts[i].data);
             self.accounts[i].data = subtotals.merge(
@@ -506,7 +536,7 @@ impl AccountTree<BalanceData> {
                     ..this
                 },
                 |children, this| BalanceData {
-                    incl: &this.excl + &children.incl,
+                    incl: &this.excl + children.incl,
                     ..this
                 },
             );
