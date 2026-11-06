@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::account::{AccountName, AccountType, Realness};
 use crate::amount::currency::to_currency_code;
@@ -35,8 +35,9 @@ impl SourcePos {
 
     /// The start of an unnamed source (initialPos "").
     pub fn null() -> SourcePos {
+        static NO_FILE: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from(""));
         SourcePos {
-            file: Arc::from(""),
+            file: NO_FILE.clone(),
             line: 1,
             col: 1,
         }
