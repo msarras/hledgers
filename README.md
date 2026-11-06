@@ -12,12 +12,12 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 8 of 10, first part: the journal reader and writer, valuation,
-cost conversion, lot tracking, the listing commands, the balance reports,
-the register reports and holdings, with all their output formats, the CSV,
-timeclock and timedot readers, the import command, and most of the
-command-line interface (help, config files, command aliases, add-ons,
-translations) are complete. `hledgers` reads journal files with every directive,
+Milestone 8 of 10: the journal reader and writer, valuation, cost
+conversion, lot tracking, the listing commands, the balance reports, the
+register reports and holdings, with all their output formats, the CSV,
+timeclock and timedot readers, the import command, and the command-line
+interface (help, config files, command aliases, add-ons, translations,
+`run` and `repl`, `add`, `get`, `setup`) are complete. `hledgers` reads journal files with every directive,
 include globs, amount expressions, costs, balance assertions and
 assignments, auto postings and periodic transactions; it balances and
 checks entries as hledger 1.99 does and prints the same error messages; it
@@ -34,7 +34,8 @@ lot detail, `--ignore-lots` skips it). `print`, `check`, `files`, `prices`,
 `rewrite`, `accounts`, `payees`, `codes`, `notes`, `descriptions`, `tags`,
 `commodities`, `stats`, `transactions`, `balance`, `balancesheet`,
 `balancesheetequity`, `incomestatement`, `cashflow`, `register`,
-`aregister`, `activity`, `close`, `diff`, `roi` and `holdings` work, with
+`aregister`, `activity`, `close`, `diff`, `roi`, `holdings`, `run`,
+`repl`, `add`, `get` and `setup` work, with
 the general input, report and query options; long flags may be abbreviated
 to a unique prefix. `balance` shows single-column lists and trees (with
 `--format` line formats) and multi-period tables: changes, cumulative or
@@ -58,7 +59,10 @@ cost, value, weight, unrealised and realised gains and rate of return, in
 a list or tree, or their totals at each period's end. `print`, `balance`,
 the compound commands, `register`, `aregister` and `holdings` write txt,
 csv, tsv, json, html and fods (`-O`, or `-o FILE` by its extension), html
-and fods with links to hledger-web's register (`--base-url`); `balance`,
+and fods with links to hledger-web's register (`--base-url`); `print`
+also writes Beancount, Ledger and SQL (`-O beancount|ledger|sql`; with
+`--export`, the whole journal, Beancount's with its options and open,
+commodity and price directives); `balance`,
 the compound commands, `register`, `aregister`, `activity` and `holdings`
 draw charts (`--chart[=KIND,SCALE]`, `-O svg`) as text, svg, html, or
 their data as csv, tsv and json. It reads CSV, SSV and TSV files (by
@@ -77,8 +81,9 @@ ending now; `--old-timeclock`) and timedot files (dots, numbers with
 units, letters), directly or included. `import` appends the new
 transactions of data files, or of the rules files in `rules/`, to the
 journal, remembering how far each was read in `.latest` files (as `print
---new` does), with `--dry-run`, `--catchup`, `--strict` and the `archive`
-rule.
+--new` does), with `--dry-run`, `--catchup`, `--strict`, `--get` and the
+`archive` rule. `--obfuscate` hides descriptions, codes and account names
+behind hashes, as hledger's does.
 
 The command line is processed as hledger's is: flags before the command
 are moved after it, commands are found by name, alias or unique prefix,
@@ -99,10 +104,21 @@ eleven built-in catalogs or the user's own, and `--write-lang` starts a
 translation. Today's date and CSV time zones use the local time zone;
 register and text charts use the terminal's width; long help and reports
 go through a pager on a terminal; `--view` opens the output in a viewer;
-`--test` runs the built-in self-tests. Of hledger's 2420 functional test
-cases 2311 pass byte-identically, all of them gated, with this repo's 27.
-`run`, `repl`, `add`, `get`, `setup`, `import --get`, beancount, ledger
-and sql output and `--obfuscate` are the second part of milestone 8.
+`--test` runs the built-in self-tests. `run` runs commands one after
+another, from its command line, files or standard input, reading each
+journal once, and can collect their outputs into one html page; `repl`
+does so at a prompt (with line editing on a terminal), reloading changed
+files and aliases. `add` asks for transactions, with defaults from the
+command line or a similar past entry, completion on a terminal, and
+checks against the whole journal, and appends them. `get` runs the
+journal's `data/getdata` and `prices/getprices` helpers, merging the
+prices into per-commodity files. `setup` checks the installation, the
+terminal and the default journal, contacting hledger.org over HTTPS (pure
+Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
+2420 functional test cases 2413 pass byte-identically, all of them gated,
+with this repo's 27; the others are `--debug` value dumps and fast-path
+debug messages (out of scope) and one `for` loop the harness does not
+interpret.
 
 ## Build
 
