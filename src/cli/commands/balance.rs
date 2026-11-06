@@ -329,14 +329,16 @@ pub fn balance_report_as_text(
     };
     let mut out = String::new();
     let mut sizes: Vec<Vec<usize>> = Vec::new();
-    for (name, amount) in &report.items {
-        let (text, widths) = if ropts.account_list_mode == AccountListMode::Tree && ropts.full_names
-        {
+    // the items rendered on all cores, joined in order
+    let rendered = crate::par::map(&report.items, |(name, amount)| {
+        if ropts.account_list_mode == AccountListMode::Tree && ropts.full_names {
             let full = account_name_drop(ropts.drop, &name.full);
             render_balance_report_item(ropts, &format, layout, &full, 0, amount)
         } else {
             render_balance_report_item(ropts, &format, layout, &name.name, name.indent, amount)
-        };
+        }
+    });
+    for (text, widths) in rendered {
         out.push_str(&text);
         out.push('\n');
         sizes.push(widths);
@@ -393,9 +395,9 @@ fn default_balance_amount_column_width(
         ..AmountFormat::NO_COST
     };
     let total = (!ropts.no_total).then_some(&report.total);
-    (report.items.iter().map(|(_, m)| m))
-        .chain(total)
-        .map(|m| show_mixed_amount_b(&fmt, m).width)
+    let amounts: Vec<&MixedAmount> = (report.items.iter().map(|(_, m)| m)).chain(total).collect();
+    crate::par::map(&amounts, |m| show_mixed_amount_b(&fmt, m).width)
+        .into_iter()
         .fold(20, usize::max)
 }
 
