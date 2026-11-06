@@ -456,24 +456,33 @@ pub fn postings_or_transactions_report_as_text<T>(
         colour: opts.spec.opts.color,
         ..AmountFormat::ONE_LINE_NO_COST
     };
-    let shown: Vec<(Vec<Wide>, Vec<Wide>)> = (items.iter())
-        .map(|i| {
-            (
-                show_mixed_amount_lines_b(&fmt, amount(i)),
-                show_mixed_amount_lines_b(&fmt, balance(i)),
-            )
-        })
-        .collect();
-    let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
-    let start = if align_all {
-        &shown[..]
-    } else {
-        &shown[..shown.len().min(CHUNK_SIZE)]
+    let show = |i: &T| {
+        (
+            show_mixed_amount_lines_b(&fmt, amount(i)),
+            show_mixed_amount_lines_b(&fmt, balance(i)),
+        )
     };
+    // the items the starting widths come from are shown first, the others
+    // as they come
+    let n_start = if align_all {
+        items.len()
+    } else {
+        items.len().min(CHUNK_SIZE)
+    };
+    let start: Vec<(Vec<Wide>, Vec<Wide>)> = items[..n_start].iter().map(show).collect();
+    let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
     let mut amt_width = start.iter().fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
     let mut bal_width = start.iter().fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
     let mut out = String::new();
-    for (item, (amt, bal)) in items.iter().zip(&shown) {
+    for (k, item) in items.iter().enumerate() {
+        let later;
+        let (amt, bal) = match start.get(k) {
+            Some((amt, bal)) => (amt, bal),
+            None => {
+                later = show(item);
+                (&later.0, &later.1)
+            }
+        };
         if !align_all {
             amt_width = widest(amt, amt_width);
             bal_width = widest(bal, bal_width);
