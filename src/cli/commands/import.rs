@@ -244,7 +244,7 @@ fn ensure_journal_file_exists(f: &str) -> Result<(), String> {
 /// Whether appending to a file in this directory adds to its end, as it
 /// does on most filesystems, tried with a temporary file
 /// (ensureFilesystemCanAppend).
-fn filesystem_can_append(dir: &str) -> Result<bool, String> {
+pub fn filesystem_can_append(dir: &str) -> Result<bool, String> {
     let path =
         std::path::Path::new(dir).join(format!(".hledger-append-test-{}", std::process::id()));
     let tried = (|| -> std::io::Result<bool> {
@@ -256,11 +256,6 @@ fn filesystem_can_append(dir: &str) -> Result<bool, String> {
         Ok(std::fs::read(&path)? == b"can this filesystem\nappend ?\n")
     })();
     let _ = std::fs::remove_file(&path);
-    tried.map_err(|e| {
-        format!(
-            "{}: openTempFile: {}",
-            path.display(),
-            crate::read::io_error_text(&e)
-        )
-    })
+    // the error names the directory, as openTempFile's does
+    tried.map_err(|e| format!("{dir}: openTempFile: {}", crate::read::io_error_text(&e)))
 }

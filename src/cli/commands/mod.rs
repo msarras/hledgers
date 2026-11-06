@@ -26,11 +26,12 @@ pub mod register;
 pub mod rewrite;
 pub mod roi;
 pub mod run;
+pub mod setup;
 pub mod stats;
 pub mod tags;
 pub mod transactions;
 
-use super::args::{General, Hidden, Mode};
+use super::args::{Hidden, Mode};
 use super::opts::CONF_FLAGS;
 
 /// The mode used when no command is given (mainmode): the config file
@@ -76,27 +77,11 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &roi::MODE,
     &run::RUN_MODE,
     &run::REPL_MODE,
-    &SETUP_MODE,
+    &setup::MODE,
     &stats::MODE,
     &tags::MODE,
     &transactions::MODE,
 ];
-
-// The modes of the commands milestone 8b implements.
-
-static SETUP_MODE: Mode = Mode {
-    name: "setup",
-    general: General::Group3,
-    hidden: Hidden::None,
-    args: None,
-    doc: crate::command_doc!("Setup"),
-    ..Mode::DEFAULT
-};
-
-/// The error for something a later milestone provides.
-pub fn not_yet(what: &str, milestone: &str) -> String {
-    format!("{what} is not supported yet (hledgers milestone {milestone})")
-}
 
 /// The builtin command with this exact name or alias.
 pub fn find(name: &str) -> Option<&'static Mode> {

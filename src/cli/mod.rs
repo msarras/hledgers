@@ -473,6 +473,9 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
     if mode.name == "add" {
         return commands::add::add(opts, with_possible_journal(opts)?);
     }
+    if mode.name == "setup" {
+        return commands::setup::setup(opts);
+    }
     if mode.name == "get" {
         return commands::get::get(opts, &with_journal(opts)?);
     }

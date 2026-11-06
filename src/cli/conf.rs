@@ -258,7 +258,7 @@ fn conf_file_in(dir: &str, home: &str) -> String {
 /// The existing config files, nearest first: in the current directory and
 /// each parent, the home directory, and the XDG config directory
 /// (confFiles, possibleConfFiles, possibleConfDirs).
-fn conf_files() -> Vec<String> {
+pub fn conf_files() -> Vec<String> {
     let home = home_dir();
     let xdg = xdg_config_dir();
     let mut dirs = Vec::new();
@@ -288,7 +288,7 @@ fn conf_files() -> Vec<String> {
 
 /// The user's existing config files: ~/.hledger.conf and the XDG one
 /// (userConfFiles).
-fn user_conf_files() -> Vec<String> {
+pub fn user_conf_files() -> Vec<String> {
     let home = home_dir();
     [home.clone(), xdg_config_dir()]
         .iter()

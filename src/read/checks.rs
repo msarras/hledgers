@@ -70,13 +70,36 @@ fn posting_commodities_used(p: &Posting) -> impl Iterator<Item = &Sym> {
         .chain(p.assertion.as_ref().map(|ba| &ba.amount.commodity))
 }
 
-/// Every commodity used in P directives and postings has been declared,
-/// or is an alias of a declared one (journalCheckCommodities).
-pub fn journal_check_commodities(j: &Journal) -> Result<(), String> {
+/// The declared commodities and their aliases (commoditiesAndAliases).
+fn commodities_and_aliases(j: &Journal) -> BTreeSet<&Sym> {
     let mut declared: BTreeSet<&Sym> = j.declared_commodities.keys().collect();
     for c in j.declared_commodities.values() {
         declared.extend(c.aliases.iter().map(|(a, _)| &a.commodity));
     }
+    declared
+}
+
+/// The commodities used in P directives and postings which are neither
+/// declared nor an alias of a declared one, sorted
+/// (journalUndeclaredCommodities).
+pub fn journal_undeclared_commodities(j: &Journal) -> Vec<Sym> {
+    let declared = commodities_and_aliases(j);
+    let used = (j.price_directives.iter())
+        .flat_map(|pd| [&pd.commodity, &pd.amount.commodity])
+        .chain(
+            j.txns
+                .iter()
+                .flat_map(|t| &t.postings)
+                .flat_map(posting_commodities_used),
+        );
+    let undeclared: BTreeSet<&Sym> = used.filter(|c| !declared.contains(c)).collect();
+    undeclared.into_iter().cloned().collect()
+}
+
+/// Every commodity used in P directives and postings has been declared,
+/// or is an alias of a declared one (journalCheckCommodities).
+pub fn journal_check_commodities(j: &Journal) -> Result<(), String> {
+    let declared = commodities_and_aliases(j);
     let error = |(f, l, ex): (String, usize, String), comm: &str| {
         format!(
             "{f}:{l}:\n{ex}\nStrict commodity checking is enabled, and\n\

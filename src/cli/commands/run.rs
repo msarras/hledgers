@@ -463,7 +463,7 @@ impl<'a> Session<'a> {
         }
         match cmdname {
             "help" => return Ok(commands::help::help(&opts, &ctx.aliases.borrow())?),
-            "setup" => return Err(commands::not_yet("setup", "8b").into()),
+            "setup" => return Ok(commands::setup::setup(&opts)?),
             "add" | "import" => {
                 let paths = journal_paths_or_default(Some(&self.jpaths), &opts)?;
                 let mut j = crate::read::read_possible_journal_files(&opts.input, &paths)?;

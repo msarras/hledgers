@@ -14,11 +14,13 @@ publish = false
 dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
 encoding_rs = "0.8.35"
 regex = "1.13"
+rustls-pure = "0.15.4"
 rustyline = { version = "19.0.0", default-features = false }
 serde_json = { version = "1.0.151", features = ["arbitrary_precision"] }
 terminal_size = "0.4.4"
 tz-rs = "0.7.3"
 unicode-width = { version = "0.2.3", default-features = false }
+ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
 xxhash-rust = { version = "0.8.19", default-features = false, features = ["xxh3"] }
 
 [dev-dependencies]
