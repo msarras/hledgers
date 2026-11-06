@@ -99,6 +99,8 @@ pub static MODE: Mode = Mode {
         CHART_WIDTH_FLAG,
         Flag::new(&["commodity-column"], NONE, "", "show commodity symbols in a separate column, amounts as bare numbers, one row per commodity").hidden(),
     ],
+    doc: crate::command_doc!("Balance"),
+    ..Mode::DEFAULT
 };
 
 /// The --chart flag (chartFlag).
@@ -166,7 +168,7 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let fods = |name: &str, sheet: spr::Sheet| {
         print_fods(
             locale_encoding_name(),
-            &BTreeMap::from([(name.to_string(), sheet)]),
+            &BTreeMap::from([(ropts.translations.tr(name).to_string(), sheet)]),
         )
     };
     let one_line = AmountFormat::ONE_LINE_NO_COST;
@@ -673,10 +675,17 @@ pub fn multi_balance_report_title(ropts: &ReportOpts, report: &MultiBalanceRepor
         (_, Historical) => "Ending balances (historical)",
     };
     let changing_valuation = ropts.balance_calc == ValueChange && ropts.balance_accum != Historical;
-    let default = format!(
-        "{what} in {}{}:",
-        report.span(),
-        valuation_description(ropts, changing_valuation)
+    let t = &ropts.translations;
+    let default = t.trf(
+        "{report} in {dates}{valuation}:",
+        &[
+            ("report", t.tr(what)),
+            ("dates", &report.span().to_string()),
+            (
+                "valuation",
+                &valuation_description(ropts, changing_valuation),
+            ),
+        ],
     );
     ropts.effective_title(&default).to_string()
 }
@@ -685,16 +694,19 @@ pub fn multi_balance_report_title(ropts: &ReportOpts, report: &MultiBalanceRepor
 /// end values when the report calculates changing values, which are
 /// period-end values anyway (multiBalanceReportTitle's valuationdesc).
 pub fn valuation_description(ropts: &ReportOpts, changing_valuation: bool) -> String {
+    let t = &ropts.translations;
     let cost = match ropts.conversion_op {
-        Some(ConversionOp::ToCost) => ", converted to cost",
+        Some(ConversionOp::ToCost) => t.tr(", converted to cost"),
         _ => "",
     };
     let value = match &ropts.value {
-        Some(ValuationType::AtThen(_)) => ", valued at posting date".to_string(),
+        Some(ValuationType::AtThen(_)) => t.tr(", valued at posting date").to_string(),
         Some(ValuationType::AtEnd(_)) if changing_valuation => String::new(),
-        Some(ValuationType::AtEnd(_)) => ", valued at period ends".to_string(),
-        Some(ValuationType::AtNow(_)) => ", current value".to_string(),
-        Some(ValuationType::AtDate(d, _)) => format!(", valued at {d}"),
+        Some(ValuationType::AtEnd(_)) => t.tr(", valued at period ends").to_string(),
+        Some(ValuationType::AtNow(_)) => t.tr(", current value").to_string(),
+        Some(ValuationType::AtDate(d, _)) => {
+            t.trf(", valued at {date}", &[("date", &d.to_string())])
+        }
         None => String::new(),
     };
     format!("{cost}{value}")
@@ -741,14 +753,27 @@ pub fn multi_balance_report_as_part_table(
             .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
     }
     if ropts.has_totals_column() {
-        span_names.push("  Total".to_string());
+        span_names.push(format!(
+            "  {}",
+            ropts.translations.trc("column heading", "Total")
+        ));
     }
     if ropts.average {
-        span_names.push("Average".to_string());
+        span_names.push(
+            ropts
+                .translations
+                .trc("column heading", "Average")
+                .to_string(),
+        );
     }
     let mut col_headings: Vec<String> = Vec::new();
     if layout == Layout::Bare {
-        col_headings.push("Commodity".to_string());
+        col_headings.push(
+            ropts
+                .translations
+                .trc("column heading", "Commodity")
+                .to_string(),
+        );
     }
     match layout {
         Layout::BareWide => {
@@ -1054,7 +1079,9 @@ pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan], span: &DateSpa
                 if years.len() > 1 {
                     span.to_string()
                 } else {
-                    span.show_abbrev()
+                    let months = ropts.translations.month_names();
+                    let abbrevs: Vec<&str> = months.iter().map(|(_, a)| a.as_str()).collect();
+                    span.show_abbrev_with(&abbrevs)
                 }
             }
         },
@@ -1753,10 +1780,12 @@ pub fn budget_report_as_text(
 /// A budget report's heading: what it shows, over which dates, valued
 /// how; or --title's (budgetReportTitle).
 fn budget_report_title(ropts: &ReportOpts, report: &BudgetReport) -> String {
-    let default = format!(
-        "Budget performance in {}{}:",
-        report.span(),
-        valuation_description(ropts, false)
+    let default = ropts.translations.trf(
+        "Budget performance in {dates}{valuation}:",
+        &[
+            ("dates", &report.span().to_string()),
+            ("valuation", &valuation_description(ropts, false)),
+        ],
     );
     ropts.effective_title(&default).to_string()
 }
@@ -1891,17 +1920,30 @@ fn budget_report_as_table(
     let total_rows = with_commodities(total_commodities, show_cells(total_widths, &total_lines));
     let mut col_headings: Vec<String> = Vec::new();
     if layout == Layout::Bare {
-        col_headings.push("Commodity".to_string());
+        col_headings.push(
+            ropts
+                .translations
+                .trc("column heading", "Commodity")
+                .to_string(),
+        );
     }
     if !ropts.summary_only {
         col_headings
             .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
     }
     if ropts.row_total {
-        col_headings.push("  Total".to_string());
+        col_headings.push(format!(
+            "  {}",
+            ropts.translations.trc("column heading", "Total")
+        ));
     }
     if ropts.average {
-        col_headings.push("Average".to_string());
+        col_headings.push(
+            ropts
+                .translations
+                .trc("column heading", "Average")
+                .to_string(),
+        );
     }
     let pretty_line = if ropts.pretty {
         Line::SingleLine

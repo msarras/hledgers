@@ -127,6 +127,9 @@ pub static MODE: Mode = Mode {
             .sets(&["open-acct"])
             .hidden(),
     ],
+    args: Some("[--close|--open|--clopen|--assign|--assert|--retain] [ACCTQUERY]"),
+    doc: crate::command_doc!("Close"),
+    ..Mode::DEFAULT
 };
 
 /// What close shows (CloseMode).

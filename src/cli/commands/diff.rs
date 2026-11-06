@@ -1,7 +1,7 @@
 //! The diff command (Hledger.Cli.Commands.Diff): an account's
 //! transactions which are in one of two journal files but not the other.
 
-use crate::cli::args::Mode;
+use crate::cli::args::{General, Hidden, Mode};
 use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::decimal::Decimal;
@@ -14,6 +14,10 @@ pub static MODE: Mode = Mode {
     name: "diff",
     aliases: &[],
     flags: &[],
+    general: General::Group2,
+    hidden: Hidden::Conf,
+    args: Some("-f FILE1 -f FILE2 FULLACCOUNTTNAME"),
+    doc: crate::command_doc!("Diff"),
 };
 
 /// A posting with its position: its transaction's in the journal, and

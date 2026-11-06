@@ -70,6 +70,8 @@ pub static MODE: Mode = Mode {
         .sets(&["show-reverse"])
         .hidden(),
     ],
+    doc: crate::command_doc!("Prices"),
+    ..Mode::DEFAULT
 };
 
 /// Run the prices command (prices): the declared prices, with

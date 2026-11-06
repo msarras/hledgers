@@ -44,6 +44,9 @@ pub static MODE: Mode = Mode {
         ),
         LAYOUT_FLAG,
     ],
+    args: Some("[QUERY] --add-posting \"ACCT  AMTEXPR\" ..."),
+    doc: crate::command_doc!("Rewrite"),
+    ..Mode::DEFAULT
 };
 
 /// Run the rewrite command (rewrite): apply the auto posting rule of the

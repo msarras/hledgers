@@ -1,6 +1,15 @@
 //! Program name and version (Hledger.Cli.Version).
 
-/// What `--version` prints: the hledger version whose behaviour this program
-/// reproduces, then this program's own version.
-pub const PROGNAME_AND_VERSION: &str =
-    concat!("hledger 1.99.6 (hledgers ", env!("CARGO_PKG_VERSION"), ")");
+/// What `--version` prints, after the program's name: the hledger version
+/// whose behaviour this program reproduces, then this program's own version.
+const VERSION: &str = concat!("1.99.6 (hledgers ", env!("CARGO_PKG_VERSION"), ")");
+
+/// The program's name and version, as `--version` prints them
+/// (prognameandversion).
+pub fn progname_and_version(progname: &str) -> String {
+    format!("{progname} {VERSION}")
+}
+
+/// The version of the hledger package this program follows, as upstream's
+/// messages show it (packageversion).
+pub const PACKAGE_VERSION: &str = "1.99";

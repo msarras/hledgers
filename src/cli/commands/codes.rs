@@ -11,6 +11,8 @@ pub static MODE: Mode = Mode {
     name: "codes",
     aliases: &[],
     flags: &[],
+    doc: crate::command_doc!("Codes"),
+    ..Mode::DEFAULT
 };
 
 /// Run the codes command (codes): the codes of the transactions the query

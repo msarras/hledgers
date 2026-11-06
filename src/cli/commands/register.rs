@@ -56,6 +56,8 @@ pub static MODE: Mode = Mode {
         OUTPUT_VIEW_FLAG,
         CHART_FLAG,
     ],
+    doc: crate::command_doc!("Register"),
+    ..Mode::DEFAULT
 };
 
 /// The register commands' --width flag.
@@ -137,7 +139,10 @@ pub fn register(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             let rows = postings_report_as_spreadsheet(opts, &fmt, true, &report);
             print_fods(
                 locale_encoding_name(),
-                &BTreeMap::from([("Register".to_string(), ((1, 0), rows))]),
+                &BTreeMap::from([(
+                    ropts.translations.tr("Register").to_string(),
+                    ((1, 0), rows),
+                )]),
             )
         }
     })

@@ -6,23 +6,224 @@ use std::io::Write;
 
 use super::opts::CliOpts;
 
-/// Write a command's output to standard output, or to the -o file
-/// (writeOutputLazyText).
+/// Write a command's output to standard output, or to the -o file, or with
+/// --view to the view file, then open it (writeOutput).
 pub fn write_output(opts: &CliOpts, text: &str) -> Result<(), String> {
-    match opts.output_file.as_deref() {
-        None | Some("-") => {
-            let mut stdout = std::io::stdout().lock();
-            // a reader that stops early (hledger ... | head) is not an error
-            let _ = stdout
-                .write_all(text.as_bytes())
-                .and_then(|()| stdout.flush());
+    write_output_with(opts, text, false)
+}
+
+/// Like [`write_output`], but on standard output through a pager when
+/// that is wanted and possible (writeOutputLazyText).
+pub fn write_output_paged(opts: &CliOpts, text: &str) -> Result<(), String> {
+    write_output_with(opts, text, true)
+}
+
+fn write_output_with(opts: &CliOpts, text: &str, paged: bool) -> Result<(), String> {
+    let file = match opts.output_file.as_deref() {
+        None | Some("-") if opts.raw.bool("view") => Some(view_file(opts)?),
+        None | Some("-") => None,
+        Some(f) => Some(crate::read::journal::expand_home_path(f)?),
+    };
+    match file {
+        None if paged => run_pager(opts, text),
+        None => {
+            print_stdout(text);
             Ok(())
         }
-        Some(f) => {
-            let path = crate::read::journal::expand_home_path(f)?;
-            std::fs::write(&path, text).map_err(|e| format!("{path}: withFile: {e}"))
+        Some(path) => {
+            std::fs::write(&path, text).map_err(|e| format!("{path}: withFile: {e}"))?;
+            if opts.raw.bool("view")
+                && let Err(tried) = super::docs::launch(&path)
+            {
+                crate::console::warn(
+                    &opts.input.prog_args,
+                    &format!("could not open a viewer (tried: {})", tried.join(", ")),
+                );
+            }
+            Ok(())
         }
     }
+}
+
+/// view.FMT in hledger's cache directory, made (or emptied), readable only
+/// by the user, after saying where it is (viewFile).
+fn view_file(opts: &CliOpts) -> Result<String, String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let base = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|d| d.starts_with('/'))
+        .unwrap_or_else(|| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
+    let dir = format!("{base}/hledger");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{dir}: {e}"))?;
+    let f = format!("{dir}/view.{}", opts.output_format());
+    eprintln!("writing {f} (if it's sensitive, delete it after viewing)");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&f)
+        .map_err(|e| format!("{f}: {e}"))?;
+    Ok(f)
+}
+
+/// Show some text on standard output, for help, documentation and
+/// reports, through a pager when it does not fit the terminal and a pager
+/// can be used (runPager).
+pub fn run_pager(opts: &CliOpts, text: &str) -> Result<(), String> {
+    let Some(pager) = pager_for(opts, text) else {
+        print_stdout(text);
+        return Ok(());
+    };
+    let mut cmd = std::process::Command::new("sh");
+    cmd.args(["-c", &pager]).stdin(std::process::Stdio::piped());
+    let is_less = pager
+        .rsplit('/')
+        .next()
+        .is_some_and(|n| n.eq_ignore_ascii_case("less"));
+    if is_less {
+        let less = less_var_value(
+            std::env::var("HLEDGER_LESS").ok().as_deref(),
+            std::env::var("LESS").ok().as_deref(),
+            opts.spec.opts.color,
+        );
+        if !less_is_working(&less) {
+            crate::console::warn(
+                &opts.input.prog_args,
+                "less --version fails with current LESS settings; disabling. Check 'hledger setup' for details.\n",
+            );
+            print_stdout(text);
+            return Ok(());
+        }
+        cmd.env("LESS", less);
+    }
+    match cmd.spawn() {
+        Ok(mut child) => {
+            if let Some(mut stdin) = child.stdin.take() {
+                // a pager quitting early is not an error
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+        }
+        Err(_) => print_stdout(text),
+    }
+    Ok(())
+}
+
+/// The pager to show this text with, if any (maybePagerFor): none with
+/// --pager=no, an output file, inside Emacs (but its vterm), when stdout is
+/// not a terminal, or when the text fits the terminal; otherwise $PAGER,
+/// less or more, whichever is found first.
+fn pager_for(opts: &CliOpts, text: &str) -> Option<String> {
+    let to_file = opts.output_file.as_deref().is_some_and(|f| f != "-");
+    let emacs = std::env::var("INSIDE_EMACS").is_ok_and(|e| !e.contains("vterm"));
+    if opts.pager == Some(false) || to_file || emacs {
+        return None;
+    }
+    let (w, h) = terminal_size::terminal_size_of(std::io::stdout())?;
+    let lines: Vec<&str> = text.lines().collect();
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    if lines.len() <= usize::from(h.0) && width <= usize::from(w.0) {
+        return None;
+    }
+    let env_pager = std::env::var("PAGER").ok();
+    (env_pager.iter().map(String::as_str))
+        .chain(["less", "more"])
+        .find(|p| find_executable(p))
+        .map(str::to_string)
+}
+
+/// Whether a program can be run: a path to an executable file, or a name
+/// found in PATH (findExecutable).
+fn find_executable(p: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let executable = |f: &std::path::Path| {
+        f.metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    };
+    if p.contains('/') {
+        return executable(std::path::Path::new(p));
+    }
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .any(|d| executable(&std::path::Path::new(d).join(p)))
+}
+
+/// The LESS value to run less with (lessVarValue): HLEDGER_LESS if set,
+/// else LESS with hledger's preferred options added, or just those.
+fn less_var_value(hledger_less: Option<&str>, less: Option<&str>, color: bool) -> String {
+    let mut extra = vec![
+        "--chop-long-lines",
+        "--hilite-unread",
+        "--ignore-case",
+        "--no-init",
+        "--quit-if-one-screen",
+        "--shift=8",
+        "--squeeze-blank-lines",
+        "--use-backslash",
+    ];
+    if color {
+        extra.push("--RAW-CONTROL-CHARS");
+    }
+    match (hledger_less, less) {
+        (Some(h), _) => h.to_string(),
+        (None, Some(l)) => {
+            let existing: Vec<&str> = l.split_whitespace().collect();
+            let new: Vec<&str> = extra
+                .into_iter()
+                .filter(|o| !existing.contains(o))
+                .collect();
+            if new.is_empty() {
+                l.to_string()
+            } else {
+                format!("{l} {}", new.join(" "))
+            }
+        }
+        (None, None) => extra.join(" "),
+    }
+}
+
+/// Whether `less --version` succeeds quietly, within 0.3 s, with this LESS
+/// value (the opposite of lessIsWorking, which returns whether it fails).
+fn less_is_working(less: &str) -> bool {
+    let child = std::process::Command::new("less")
+        .arg("--version")
+        .env("LESS", less)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let Ok(mut child) = child else {
+        return false;
+    };
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut err = String::new();
+                if let Some(mut e) = child.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut e, &mut err);
+                }
+                return status.success() && err.is_empty();
+            }
+            Ok(None) if start.elapsed() < std::time::Duration::from_millis(300) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            _ => {
+                let _ = child.kill();
+                return false;
+            }
+        }
+    }
+}
+
+/// Write text to standard output; a reader that stops early is not an error.
+pub fn print_stdout(text: &str) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush());
 }
 
 /// The report's title, if --title gives one, and a blank line, before the

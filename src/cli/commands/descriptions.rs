@@ -13,6 +13,8 @@ pub static MODE: Mode = Mode {
     name: "descriptions",
     aliases: &["desc"],
     flags: &[],
+    doc: crate::command_doc!("Descriptions"),
+    ..Mode::DEFAULT
 };
 
 /// Run the descriptions command (descriptions): the descriptions of the

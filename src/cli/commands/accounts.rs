@@ -68,6 +68,9 @@ pub static MODE: Mode = Mode {
         .sets(&["locations"])
         .hidden(),
     ],
+    args: Some("[QUERY..]"),
+    doc: crate::command_doc!("Accounts"),
+    ..Mode::DEFAULT
 };
 
 /// Run the accounts command (accounts).

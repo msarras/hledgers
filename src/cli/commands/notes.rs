@@ -13,6 +13,8 @@ pub static MODE: Mode = Mode {
     name: "notes",
     aliases: &[],
     flags: &[],
+    doc: crate::command_doc!("Notes"),
+    ..Mode::DEFAULT
 };
 
 /// Run the notes command (notes): the notes (descriptions after a `|`, or

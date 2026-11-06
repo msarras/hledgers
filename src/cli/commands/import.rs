@@ -42,6 +42,9 @@ pub static MODE: Mode = Mode {
         ),
         LAYOUT_FLAG,
     ],
+    args: Some("[-f JOURNALFILE] [DATAFILES]"),
+    doc: crate::command_doc!("Import"),
+    ..Mode::DEFAULT
 };
 
 /// Run the import command (importcmd). Messages go to standard error; a

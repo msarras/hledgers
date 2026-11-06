@@ -103,6 +103,8 @@ pub static BALANCESHEET: CompoundBalanceCommandSpec = CompoundBalanceCommandSpec
         name: "balancesheet",
         aliases: &["bs"],
         flags: &HISTORICAL_FLAGS,
+        doc: crate::command_doc!("Balancesheet"),
+        ..Mode::DEFAULT
     },
     name: "Balance Sheet",
     sections: &[ASSETS, LIABILITIES],
@@ -116,6 +118,8 @@ pub static BALANCESHEETEQUITY: CompoundBalanceCommandSpec = CompoundBalanceComma
         name: "balancesheetequity",
         aliases: &["bse"],
         flags: &HISTORICAL_FLAGS,
+        doc: crate::command_doc!("Balancesheetequity"),
+        ..Mode::DEFAULT
     },
     name: "Balance Sheet With Equity",
     sections: &[ASSETS, LIABILITIES, EQUITY],
@@ -129,6 +133,8 @@ pub static INCOMESTATEMENT: CompoundBalanceCommandSpec = CompoundBalanceCommandS
         name: "incomestatement",
         aliases: &["is"],
         flags: &PER_PERIOD_FLAGS,
+        doc: crate::command_doc!("Incomestatement"),
+        ..Mode::DEFAULT
     },
     name: "Income Statement",
     sections: &[REVENUES, EXPENSES],
@@ -141,6 +147,8 @@ pub static CASHFLOW: CompoundBalanceCommandSpec = CompoundBalanceCommandSpec {
         name: "cashflow",
         aliases: &["cf"],
         flags: &PER_PERIOD_FLAGS,
+        doc: crate::command_doc!("Cashflow"),
+        ..Mode::DEFAULT
     },
     name: "Cashflow Statement",
     sections: &[CASH_FLOWS],
@@ -240,6 +248,9 @@ pub fn compound_balance_command(
     let mut cbr = compound_balance_report(&spec, j, cbc.sections)?;
     let title = compound_balance_report_title(cbc, ropts, accum_override, &cbr.dates);
     cbr.title = ropts1.effective_title(&title).to_string();
+    for (title, _, _) in &mut cbr.subreports {
+        *title = ropts.translations.tr(title).to_string();
+    }
     apply_subreport_titles(&ropts1, &mut cbr);
     cbr.style_amounts(&balance_report_styles(ropts, j));
     if chart {
@@ -310,21 +321,34 @@ fn compound_balance_report_title(
         _ => spans_span(dates).to_string(),
     };
     let clarification = match (ropts.balance_calc, accum, accum_override) {
-        (ValueChange, PerPeriod, _) => " (Period-End Value Changes)",
-        (ValueChange, Cumulative, _) => " (Cumulative Period-End Value Changes)",
-        (Gain, PerPeriod, _) => " (Incremental Gain)",
-        (Gain, Cumulative, _) => " (Cumulative Gain)",
-        (Gain, Historical, _) => " (Historical Gain)",
-        (_, _, Some(PerPeriod)) => " (Balance Changes)",
-        (_, _, Some(Cumulative)) => " (Cumulative Ending Balances)",
-        (_, _, Some(Historical)) => " (Historical Ending Balances)",
+        (ValueChange, PerPeriod, _) => "(Period-End Value Changes)",
+        (ValueChange, Cumulative, _) => "(Cumulative Period-End Value Changes)",
+        (Gain, PerPeriod, _) => "(Incremental Gain)",
+        (Gain, Cumulative, _) => "(Cumulative Gain)",
+        (Gain, Historical, _) => "(Historical Gain)",
+        (_, _, Some(PerPeriod)) => "(Balance Changes)",
+        (_, _, Some(Cumulative)) => "(Cumulative Ending Balances)",
+        (_, _, Some(Historical)) => "(Historical Ending Balances)",
         _ => "",
     };
+    let t = &ropts.translations;
+    let clarification = if clarification.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", t.tr(clarification))
+    };
     let changing_valuation = ropts.balance_calc == ValueChange && ropts.balance_accum != Historical;
-    format!(
-        "{} {dates_text}{clarification}{}",
-        interval_title(cbc.name, &ropts.interval),
-        valuation_description(ropts, changing_valuation)
+    t.trf(
+        "{report} {dates}{clarification}{valuation}",
+        &[
+            ("report", t.tr(&interval_title(cbc.name, &ropts.interval))),
+            ("dates", &dates_text),
+            ("clarification", &clarification),
+            (
+                "valuation",
+                &valuation_description(ropts, changing_valuation),
+            ),
+        ],
     )
 }
 
@@ -416,7 +440,8 @@ fn compound_balance_report_as_text(
     if !(ropts.no_total || cbr.subreports.len() == 1) {
         let lines: Vec<Vec<Wide>> =
             multi_balance_row_as_text(ropts, layout, &commodities, &cbr.totals);
-        let headers = std::iter::once("Net:".to_string()).chain(std::iter::repeat_n(
+        let net = ropts.translations.tr("Net:").to_string();
+        let headers = std::iter::once(net).chain(std::iter::repeat_n(
             String::new(),
             lines.len().saturating_sub(1),
         ));
@@ -523,9 +548,14 @@ fn compound_balance_report_as_spreadsheet(
         // a period's heading links to the register for that period; it
         // shows the period's end date in a historical report
         if !ropts.summary_only {
+            // in English, as the other headings are
+            let english = ReportOpts {
+                translations: Default::default(),
+                ..ropts.clone()
+            };
             data_headers.extend(colspans.iter().map(|s| spr::Cell {
                 border: Border::default(),
-                content: report_period_name(ropts, colspans, s),
+                content: report_period_name(&english, colspans, s),
                 ..header_date_span_cell(
                     ropts.date2,
                     ropts.period_titles,

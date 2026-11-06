@@ -96,6 +96,8 @@ pub static MODE: Mode = Mode {
         OUTPUT_FILE_FLAG,
         OUTPUT_VIEW_FLAG,
     ],
+    doc: crate::command_doc!("Print"),
+    ..Mode::DEFAULT
 };
 
 /// The --round flag (roundFlag).

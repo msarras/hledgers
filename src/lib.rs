@@ -6,6 +6,7 @@ pub mod cli;
 pub mod console;
 pub mod dates;
 pub mod decimal;
+pub mod i18n;
 pub mod lots;
 pub mod model;
 pub mod parse;

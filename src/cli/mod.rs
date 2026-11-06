@@ -1,11 +1,15 @@
 //! The command-line interface: argument processing and command dispatch (Hledger.Cli).
 
+pub mod addons;
 pub mod anchor;
 pub mod args;
 pub mod chart;
 pub mod commands;
+pub mod conf;
+pub mod docs;
 pub mod io;
 pub mod opts;
+pub mod selftest;
 pub mod version;
 
 use std::ffi::OsString;
@@ -23,9 +27,15 @@ pub fn run(args: impl Iterator<Item = OsString>) -> i32 {
     let argv0 = args.next().unwrap_or_default();
     let progname = argv0.rsplit('/').next().unwrap_or_default().to_string();
     let args: Vec<String> = args.collect();
-    match dispatch(&args) {
-        Ok(()) => 0,
+    match dispatch(&progname, &args) {
+        Ok(status) => status,
         Err(msg) => {
+            // finding the colour option for the error fails when --color
+            // ends the command line (colorOption, getOpt)
+            if let Some(flag) = crate::console::color_flag_without_value(&args) {
+                eprint!("{progname}: Error: {flag} requires a value\n\n");
+                return 1;
+            }
             crate::console::print_error(&progname, crate::console::color_option(&args), &msg);
             1
         }
@@ -44,48 +54,236 @@ fn replace_numeric_flags(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// A --debug without a numeric value made --debug=1 (ensureDebugFlagHasVal).
-fn ensure_debug_flag_has_value(args: Vec<String>) -> Vec<String> {
-    let mut out = Vec::with_capacity(args.len());
-    let mut it = args.into_iter().peekable();
-    while let Some(a) = it.next() {
+/// The --debug level the command line asks for: the value of the last
+/// --debug, 1 if it has none, or 0 (debugLevel).
+fn debug_level(args: &[String]) -> usize {
+    let mut level = 0;
+    for (i, a) in args.iter().enumerate() {
         if a == "--debug" {
-            match it.peek() {
-                Some(v) if !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()) => out.push(a),
-                _ => out.push("--debug=1".to_string()),
-            }
-        } else {
-            out.push(a);
+            level = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1);
+        } else if let Some(v) = a.strip_prefix("--debug=") {
+            level = v.parse().unwrap_or(1);
+        }
+    }
+    level
+}
+
+/// The first list without one occurrence of each item of the second (\\).
+fn list_difference(xs: &[String], ys: &[String]) -> Vec<String> {
+    let mut out = xs.to_vec();
+    for y in ys {
+        if let Some(i) = out.iter().position(|x| x == y) {
+            out.remove(i);
         }
     }
     out
 }
 
-fn dispatch(prog_args: &[String]) -> Result<(), String> {
-    let args = ensure_debug_flag_has_value(replace_numeric_flags(prog_args));
-    let cmd = args::command_index(&args);
-    let mode = match cmd {
-        None => &commands::MAIN_MODE,
-        Some(i) => commands::find(&args[i]).ok_or_else(|| {
-            format!(
-                "command {} is not recognised. Run 'hledger help commands' to see a list.",
-                args[i]
-            )
-        })?,
-    };
-    let rest: Vec<String> = args
-        .iter()
-        .enumerate()
-        .filter(|&(i, _)| Some(i) != cmd)
-        .map(|(_, a)| a.clone())
-        .collect();
-    let mut raw = args::process(mode, &rest)?;
-    if mode.name == "check" {
-        commands::check::validate_check_args(&raw)?;
+/// A list of strings as --debug output shows it.
+fn show_list(xs: &[String]) -> String {
+    if xs.is_empty() {
+        return "[]".to_string();
     }
-    if cmd.is_some() {
-        raw.0
-            .insert(0, ("command".to_string(), mode.name.to_string()));
+    let items: Vec<String> = xs.iter().map(|x| format!("{x:?}")).collect();
+    format!("[ {} ]", items.join(" , "))
+}
+
+/// Process the command line as hledger does (main, steps 1-6): expand
+/// `@FILE` arguments and `-NUM` flags, find the command and move the flags
+/// written before it after it, read the config file (unless only help
+/// output is wanted and it has errors), expand a command alias, find add-on
+/// commands when they can matter, combine the config file's general and
+/// command arguments with the alias's and the command line's, parse that
+/// final command line, and act on it. Returns the exit status.
+fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
+    use args::{cmdargs_parse_with, drop_unsupported_opts, flag_args};
+    let debug = debug_level(prog_args) >= 1;
+    let dbg = |label: &str, value: &str| {
+        if debug {
+            eprintln!("{label}: {value}");
+        }
+    };
+    // 1. preliminary command line parsing
+    let cliargs = replace_numeric_flags(&args::expand_args_at(prog_args)?);
+    let (clicmdarg, cliargswithoutcmd, cliargswithcmdfirst) =
+        args::move_flags_after_command(&cliargs);
+    let cliargswithcmdfirstwithoutclispecific = args::drop_cli_specific_opts(&cliargswithcmdfirst);
+    let cliargsaftercmd: Vec<String> = match cliargs.iter().position(|a| *a == clicmdarg) {
+        Some(i) => cliargs[i + 1..].to_vec(),
+        None => Vec::new(),
+    };
+
+    // 2. read the config file if any
+    let cliconfargs = drop_unsupported_opts(&args::CONF_FLAGS_MODE, &cliargswithoutcmd);
+    let cliconfrawopts =
+        args::cmdargs_parse_mode("for conf options", &args::CONF_FLAGS_MODE, &cliconfargs)?;
+    let (conf, conffile) = if clicmdarg == "setup" {
+        (conf::Conf::default(), None)
+    } else {
+        match conf::get_conf(&cliconfrawopts, debug) {
+            Ok(c) => c,
+            Err(_) if can_skip_conf(&clicmdarg, &cliargswithoutcmd)? => {
+                (conf::Conf::default(), None)
+            }
+            Err(e) => {
+                return Err(format!(
+                    "{}\n(hledger {} could not read this config file. To run without it, add -n.)",
+                    e.trim_end(),
+                    version::PACKAGE_VERSION
+                ));
+            }
+        }
+    };
+    let shell_aliases_allowed = conf::conf_file_is_trusted(&cliconfrawopts, conffile.as_deref());
+
+    // 3. identify a command name if possible
+    let confallgenargs = replace_numeric_flags(&conf.lookup("general"));
+    let confothergenargs = args::drop_conf_flags(&confallgenargs);
+    let confdroppedgenargs = list_difference(&confallgenargs, &confothergenargs);
+    let cmdarg = clicmdarg;
+    let nocmdprovided = cmdarg.is_empty();
+    let mut cmdaliases = conf.aliases();
+    cmdaliases.reverse();
+    let aliasexpansion =
+        conf::expand_command_alias(|n| commands::find(n).is_some(), &cmdaliases, &cmdarg);
+    let (effectivecmdarg, aliasargs) = match &aliasexpansion {
+        conf::ResolvedCommand::Hledger(c, a) => (c.clone(), replace_numeric_flags(a)),
+        conf::ResolvedCommand::Shell(_) => (cmdarg.clone(), Vec::new()),
+    };
+    let addonsneeded = !nocmdprovided
+        && commands::find(&effectivecmdarg)
+            .is_none_or(|m| m.names().any(|n| n == "run" || n == "repl"));
+    let addons = if addonsneeded {
+        addons::addon_command_names()
+    } else {
+        Vec::new()
+    };
+    let mut args0: Vec<String> = Some(effectivecmdarg.clone())
+        .filter(|c| !c.is_empty())
+        .into_iter()
+        .collect();
+    args0.extend(cliargswithcmdfirstwithoutclispecific);
+    let possiblecmdarg: Vec<String> = args0
+        .into_iter()
+        .find(|a| !args::is_flag_arg(a))
+        .into_iter()
+        .collect();
+    let cmdname = cmdargs_parse_with(
+        &flag_args().req_val,
+        "for command name",
+        &addons,
+        &possiblecmdarg,
+    )?
+    .string("command")
+    .unwrap_or("")
+    .to_string();
+    let badcmdprovided = cmdname.is_empty() && !nocmdprovided;
+    let isaddoncmd = !cmdname.is_empty() && addons.contains(&cmdname);
+    let builtin = commands::find(&cmdname);
+    let effectivemode = builtin.unwrap_or(&commands::MAIN_MODE);
+    let finalreqvalflagargs = if isaddoncmd {
+        flag_args().general_req_val.clone()
+    } else {
+        args::mode_req_val_flag_args(effectivemode)
+    };
+    // a shell command alias runs now, if allowed, with the arguments
+    // written after its name
+    if let conf::ResolvedCommand::Shell(shcmd) = &aliasexpansion {
+        if !shell_aliases_allowed {
+            let defined = conffile
+                .as_ref()
+                .map(|f| format!(",\ndefined in {f}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "the command alias '{cmdarg}' runs a shell command (! {shcmd}){defined}.\n\
+                 Shell command aliases are only allowed from your user config file (~/.hledger.conf or XDG),\n\
+                 or a config file given with --conf; refusing to run it from an automatically-found config file."
+            ));
+        }
+        let mut parts = vec![shcmd.clone()];
+        parts.extend(
+            cliargsaftercmd
+                .iter()
+                .map(|a| crate::text::quote_for_command_line(a)),
+        );
+        return run_shell(&parts.join(" "));
+    }
+    if badcmdprovided {
+        let aliasnote = if effectivecmdarg != cmdarg {
+            format!(" (expanded from the {cmdarg} command alias)")
+        } else {
+            String::new()
+        };
+        return Err(format!(
+            "command {effectivecmdarg}{aliasnote} is not recognised. Run 'hledger help commands' to see a list."
+        ));
+    }
+
+    // 4. get the applicable arguments from the config file
+    let supportedgenargsfromconf = if cmdname == "ui" || cmdname == "web" {
+        (confothergenargs.iter())
+            .filter(|a| !a.starts_with("ui") && !a.starts_with("web"))
+            .cloned()
+            .collect()
+    } else if isaddoncmd {
+        Vec::new()
+    } else {
+        drop_unsupported_opts(effectivemode, &confothergenargs)
+    };
+    let excludedgenargsfromconf = list_difference(&confothergenargs, &supportedgenargsfromconf);
+    let confcmdargs0 = if cmdname.is_empty() {
+        Vec::new()
+    } else {
+        replace_numeric_flags(&conf.lookup(&cmdname))
+    };
+    // an add-on's own flags are hidden from parsing behind a --
+    let mut confcmdargs = confcmdargs0.clone();
+    if isaddoncmd {
+        confcmdargs.insert(0, "--".to_string());
+    }
+    if conffile.is_some() {
+        if !confdroppedgenargs.is_empty() {
+            dbg(
+                "ignored conf-selecting flags from config file",
+                &show_list(&confdroppedgenargs),
+            );
+        }
+        dbg(
+            "using general args from config file",
+            &show_list(&confothergenargs),
+        );
+        if !excludedgenargsfromconf.is_empty() {
+            dbg(
+                "excluded general args from config file, not supported by this command",
+                &show_list(&excludedgenargsfromconf),
+            );
+        }
+        dbg(
+            "using subcommand args from config file",
+            &show_list(&confcmdargs),
+        );
+    }
+
+    // 5. combine the config file's and the command line's arguments
+    let mut finalargs: Vec<String> = Some(effectivecmdarg.clone())
+        .filter(|c| !c.is_empty())
+        .into_iter()
+        .collect();
+    finalargs.extend(supportedgenargsfromconf.iter().cloned());
+    finalargs.extend(confcmdargs);
+    finalargs.extend(aliasargs.iter().cloned());
+    finalargs.extend(cliargswithoutcmd.iter().cloned());
+    let finalargs = replace_numeric_flags(&finalargs);
+    let raw = cmdargs_parse_with(
+        &finalreqvalflagargs,
+        "final command line",
+        &addons,
+        &finalargs,
+    )?;
+
+    // 6. select an action and run it
+    if raw.string("command") == Some("check") {
+        commands::check::validate_check_args(&raw)?;
     }
     // colour on stdout, unless writing to a file (useColorOnStdout)
     let to_file = raw.string("output-file").is_some_and(|f| f != "-");
@@ -93,18 +291,157 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
     let mut opts = CliOpts::from_raw_opts(raw, crate::dates::current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
-    if opts.raw.bool("quickref") {
-        return io::write_output(&opts, &commands::quickref::render());
-    }
-    if opts.raw.bool("version") {
-        let out = format!("{}\n", version::PROGNAME_AND_VERSION);
-        return io::write_output(&opts, &out);
-    }
-    let Some(_) = cmd else {
-        return io::write_output(&opts, &commands::quickref::render());
+    opts.progname = progname.to_string();
+    let raw = &opts.raw;
+    let quickref = || io::run_pager(&opts, &commands::quickref::render(progname));
+    let doc_flag = ["quickref", "help", "examples", "info", "man", "webman"]
+        .into_iter()
+        .find(|f| raw.bool(f));
+    let usage = |mode: &args::Mode| {
+        let mut usage = args::mode_usage(mode, progname);
+        if color && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            usage = args::highlight_help(&usage);
+        }
+        io::run_pager(&opts, &usage)
     };
+    // 6.1 no command and a help or documentation flag
+    if nocmdprovided {
+        match doc_flag {
+            Some("quickref") => quickref()?,
+            Some("help") => usage(&commands::MAIN_MODE)?,
+            Some("examples") => docs::run_tldr_for_page("hledger")?,
+            Some("info") => docs::run_info_for_topic("hledger", None)?,
+            Some("man") => docs::run_man_for_topic("hledger", None)?,
+            Some("webman") => docs::open_browser_on(&docs::web_manual_url("hledger", None)),
+            _ => {}
+        }
+        if doc_flag.is_some() {
+            return Ok(0);
+        }
+    }
+    // 6.2 the version
+    if raw.bool("version") && !isaddoncmd && doc_flag.is_none() {
+        io::print_stdout(&format!("{}\n", version::progname_and_version(progname)));
+        return Ok(0);
+    }
+    // or --test: run the self-tests, if no command is given
+    if let Some(pattern) = raw.string("test").filter(|_| !isaddoncmd) {
+        if nocmdprovided {
+            return Ok(selftest::run_unit_tests(pattern));
+        }
+        return Err(format!(
+            "--test can't be used with a command ({cmdarg}); to select tests, use --test=PATTERN"
+        ));
+    }
+    // or --write-lang: write a catalog to start translating from
+    if let Some(lang) = raw.string("write-lang").filter(|_| !isaddoncmd) {
+        io::print_stdout(&crate::i18n::write_lang(lang)?);
+        return Ok(0);
+    }
+    // 6.3 no command: the quick reference
+    if nocmdprovided {
+        quickref()?;
+        return Ok(0);
+    }
+    // 6.4 a builtin command
+    if let Some(mode) = builtin {
+        let topic = Some(mode.name);
+        match doc_flag {
+            Some("quickref") => quickref()?,
+            Some("help") => usage(mode)?,
+            Some("examples") => docs::run_tldr_for_page(&format!("hledger-{}", mode.name))?,
+            Some("info") => docs::run_info_for_topic("hledger", topic)?,
+            Some("man") => docs::run_man_for_topic("hledger", topic)?,
+            Some("webman") => docs::open_browser_on(&docs::web_manual_url("hledger", topic)),
+            _ => {
+                run_builtin(mode, &opts, &conf)?;
+            }
+        }
+        return Ok(0);
+    }
+    // 6.5 an add-on command: run hledger-NAME with the arguments from each
+    // source (the config file's general arguments and its section, the
+    // alias, the command line), each source's first -- consumed, and
+    // hledger's own config file flags before it dropped
+    if isaddoncmd {
+        let mut addonargs = Vec::new();
+        for source in [
+            &supportedgenargsfromconf,
+            &confcmdargs0,
+            &aliasargs,
+            &cliargswithoutcmd,
+        ] {
+            let (before, after) = args::break_at_first_separator(source);
+            addonargs.extend(args::drop_cli_specific_opts(&before));
+            addonargs.extend(after);
+        }
+        let exe = format!("hledger-{cmdname}");
+        let status = std::process::Command::new(&exe)
+            .args(&addonargs)
+            .status()
+            .map_err(|e| format!("{exe}: rawSystem: {}", crate::read::io_error_text(&e)))?;
+        return Ok(exit_code(status));
+    }
+    Err(crate::reports::opts::usage_error(&format!(
+        "could not understand the arguments {finalargs:?}"
+    )))
+}
+
+/// Run a shell command line with sh, returning its exit status (system).
+fn run_shell(cmd: &str) -> Result<i32, String> {
+    let status = std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .status()
+        .map_err(|e| format!("{cmd}: {e}"))?;
+    Ok(exit_code(status))
+}
+
+/// A child process's exit status as ours.
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
+}
+
+/// Whether, when the config file can not be read, this command line can do
+/// without it: when it asks for help, documentation, the version or the
+/// tests, with no command or one recognised without the config file
+/// (canSkipConf).
+fn can_skip_conf(cmdarg: &str, args: &[String]) -> Result<bool, String> {
+    let mode = &args::HELP_FLAGS_MODE;
+    let raw = args::cmdargs_parse_mode(
+        "for help flags",
+        mode,
+        &args::drop_unsupported_opts(mode, args),
+    )?;
+    let helpflag = raw.string("test").is_some()
+        || raw.string("write-lang").is_some()
+        || [
+            "help", "info", "man", "webman", "examples", "quickref", "version",
+        ]
+        .iter()
+        .any(|f| raw.bool(f));
+    if !helpflag {
+        return Ok(false);
+    }
+    if cmdarg.is_empty() {
+        return Ok(true);
+    }
+    let addons = addons::addon_command_names();
+    Ok(args::process_main(&addons, &[cmdarg.to_string()])
+        .is_ok_and(|raw| raw.string("command").is_some_and(|c| !c.is_empty())))
+}
+
+/// Run a builtin command (Cli.hs 6.4.2-6.4.5): help without a journal,
+/// import with a journal that may not exist yet, the others with the
+/// journal read.
+fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(), String> {
+    if mode.name == "help" {
+        return commands::help::help(opts, &conf.aliases());
+    }
     if mode.name == "import" {
-        return commands::import::import(&opts, with_possible_journal(&opts)?);
+        return commands::import::import(opts, with_possible_journal(opts)?);
     }
     let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
@@ -135,9 +472,26 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         "transactions" => commands::transactions::transactions,
         name => return Err(format!("the {name} command is not implemented yet")),
     };
-    let j = with_journal(&opts)?;
-    let out = run(&opts, j)?;
-    io::write_output(&opts, &out)
+    let j = with_journal(opts)?;
+    let out = run(opts, j)?;
+    // the reports upstream writes with writeOutputLazyText may be paged
+    let paged = [
+        "aregister",
+        "balance",
+        "balancesheet",
+        "balancesheetequity",
+        "cashflow",
+        "incomestatement",
+        "holdings",
+        "print",
+        "register",
+        "transactions",
+    ];
+    if paged.contains(&mode.name) {
+        io::write_output_paged(opts, &out)
+    } else {
+        io::write_output(opts, &out)
+    }
 }
 
 /// The journal the options say to read, read and transformed for the
