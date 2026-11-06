@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::account::{Realness, account_name_drop, elide_account_name};
-use crate::amount::render::{AmountFormat, show_mixed_amount_lines_b};
+use crate::amount::render::{
+    AmountFormat, show_mixed_amount_lines_b, show_mixed_amount_lines_reusing,
+};
 use crate::amount::{MixedAmount, Rounding, styles_with_rounding};
 use crate::cli::anchor::{date_cell, set_account_anchor};
 use crate::cli::args::{Arity, Flag, Mode};
@@ -456,10 +458,12 @@ pub fn postings_or_transactions_report_as_text<T>(
         colour: opts.spec.opts.color,
         ..AmountFormat::ONE_LINE_NO_COST
     };
-    let show = |i: &T| {
+    // successive balances are mostly the same amounts, whose texts are reused
+    let mut last_balance = Vec::new();
+    let mut show = |i: &T| {
         (
             show_mixed_amount_lines_b(&fmt, amount(i)),
-            show_mixed_amount_lines_b(&fmt, balance(i)),
+            show_mixed_amount_lines_reusing(&fmt, balance(i), &mut last_balance),
         )
     };
     // the items the starting widths come from are shown first, the others
@@ -469,7 +473,7 @@ pub fn postings_or_transactions_report_as_text<T>(
     } else {
         items.len().min(CHUNK_SIZE)
     };
-    let start: Vec<(Vec<Wide>, Vec<Wide>)> = items[..n_start].iter().map(show).collect();
+    let start: Vec<(Vec<Wide>, Vec<Wide>)> = items[..n_start].iter().map(&mut show).collect();
     let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
     let mut amt_width = start.iter().fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
     let mut bal_width = start.iter().fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
