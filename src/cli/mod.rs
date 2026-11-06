@@ -344,9 +344,28 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
         }
         return Ok(0);
     }
-    // 6.5 an add-on command
+    // 6.5 an add-on command: run hledger-NAME with the arguments from each
+    // source (the config file's general arguments and its section, the
+    // alias, the command line), each source's first -- consumed, and
+    // hledger's own config file flags before it dropped
     if isaddoncmd {
-        return Err(commands::not_yet("add-on commands", "8a"));
+        let mut addonargs = Vec::new();
+        for source in [
+            &supportedgenargsfromconf,
+            &confcmdargs0,
+            &aliasargs,
+            &cliargswithoutcmd,
+        ] {
+            let (before, after) = args::break_at_first_separator(source);
+            addonargs.extend(args::drop_cli_specific_opts(&before));
+            addonargs.extend(after);
+        }
+        let exe = format!("hledger-{cmdname}");
+        let status = std::process::Command::new(&exe)
+            .args(&addonargs)
+            .status()
+            .map_err(|e| format!("{exe}: rawSystem: {}", crate::read::io_error_text(&e)))?;
+        return Ok(exit_code(status));
     }
     Err(crate::reports::opts::usage_error(&format!(
         "could not understand the arguments {finalargs:?}"
