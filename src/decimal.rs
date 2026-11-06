@@ -16,7 +16,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use std::str::FromStr;
 
 use dashu_int::IBig;
-use dashu_int::ops::{Abs, DivRem, UnsignedAbs};
+use dashu_int::ops::{Abs, DivRem, Gcd, UnsignedAbs};
 
 /// The most decimal places a Decimal can have.
 const MAX_PLACES: u32 = 255;
@@ -319,14 +319,41 @@ impl Div for &Decimal {
 
     fn div(self, rhs: &Decimal) -> Decimal {
         assert!(!rhs.is_zero(), "Decimal division by zero");
-        let mut num = &self.mantissa * pow10(rhs.places) * pow10(u8::MAX);
+        let mut num = &self.mantissa * pow10(rhs.places);
         let mut den = &rhs.mantissa * pow10(self.places);
         if den < IBig::ZERO {
             num = -num;
             den = -den;
         }
-        Decimal::new(div_round(&num, &den), u8::MAX).normalize()
+        if let Some(q) = terminating_quotient(&num, &den) {
+            return q;
+        }
+        Decimal::new(div_round(&(num * pow10(u8::MAX)), &den), u8::MAX).normalize()
     }
+}
+
+/// `num / den` for positive `den`, if it has at most 255 decimal places,
+/// with the fewest places that show it; the same as rounding at 255 places
+/// and normalizing, without the 255-digit intermediate. In lowest terms the
+/// quotient terminates exactly when the denominator is `2^a * 5^b`, and then
+/// it takes `max(a, b)` places, the last digit not zero.
+fn terminating_quotient(num: &IBig, den: &IBig) -> Option<Decimal> {
+    let g = IBig::from(num.gcd(den));
+    let mut d = den / &g;
+    let twos = d.trailing_zeros().unwrap_or(0);
+    d >>= twos;
+    let five = IBig::from(5);
+    let mut fives = 0;
+    while fives <= MAX_PLACES as usize && (&d % &five).is_zero() {
+        d /= &five;
+        fives += 1;
+    }
+    let places = twos.max(fives);
+    if d != IBig::ONE || places > MAX_PLACES as usize {
+        return None;
+    }
+    let mantissa = ((num / &g) << (places - twos)) * five.pow(places - fives);
+    Some(Decimal::new(mantissa, places as u8))
 }
 
 macro_rules! forward_owned_ops {

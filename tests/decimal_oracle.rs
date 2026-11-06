@@ -256,3 +256,33 @@ fn long_products_round_at_255_places() {
         );
     }
 }
+
+/// Quotients that terminate, at up to 255 places or beyond: a product
+/// divided by one factor, and numbers divided by `2^i * 5^j` at some
+/// places, which give quotients of up to 330 places; rounded half-even
+/// at 255 places, normalized.
+#[test]
+fn terminating_quotients_round_at_255_places() {
+    let mut rng = Rng(0x7e2a_1fac);
+    for case in 0..CASES {
+        let (a, b) = (rng.decimal(), rng.decimal());
+        if !b.is_zero() {
+            let product = &a * &b;
+            let exact = div(&ratio(&product), &ratio(&b));
+            assert_eq!(
+                rep(&(&product / &b)),
+                normalized(round_to(&exact, 255)),
+                "case {case}: {product} / {b}"
+            );
+        }
+        let (i, j) = (rng.below(300) as u32, rng.below(300) as u32);
+        let mantissa = BigInt::from(2u32).pow(i) * BigInt::from(5u32).pow(j);
+        let divisor = Decimal::new(mantissa.to_string().parse().unwrap(), rng.below(31) as u8);
+        let exact = div(&ratio(&a), &ratio(&divisor));
+        assert_eq!(
+            rep(&(&a / &divisor)),
+            normalized(round_to(&exact, 255)),
+            "case {case}: {a} / {divisor}"
+        );
+    }
+}
