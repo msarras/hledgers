@@ -13,6 +13,7 @@ pub mod compound;
 pub mod descriptions;
 pub mod diff;
 pub mod files;
+pub mod get;
 pub mod help;
 pub mod holdings;
 pub mod import;
@@ -29,7 +30,7 @@ pub mod stats;
 pub mod tags;
 pub mod transactions;
 
-use super::args::{Arity, Flag, General, Hidden, Mode};
+use super::args::{General, Hidden, Mode};
 use super::opts::CONF_FLAGS;
 
 /// The mode used when no command is given (mainmode): the config file
@@ -61,7 +62,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &descriptions::MODE,
     &diff::MODE,
     &files::MODE,
-    &GET_MODE,
+    &get::MODE,
     &help::MODE,
     &holdings::MODE,
     &import::MODE,
@@ -82,29 +83,6 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
 ];
 
 // The modes of the commands milestone 8b implements.
-
-static GET_MODE: Mode = Mode {
-    name: "get",
-    flags: &[
-        Flag::new(
-            &["transactions"],
-            Arity::None,
-            "",
-            "fetch transactions only",
-        ),
-        Flag::new(&["prices"], Arity::None, "", "fetch prices only"),
-        Flag::new(
-            &["dry-run"],
-            Arity::None,
-            "",
-            "just print the commands that would be run",
-        ),
-    ],
-    general: General::Groups2,
-    args: None,
-    doc: crate::command_doc!("Get"),
-    ..Mode::DEFAULT
-};
 
 static SETUP_MODE: Mode = Mode {
     name: "setup",

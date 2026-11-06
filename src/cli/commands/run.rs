@@ -481,6 +481,9 @@ impl<'a> Session<'a> {
         if cmdname == "run" {
             return run_with(ctx, Some(&jpaths), &opts);
         }
+        if mode.name == "get" {
+            return Ok(commands::get::get(&opts, &j)?);
+        }
         let Some((action, paged)) = crate::cli::journal_command(mode.name) else {
             // repl (or a command with no action) does nothing here, as upstream
             return Ok(());

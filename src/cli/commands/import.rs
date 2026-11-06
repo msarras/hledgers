@@ -7,7 +7,6 @@ use std::io::Write;
 
 use super::print::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::not_yet;
 use crate::cli::opts::CliOpts;
 use crate::model::{Journal, Transaction};
 use crate::read::latest::save_latest_dates_for_files;
@@ -51,8 +50,9 @@ pub static MODE: Mode = Mode {
 /// dry run shows the transactions on standard output.
 pub fn import(opts: &CliOpts, j: Journal) -> Result<(), String> {
     let raw = &opts.raw;
+    // with --get, fetch new data first
     if raw.bool("get") {
-        return Err(not_yet("import --get", "8"));
+        super::get::get(opts, &j)?;
     }
     let journal_file = j
         .files
