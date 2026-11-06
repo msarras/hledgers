@@ -4,7 +4,7 @@
 # nothing that once passed can silently fail again. Cases left out need a later
 # milestone; each milestone's report names them.
 
-0unittests.test:1
+0unittests.test
 account-aliases.test
 accounts-sorting.test
 accounts.test
@@ -54,8 +54,9 @@ check-ordereddates.test
 check-payees.test
 check-tags.test
 check-uniqueleafnames.test
-cli/cli.test:1-5,10-23,26-36,42-45,51-54
-cli/command-aliases.test:6,14,32
+cli/addons.test
+cli/cli.test:1-47,49-54
+cli/command-aliases.test:1-15,21-25,27-29,31-32
 cli/commodity-style.test
 cli/date-options.test
 cli/multiple-files.test
@@ -77,6 +78,8 @@ errors/autobalanced.test
 errors/balanced.test
 errors/basis.test
 errors/commodities.test
+errors/confargs.test
+errors/confparse.test
 errors/csvamountonenonzero.test
 errors/csvamountparse.test
 errors/csvbalanceparse.test
@@ -112,9 +115,10 @@ errors/tcorderedactions.test
 errors/tdquantity.test
 errors/uniqueleafnames.test
 forecast.test
+help.test
 holdings-charts.test
 holdings.test
-i18n.test:5,8-9,44
+i18n.test
 i18n/unicode-account-matching.test
 i18n/unicode-balance.test
 i18n/unicode-description-matching.test
