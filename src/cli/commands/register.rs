@@ -447,15 +447,18 @@ pub fn register_line(
 /// --align-all, all items'), at least 12, widening as wider ones come
 /// (postingsOrTransactionsReportAsText). The total width comes from
 /// --width, which is an error if malformed and there are items.
-pub fn postings_or_transactions_report_as_text<T>(
+pub fn postings_or_transactions_report_as_text<T: Sync>(
     opts: &CliOpts,
     items: &[T],
-    amount: impl Fn(&T) -> &MixedAmount,
-    balance: impl Fn(&T) -> &MixedAmount,
-    item_as_text: impl Fn(ItemWidths, &T, &[Wide], &[Wide]) -> String,
+    amount: impl Fn(&T) -> &MixedAmount + Sync,
+    balance: impl Fn(&T) -> &MixedAmount + Sync,
+    item_as_text: impl Fn(ItemWidths, &T, &[Wide], &[Wide]) -> String + Sync,
 ) -> Result<String, String> {
     const MIN_WIDTH: usize = 12;
     const CHUNK_SIZE: usize = 1000;
+    // the items are shown and rendered a block at a time, in runs on all cores
+    const BLOCK: usize = 8192;
+    const RUN: usize = 256;
     if items.is_empty() {
         return Ok(String::new());
     }
@@ -465,13 +468,23 @@ pub fn postings_or_transactions_report_as_text<T>(
         colour: opts.spec.opts.color,
         ..AmountFormat::ONE_LINE_NO_COST
     };
-    // successive balances are mostly the same amounts, whose texts are reused
-    let mut last_balance = Vec::new();
-    let mut show = |i: &T| {
-        (
-            show_mixed_amount_lines_b(&fmt, amount(i)),
-            show_mixed_amount_lines_reusing(&fmt, balance(i), &mut last_balance),
-        )
+    // the items' amounts and balances shown, a run of them at a time on
+    // each core; successive balances are mostly the same amounts, whose
+    // texts are reused
+    type Shown = (Vec<Wide>, Vec<Wide>);
+    let show = |items: &[T]| -> Vec<Vec<Shown>> {
+        let runs: Vec<&[T]> = items.chunks(RUN).collect();
+        crate::par::map(&runs, |run| {
+            let mut last_balance = Vec::new();
+            (run.iter())
+                .map(|i| {
+                    (
+                        show_mixed_amount_lines_b(&fmt, amount(i)),
+                        show_mixed_amount_lines_reusing(&fmt, balance(i), &mut last_balance),
+                    )
+                })
+                .collect()
+        })
     };
     // the items the starting widths come from are shown first, the others
     // as they come
@@ -480,31 +493,54 @@ pub fn postings_or_transactions_report_as_text<T>(
     } else {
         items.len().min(CHUNK_SIZE)
     };
-    let start: Vec<(Vec<Wide>, Vec<Wide>)> = items[..n_start].iter().map(&mut show).collect();
+    let start = show(&items[..n_start]);
     let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
-    let mut amt_width = start.iter().fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
-    let mut bal_width = start.iter().fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
+    let mut amt_width = start
+        .iter()
+        .flatten()
+        .fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
+    let mut bal_width = start
+        .iter()
+        .flatten()
+        .fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
     let mut out = String::new();
-    for (k, item) in items.iter().enumerate() {
-        let later;
-        let (amt, bal) = match start.get(k) {
-            Some((amt, bal)) => (amt, bal),
-            None => {
-                later = show(item);
-                (&later.0, &later.1)
-            }
-        };
-        if !align_all {
-            amt_width = widest(amt, amt_width);
-            bal_width = widest(bal, bal_width);
+    // each item's widths found in order, widening as wider amounts come;
+    // then each run's items rendered on a core, and the runs' texts joined
+    let mut render = |items: &[T], shown: Vec<Vec<Shown>>| {
+        let mut items = items.iter();
+        let mut runs = Vec::with_capacity(shown.len());
+        for run in shown {
+            let run: Vec<(ItemWidths, &T, Shown)> = (run.into_iter())
+                .map(|s| {
+                    if !align_all {
+                        amt_width = widest(&s.0, amt_width);
+                        bal_width = widest(&s.1, bal_width);
+                    }
+                    let widths = ItemWidths {
+                        total,
+                        description,
+                        amount: amt_width as isize,
+                        balance: bal_width as isize,
+                    };
+                    (widths, items.next().expect("an item for each shown"), s)
+                })
+                .collect();
+            runs.push(run);
         }
-        let widths = ItemWidths {
-            total,
-            description,
-            amount: amt_width as isize,
-            balance: bal_width as isize,
-        };
-        out.push_str(&item_as_text(widths, item, amt, bal));
+        let texts = crate::par::map_owned(runs, |run| {
+            let mut text = String::new();
+            for (widths, item, (amt, bal)) in run {
+                text.push_str(&item_as_text(widths, item, &amt, &bal));
+            }
+            text
+        });
+        for text in texts {
+            out.push_str(&text);
+        }
+    };
+    render(&items[..n_start], start);
+    for block in items[n_start..].chunks(BLOCK) {
+        render(block, show(block));
     }
     Ok(out)
 }
