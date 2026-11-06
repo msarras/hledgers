@@ -4,6 +4,7 @@
 //! and a totals row. One engine makes the multi-period balance report; the
 //! single-column balance report is its one-period case.
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashSet};
 
@@ -392,12 +393,12 @@ pub fn make_report_query(spec: &ReportSpec, span: DateSpan) -> ReportSpec {
 /// time to the report's end; valued as the options say, unless that
 /// happens after summing; without postings that have no amount; with every
 /// amount 1 when counting (getPostings, journalValueAndFilterPostingsWith).
-pub fn get_postings(
+pub fn get_postings<'j>(
     spec: &ReportSpec,
-    j: &Journal,
+    j: &'j Journal,
     oracle: &PriceOracle,
     span: DateSpan,
-) -> Result<Journal, String> {
+) -> Result<Cow<'j, Journal>, String> {
     let ropts = &spec.opts;
     let full_span = if ropts.requires_historical() {
         DateSpan::exact(None, span.end())
@@ -429,8 +430,32 @@ pub fn get_postings(
         },
         ..spec.clone()
     };
-    let mut valued = spec.journal_value_and_filter_postings_with(j, oracle)?;
     let count = is_count(ropts.balance_calc);
+    // when nothing is converted, valued or counted, and the query matches
+    // every posting, all with amounts, those are the journal's own
+    let unchanged = !count
+        && !spec.opts.related
+        && spec.opts.value.is_none()
+        && matches!(
+            spec.opts.conversion_op,
+            None | Some(ConversionOp::NoConversionOp)
+        )
+        && spec.query.clone().filter(Query::is_amt_or_cur).is_null()
+        && {
+            let types = |a: &str| j.account_type(a);
+            let q = &spec.query;
+            crate::par::map(&j.txns, |t| {
+                (t.postings.iter()).all(|p| {
+                    p.has_amount() && q.matches_posting_extra(&types, PostingRef::new(t, p))
+                })
+            })
+            .into_iter()
+            .all(|all| all)
+        };
+    if unchanged {
+        return Ok(Cow::Borrowed(j));
+    }
+    let mut valued = spec.journal_value_and_filter_postings_with(j, oracle)?;
     for t in &mut valued.txns {
         t.postings.retain(|p| p.has_amount());
         if count {
@@ -439,7 +464,7 @@ pub fn get_postings(
             }
         }
     }
-    Ok(valued)
+    Ok(Cow::Owned(valued))
 }
 
 /// The account tree of a multi-period balance report, from its postings:
