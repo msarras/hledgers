@@ -319,6 +319,11 @@ impl Div for &Decimal {
 
     fn div(self, rhs: &Decimal) -> Decimal {
         assert!(!rhs.is_zero(), "Decimal division by zero");
+        // by one, as an average of one period is: the fewest places that
+        // show the number, as below
+        if rhs.places == 0 && rhs.mantissa == IBig::ONE {
+            return self.normalize();
+        }
         let mut num = &self.mantissa * pow10(rhs.places);
         let mut den = &rhs.mantissa * pow10(self.places);
         if den < IBig::ZERO {

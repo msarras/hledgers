@@ -258,8 +258,8 @@ fn long_products_round_at_255_places() {
 }
 
 /// Quotients that terminate, at up to 255 places or beyond: a product
-/// divided by one factor, and numbers divided by `2^i * 5^j` at some
-/// places, which give quotients of up to 330 places; rounded half-even
+/// divided by one factor, numbers divided by one, and numbers divided by
+/// `2^i * 5^j` at some places, which give quotients of up to 330 places; rounded half-even
 /// at 255 places, normalized.
 #[test]
 fn terminating_quotients_round_at_255_places() {
@@ -283,6 +283,12 @@ fn terminating_quotients_round_at_255_places() {
             rep(&(&a / &divisor)),
             normalized(round_to(&exact, 255)),
             "case {case}: {a} / {divisor}"
+        );
+        // by one
+        assert_eq!(
+            rep(&(&a / &Decimal::from_i64(1))),
+            normalized(round_to(&ratio(&a), 255)),
+            "case {case}: {a} / 1"
         );
     }
 }
