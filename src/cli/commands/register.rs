@@ -395,7 +395,14 @@ pub fn register_line(
     ]
     .into_iter()
     .fold(1, usize::max);
-    let spaces = |out: &mut String, k: usize| out.extend(std::iter::repeat_n(' ', k));
+    const SPACES: &str = "                                                                ";
+    let spaces = |out: &mut String, mut k: usize| {
+        while k > 0 {
+            let n = k.min(SPACES.len());
+            out.push_str(&SPACES[..n]);
+            k -= n;
+        }
+    };
     let left = |out: &mut String, lines: &[Wide], w: usize, i: usize| match lines.get(i) {
         Some(t) => {
             out.push_str(&t.s);
