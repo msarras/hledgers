@@ -1080,35 +1080,54 @@ impl PartialOrd for MixedAmount {
     }
 }
 
-/// The two sums merged; amounts with the same commodity and cost are added,
-/// the right one's commodity and style winning (maPlus).
+/// Two sums' amounts, each in key order, merged; amounts with the same
+/// commodity and cost are added, the right one's commodity and style
+/// winning (maPlus).
+fn merged(
+    a: impl ExactSizeIterator<Item = Amount>,
+    b: impl ExactSizeIterator<Item = Amount>,
+) -> MixedAmount {
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut a, mut b) = (a.peekable(), b.peekable());
+    while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+        match key_cmp(x, y) {
+            Ordering::Less => out.extend(a.next()),
+            Ordering::Greater => out.extend(b.next()),
+            Ordering::Equal => {
+                let (x, y) = (a.next().expect("peeked"), b.next().expect("peeked"));
+                out.push(sum_similar(&x, &y));
+            }
+        }
+    }
+    out.extend(a);
+    out.extend(b);
+    MixedAmount(out)
+}
+
+/// The two sums merged (maPlus).
 impl Add for &MixedAmount {
     type Output = MixedAmount;
 
     fn add(self, rhs: &MixedAmount) -> MixedAmount {
-        let (a, b) = (&self.0, &rhs.0);
-        let (mut i, mut j) = (0, 0);
-        let mut out = Vec::with_capacity(a.len() + b.len());
-        while i < a.len() && j < b.len() {
-            match key_cmp(&a[i], &b[j]) {
-                Ordering::Less => {
-                    out.push(a[i].clone());
-                    i += 1;
-                }
-                Ordering::Greater => {
-                    out.push(b[j].clone());
-                    j += 1;
-                }
-                Ordering::Equal => {
-                    out.push(sum_similar(&a[i], &b[j]));
-                    i += 1;
-                    j += 1;
-                }
-            }
-        }
-        out.extend_from_slice(&a[i..]);
-        out.extend_from_slice(&b[j..]);
-        MixedAmount(out)
+        merged(self.0.iter().cloned(), rhs.0.iter().cloned())
+    }
+}
+
+/// The two sums merged, reusing the left one's amounts (maPlus).
+impl Add<&MixedAmount> for MixedAmount {
+    type Output = MixedAmount;
+
+    fn add(self, rhs: &MixedAmount) -> MixedAmount {
+        merged(self.0.into_iter(), rhs.0.iter().cloned())
+    }
+}
+
+/// The two sums merged, reusing their amounts (maPlus).
+impl Add for MixedAmount {
+    type Output = MixedAmount;
+
+    fn add(self, rhs: MixedAmount) -> MixedAmount {
+        merged(self.0.into_iter(), rhs.0.into_iter())
     }
 }
 
@@ -1141,13 +1160,13 @@ impl Neg for &MixedAmount {
 /// maSum.
 impl<'a> Sum<&'a MixedAmount> for MixedAmount {
     fn sum<I: Iterator<Item = &'a MixedAmount>>(iter: I) -> MixedAmount {
-        iter.fold(MixedAmount::null(), |total, m| &total + m)
+        iter.fold(MixedAmount::null(), |total, m| total + m)
     }
 }
 
 impl Sum<MixedAmount> for MixedAmount {
     fn sum<I: Iterator<Item = MixedAmount>>(iter: I) -> MixedAmount {
-        iter.fold(MixedAmount::null(), |total, m| &total + &m)
+        iter.fold(MixedAmount::null(), |total, m| total + m)
     }
 }
 

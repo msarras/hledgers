@@ -65,9 +65,27 @@ impl Add for &BalanceData {
     }
 }
 
+/// The sum, reusing the amounts of both.
+impl Add for BalanceData {
+    type Output = BalanceData;
+
+    fn add(self, other: BalanceData) -> BalanceData {
+        BalanceData {
+            excl: self.excl + other.excl,
+            incl: self.incl + other.incl,
+            postings: self.postings + other.postings,
+        }
+    }
+}
+
 impl AddAssign<&BalanceData> for BalanceData {
     fn add_assign(&mut self, other: &BalanceData) {
-        *self = &*self + other;
+        let this = std::mem::take(self);
+        *self = BalanceData {
+            excl: this.excl + &other.excl,
+            incl: this.incl + &other.incl,
+            postings: this.postings + other.postings,
+        };
     }
 }
 
@@ -159,7 +177,7 @@ impl PeriodData<BalanceData> {
         match day {
             None => self.pre += &b,
             Some(d) => match self.periods.get_mut(&d) {
-                Some(old) => *old = &b + old,
+                Some(old) => *old = b + std::mem::take(old),
                 None => {
                     self.periods.insert(d, b);
                 }
