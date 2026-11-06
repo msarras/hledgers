@@ -145,7 +145,9 @@ a separate process.
   that must pass; it grows with each milestone. Other cases are run and counted
   but do not fail the build.
 - `tests/shelltest-unsupported.txt` lists the cases whose command lines use
-  shell features the harness does not support, with the reason.
+  shell features the harness does not support, with the reason, and the cases
+  that can not pass by design (reason `by-design: ...`), which are not run and
+  are counted apart.
 - `HLEDGERS_TEST_FILTER=GLOB` runs only matching test files, eg `'cli/*.test'`.
 - `HLEDGERS_TEST_VERBOSE=1` shows the details of every failing case, not just
   gated ones.

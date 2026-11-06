@@ -10,7 +10,9 @@
 //!
 //! The run fails if a parse fails, a case matched by tests/shelltest-gate.txt
 //! fails, an unsupported case is missing from tests/shelltest-unsupported.txt, or
-//! that list or the gate list has an entry that matches nothing.
+//! that list or the gate list has an entry that matches nothing. Cases that list
+//! marks `by-design:` can not pass by design: they are not run, and are counted
+//! apart from the others.
 //! HLEDGERS_TEST_FILTER=GLOB selects files; HLEDGERS_TEST_VERBOSE=1 lists every passing case and shows every
 //! failure's details, not just gated ones; HLEDGERS_TEST_BIN=PATH runs another binary.
 
@@ -45,7 +47,12 @@ enum Outcome {
     Pass,
     Fail(String),
     Unsupported(String),
+    ByDesign,
 }
+
+/// The reason marking an entry of tests/shelltest-unsupported.txt as a case that
+/// can not pass by design.
+const BY_DESIGN: &str = "by-design:";
 
 pub fn main() -> ExitCode {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -98,6 +105,10 @@ pub fn main() -> ExitCode {
     let listed: BTreeMap<String, String> = read_list(&root.join("tests/shelltest-unsupported.txt"))
         .into_iter()
         .collect();
+    let by_design: BTreeSet<&str> = (listed.iter())
+        .filter(|(_, reason)| reason.starts_with(BY_DESIGN))
+        .map(|(id, _)| id.as_str())
+        .collect();
 
     let bin = tempfile::tempdir().expect("temporary directory");
     // HLEDGERS_TEST_BIN points the corpus at another binary, such as a Haskell
@@ -114,8 +125,11 @@ pub fn main() -> ExitCode {
         .num_threads(8)
         .build()
         .expect("thread pool");
-    let results: Vec<Vec<Outcome>> =
-        pool.install(|| files.par_iter().map(|f| run_file(f, &base_env)).collect());
+    let results: Vec<Vec<Outcome>> = pool.install(|| {
+        (files.par_iter())
+            .map(|f| run_file(f, &base_env, &by_design))
+            .collect()
+    });
 
     // Report.
     let mut out = String::new();
@@ -143,8 +157,10 @@ pub fn main() -> ExitCode {
             .collect::<Vec<_>>()
             .join(", ")
     );
-    let (mut passed, mut failed, mut unsupported, mut gated, mut gated_passed) = (0, 0, 0, 0, 0);
+    let (mut passed, mut failed, mut unsupported, mut designed) = (0, 0, 0, 0);
+    let (mut gated, mut gated_passed) = (0, 0);
     let mut seen_unsupported = BTreeSet::new();
+    let mut seen_by_design = BTreeSet::new();
     let mut gate_used = vec![false; gate.len()];
     let mut table = String::new();
     for (f, outcomes) in files.iter().zip(&results) {
@@ -155,7 +171,7 @@ pub fn main() -> ExitCode {
                 continue;
             }
         };
-        let (mut p, mut x, mut u) = (0, 0, 0);
+        let (mut p, mut x, mut u, mut d) = (0, 0, 0, 0);
         for (n, ((case, _), outcome)) in (1..).zip(cases.iter().zip(outcomes)) {
             let id = format!("{}:{n}", f.id);
             let mut in_gate = false;
@@ -201,21 +217,30 @@ pub fn main() -> ExitCode {
                         ));
                     }
                 }
+                Outcome::ByDesign => {
+                    d += 1;
+                    seen_by_design.insert(id.clone());
+                    let _ = writeln!(out, "BY DESIGN {id}: {}", case.command);
+                    if in_gate {
+                        problems.push(format!("gated case {id} is listed as by design"));
+                    }
+                }
             }
         }
-        let _ = writeln!(table, "  {:<44} {p:>5} {x:>5} {u:>5}", f.id);
-        (passed, failed, unsupported) = (passed + p, failed + x, unsupported + u);
+        let _ = writeln!(table, "  {:<44} {p:>5} {x:>5} {u:>5} {d:>6}", f.id);
+        (passed, failed) = (passed + p, failed + x);
+        (unsupported, designed) = (unsupported + u, designed + d);
     }
     let _ = writeln!(
         out,
-        "  {:<44} {:>5} {:>5} {:>5}",
-        "file", "pass", "fail", "unsup"
+        "  {:<44} {:>5} {:>5} {:>5} {:>6}",
+        "file", "pass", "fail", "unsup", "design"
     );
     out.push_str(&table);
     let _ = writeln!(
         out,
         "totals: {passed} passed, {failed} failed, {unsupported} unsupported \
-         ({} of them listed); gated cases: {gated_passed} of {gated} passed",
+         ({} of them listed), {designed} by design; gated cases: {gated_passed} of {gated} passed",
         seen_unsupported
             .iter()
             .filter(|id| listed.contains_key(*id))
@@ -225,15 +250,20 @@ pub fn main() -> ExitCode {
     // Stale list entries, checked only for the files that ran.
     let ran: BTreeSet<&str> = files.iter().map(|f| f.id.as_str()).collect();
     for (id, reason) in &listed {
-        if reason.is_empty() {
+        let (seen, what) = if by_design.contains(id.as_str()) {
+            (&seen_by_design, "a case")
+        } else {
+            (&seen_unsupported, "an unsupported case")
+        };
+        if reason.trim_start_matches(BY_DESIGN).trim().is_empty() {
             problems.push(format!(
                 "tests/shelltest-unsupported.txt gives no reason for {id}"
             ));
         }
         let file = id.rsplit_once(':').map_or(id.as_str(), |(f, _)| f);
-        if (ran.contains(file) || selected.is_none()) && !seen_unsupported.contains(id) {
+        if (ran.contains(file) || selected.is_none()) && !seen.contains(id) {
             problems.push(format!(
-                "tests/shelltest-unsupported.txt lists {id}, which is not an unsupported case"
+                "tests/shelltest-unsupported.txt lists {id}, which is not {what}"
             ));
         }
     }
@@ -314,7 +344,11 @@ fn base_env(bin: &Path) -> BTreeMap<String, String> {
     env
 }
 
-fn run_file(f: &TestFile, base_env: &BTreeMap<String, String>) -> Vec<Outcome> {
+fn run_file(
+    f: &TestFile,
+    base_env: &BTreeMap<String, String>,
+    by_design: &BTreeSet<&str>,
+) -> Vec<Outcome> {
     static PIDS: AtomicU64 = AtomicU64::new(0);
     let Ok(cases) = &f.cases else {
         return Vec::new();
@@ -324,9 +358,12 @@ fn run_file(f: &TestFile, base_env: &BTreeMap<String, String>) -> Vec<Outcome> {
     let mut env = base_env.clone();
     env.insert("HOME".into(), home.path().to_string_lossy().into_owned());
     env.insert("PWD".into(), dir.to_string_lossy().into_owned());
-    cases
-        .iter()
-        .map(|(case, shape)| {
+    (1..)
+        .zip(cases)
+        .map(|(n, (case, shape))| {
+            if by_design.contains(format!("{}:{n}", f.id).as_str()) {
+                return Outcome::ByDesign;
+            }
             if let Shape::Unsupported(why) = shape {
                 return Outcome::Unsupported(why.clone());
             }
