@@ -20,7 +20,7 @@ use super::common::{
     transaction_commentp,
 };
 use crate::account::{
-    AccountAlias, AccountType, account_name_apply_aliases, account_name_posting_type,
+    AccountAlias, AccountType, Realness, account_name_apply_aliases, account_name_posting_type,
     account_name_without_posting_type, join_account_names,
 };
 use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
@@ -1371,11 +1371,22 @@ impl<'a> JournalParser<'a, '_> {
         }
         let status = statusp(&mut self.c);
         self.c.skip_spaces();
-        let Ok(aliased) = self.aliased_account_namep(true) else {
+        let Ok(written) = accountnamep(&mut self.c, true) else {
             self.c = start;
             return Ok(None);
         };
-        let account = self.apply_parent_and_option_aliases(&aliased)?;
+        // with no aliases or parent account, a real posting's account is
+        // the name as written
+        let unchanged = self.st.aliases.is_empty()
+            && self.st.parent_accounts.is_empty()
+            && self.st.opt_aliases.as_ref().is_ok_and(Vec::is_empty)
+            && account_name_posting_type(&written) == Realness::Real;
+        let account = if unchanged {
+            written
+        } else {
+            let aliased = alias_or_die(&self.st.aliases, &written);
+            self.apply_parent_and_option_aliases(&aliased)?
+        };
         let realness = account_name_posting_type(&account);
         let account: Arc<str> = account_name_without_posting_type(&account).into();
         self.c.skip_spaces();
