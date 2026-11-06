@@ -18,6 +18,7 @@ serde_json = { version = "1.0.151", features = ["arbitrary_precision"] }
 terminal_size = "0.4.4"
 tz-rs = "0.7.3"
 unicode-width = { version = "0.2.3", default-features = false }
+xxhash-rust = { version = "0.8.19", default-features = false, features = ["xxh3"] }
 
 [dev-dependencies]
 num-bigint = "0.5.1"

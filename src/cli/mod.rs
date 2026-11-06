@@ -2,6 +2,7 @@
 
 pub mod addons;
 pub mod anchor;
+pub mod anon;
 pub mod args;
 pub mod chart;
 pub mod commands;
@@ -502,7 +503,7 @@ fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
     let iopts = journal_input_opts(opts, &paths)?;
     let mut j = crate::read::read_journal_files(&iopts, &paths)?;
-    journal_transform(opts, &mut j);
+    journal_transform(opts, &mut j)?;
     maybe_warn_unknown_valuation_commodity(opts, &j);
     Ok(j)
 }
@@ -513,7 +514,7 @@ fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.possible_journal_file_paths()?;
     let iopts = journal_input_opts(opts, &paths)?;
     let mut j = crate::read::read_possible_journal_files(&iopts, &paths)?;
-    journal_transform(opts, &mut j);
+    journal_transform(opts, &mut j)?;
     Ok(j)
 }
 
@@ -524,20 +525,30 @@ fn journal_input_opts(opts: &CliOpts, paths: &[String]) -> Result<crate::read::I
     iopts.journal_dir = paths.first().map(|p| {
         crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
     });
-    if iopts.anon {
-        return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());
-    }
     Ok(iopts)
 }
 
 /// The journal transformed for the report after reading (journalTransform):
-/// pivoted with --pivot, even an empty one (maybePivot), and its lot detail
-/// prepared.
-fn journal_transform(opts: &CliOpts, j: &mut Journal) {
+/// pivoted with --pivot, even an empty one (maybePivot); an error with
+/// --anon (maybeWarnAboutAnon); obfuscated with --obfuscate
+/// (maybeObfuscate); and its lot detail prepared.
+fn journal_transform(opts: &CliOpts, j: &mut Journal) -> Result<(), String> {
     if let Some(name) = opts.raw.string("pivot") {
         j.pivot(name);
     }
+    if opts.raw.bool("anon") {
+        return Err(
+            "--anon does not give privacy, and perhaps should be avoided;\n\
+                    please see https://github.com/hledgerorg/hledger/issues/2133 .\n\
+                    For now it has been renamed to --obfuscate (a hidden flag)."
+                .to_string(),
+        );
+    }
+    if opts.input.anon {
+        anon::anon_journal(j);
+    }
     prepare_lot_detail(opts, j);
+    Ok(())
 }
 
 /// Prepare the journal's lot detail for the report (journalPrepareLotDetail):
