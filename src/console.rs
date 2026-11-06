@@ -80,3 +80,34 @@ pub fn color_option(args: &[String]) -> Option<&str> {
     }
     found
 }
+
+/// The --color or --colour flag that ends the command line without a value,
+/// if any: upstream fails to find the colour option then (getOpt, with
+/// splitFlagsAndVals).
+pub fn color_flag_without_value(args: &[String]) -> Option<&'static str> {
+    let split: Vec<&str> = args
+        .iter()
+        .flat_map(|a| {
+            if a.starts_with("--") && a.contains('=') {
+                let (x, y) = a.split_once('=').unwrap_or((a, ""));
+                vec![x, y]
+            } else if a.len() > 2 && a.starts_with('-') && !a[1..].starts_with('-') {
+                let c = a.char_indices().nth(2).map_or(a.len(), |(i, _)| i);
+                vec![&a[..c], &a[c..]]
+            } else {
+                vec![a.as_str()]
+            }
+        })
+        .collect();
+    match split
+        .iter()
+        .rposition(|a| *a == "--color" || *a == "--colour")
+    {
+        Some(i) if i + 1 == split.len() => Some(if split[i] == "--color" {
+            "--color"
+        } else {
+            "--colour"
+        }),
+        _ => None,
+    }
+}

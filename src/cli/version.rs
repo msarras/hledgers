@@ -9,3 +9,7 @@ const VERSION: &str = concat!("1.99.6 (hledgers ", env!("CARGO_PKG_VERSION"), ")
 pub fn progname_and_version(progname: &str) -> String {
     format!("{progname} {VERSION}")
 }
+
+/// The version of the hledger package this program follows, as upstream's
+/// messages show it (packageversion).
+pub const PACKAGE_VERSION: &str = "1.99";
