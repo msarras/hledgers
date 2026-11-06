@@ -142,7 +142,7 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let mut r = Roi {
         ropts,
         today,
-        oracle: PriceOracle::new(ropts.infer_prices, j),
+        oracle: PriceOracle::new(ropts.infer_prices, ropts.debug, j),
         styles: styles_with_rounding(Rounding::Hard, &j.commodity_styles()),
         investment,
         pnl,

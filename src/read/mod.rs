@@ -16,9 +16,14 @@ pub mod rules;
 pub mod timeclock;
 pub mod timedot;
 
-use crate::amount::CommodityStyles;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::amount::render::show_amount;
+use crate::amount::{Amount, AmountStyle, CommodityStyles, Rounding, Sym};
 use crate::dates::{DateSpan, Day};
-use crate::model::Journal;
+use crate::decimal::Decimal;
+use crate::model::{Commodity, Journal};
 
 /// How transactions are balanced (BalancingOpts). The last five fields are
 /// set from the journal when it is finalised.
@@ -187,6 +192,11 @@ pub fn read_journal_files_and_latest_dates(
         journals.push(j);
         latest.extend(l);
     }
+    if crate::cli::debug_level(&iopts.prog_args) >= 1 {
+        for msg in commodity_style_conflicts(&journals) {
+            eprintln!("{msg}");
+        }
+    }
     let declared: Vec<_> = journals
         .iter()
         .map(|j| {
@@ -225,6 +235,51 @@ pub fn read_journal_files_and_latest_dates(
     }
     finalise::journal_number_and_tie_transactions(&mut j);
     Ok((j, latest))
+}
+
+/// Debug messages for the commodities that the files declare with different
+/// display styles. The last file's style is used, as for a repeated
+/// declaration within one file, so this is not a warning
+/// (commodityStyleConflicts).
+fn commodity_style_conflicts(journals: &[Journal]) -> Vec<String> {
+    let mut by_symbol: BTreeMap<&str, Vec<&Commodity>> = BTreeMap::new();
+    for j in journals {
+        for (sym, c) in j.declared_commodities.iter() {
+            if c.format.is_some() {
+                by_symbol.entry(sym).or_default().push(c);
+            }
+        }
+    }
+    let unrounded = |c: &Commodity| {
+        c.format.clone().map(|st| AmountStyle {
+            rounding: Rounding::No,
+            ..st
+        })
+    };
+    by_symbol
+        .into_iter()
+        .filter(|(_, cs)| cs.windows(2).any(|w| unrounded(w[0]) != unrounded(w[1])))
+        .map(|(sym, cs)| {
+            let mut lines = vec![format!(
+                "commodity {sym} is declared with different display styles; using the last:"
+            )];
+            for c in cs {
+                let a = Amount {
+                    commodity: Sym::from(sym),
+                    quantity: Decimal::from_i64(1000),
+                    style: Arc::new(c.format.clone().unwrap_or_default()),
+                    ..Amount::null()
+                };
+                lines.push(format!(
+                    "  {}:{}: {}",
+                    c.pos.file,
+                    c.pos.line,
+                    show_amount(&a)
+                ));
+            }
+            lines.join("\n")
+        })
+        .collect()
 }
 
 /// Like [`read_journal_files`], but a first file that does not exist is an

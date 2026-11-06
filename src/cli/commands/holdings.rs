@@ -727,7 +727,7 @@ fn flat_report(
     let mut flat = Flat {
         report_date,
         styles,
-        oracle: PriceOracle::new(ropts.infer_prices, j),
+        oracle: PriceOracle::new(ropts.infer_prices, ropts.debug, j),
         valuing: ropts.value.is_some(),
         valuation_date,
         target,

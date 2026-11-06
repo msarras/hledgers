@@ -3,6 +3,7 @@
 //! market prices declared by P directives, inferred from costs, or given
 //! by commodity aliases.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::amount::{Amount, AmountCost, CommodityStyles, MixedAmount, Sym};
@@ -165,12 +166,19 @@ pub struct PriceOracle {
     /// The aliases which different file trees declared differently, with
     /// their declarations.
     ambiguous_aliases: BTreeMap<Sym, Vec<PriceDirective>>,
+    /// At --debug=2 or more, if there are aliases: the usable alias rates,
+    /// to show when they are tried.
+    debug_alias_rates: Option<Vec<PriceDirective>>,
+    /// The lookups which have tried the alias rates, so that each is shown
+    /// once (upstream's oracle is memoised).
+    alias_tries: RefCell<BTreeSet<(Day, Sym, Sym)>>,
 }
 
 impl PriceOracle {
     /// The price oracle of a journal, using prices inferred from its costs
-    /// if `infer` is true (journalPriceOracle).
-    pub fn new(infer: bool, j: &Journal) -> PriceOracle {
+    /// if `infer` is true, showing debug output at this --debug level
+    /// (journalPriceOracle).
+    pub fn new(infer: bool, debug: usize, j: &Journal) -> PriceOracle {
         let declared: Vec<MarketPrice> = j
             .price_directives
             .iter()
@@ -185,12 +193,13 @@ impl PriceOracle {
         // the aliases declared differently, as an alias of a different
         // commodity or with a different quantity, can not be used
         // (journalAliasPriceDirectivesChecked)
+        let alias_pds = journal_alias_price_directives(j);
         let mut by_alias: BTreeMap<Sym, Vec<PriceDirective>> = BTreeMap::new();
-        for pd in journal_alias_price_directives(j) {
+        for pd in &alias_pds {
             by_alias
                 .entry(pd.amount.commodity.clone())
                 .or_default()
-                .push(pd);
+                .push(pd.clone());
         }
         let (ambiguous_aliases, usable): (BTreeMap<_, _>, BTreeMap<_, _>) =
             by_alias.into_iter().partition(|(_, pds)| pds.len() > 1);
@@ -201,12 +210,20 @@ impl PriceOracle {
             .collect();
         let forward_with_aliases =
             (!alias_prices.is_empty()).then(|| with_alias_prices(&forward, &alias_prices));
+        let debug_alias_rates =
+            (debug >= 2 && !(alias_prices.is_empty() && ambiguous_aliases.is_empty())).then(|| {
+                (alias_pds.into_iter())
+                    .filter(|pd| !ambiguous_aliases.contains_key(&pd.amount.commodity))
+                    .collect()
+            });
         PriceOracle {
             forward,
             forward_with_aliases,
             declared_default: build_default_valuation_index(&declared),
             inferred_default: build_default_valuation_index(inferred),
             ambiguous_aliases,
+            debug_alias_rates,
+            alias_tries: RefCell::default(),
         }
     }
 
@@ -235,6 +252,33 @@ impl PriceOracle {
             .find_map(|c| self.ambiguous_aliases.get(c))
         {
             return Err(ambiguous_alias_error(pds));
+        }
+        // at --debug=2 or more, show when alias rates are tried, and where
+        // they were declared
+        if let Some(rates) = &self.debug_alias_rates
+            && self
+                .alias_tries
+                .borrow_mut()
+                .insert((d, from.clone(), to.clone()))
+        {
+            let rates: Vec<String> = (rates.iter())
+                .map(|pd| {
+                    format!(
+                        " {}>{} {}  (alias declared at {}:{})",
+                        pd.commodity,
+                        pd.amount.commodity,
+                        pd.amount.quantity,
+                        pd.pos.file,
+                        pd.pos.line
+                    )
+                })
+                .collect();
+            eprintln!(
+                "no market price found from {} to {} on {d}, trying commodity alias rates:\n{}",
+                quote_if_needed(from),
+                quote_if_needed(to),
+                rates.join("\n")
+            );
         }
         Ok(self
             .forward_with_aliases
@@ -548,7 +592,7 @@ mod tests {
                 .collect(),
             ..Journal::default()
         };
-        let mut o = PriceOracle::new(false, &j);
+        let mut o = PriceOracle::new(false, 0, &j);
         if !aliases.is_empty() {
             o.forward_with_aliases = Some(with_alias_prices(&o.forward, aliases));
         }
