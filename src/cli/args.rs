@@ -1214,6 +1214,13 @@ mod tests {
 
     #[test]
     fn unsupported_flags_and_cli_specific_flags_are_dropped() {
+        // upstream's doctests
+        for args in [
+            &["--debug", "1", "-f", "file"][..],
+            &["--debug", "-f", "file"][..],
+        ] {
+            assert!(drop_unsupported_opts(&CONF_FLAGS_MODE, &strings(args)).is_empty());
+        }
         let args = strings(&["-f", "x", "--conf", "c", "--debug", "2", "-n", "--pretty"]);
         assert_eq!(
             drop_unsupported_opts(&CONF_FLAGS_MODE, &args),
