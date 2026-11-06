@@ -790,8 +790,7 @@ fn trim_end(mut line: StyledLine) -> StyledLine {
     line
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::write::chart::ChartLabel;
 
@@ -813,8 +812,8 @@ mod tests {
     }
 
     // tests_Hledger_Write_Chart_Text.
-    #[test]
-    fn trimming() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn trimming() {
         assert_eq!(trim_end(vec![plain("a "), plain("  ")]), vec![plain("a")]);
         assert!(trim_end(Vec::new()).is_empty());
     }
@@ -850,8 +849,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn single_series_scaled_to_the_width() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn single_series_scaled_to_the_width() {
         let opts = TextChartOpts {
             width: 20,
             unicode: true,
@@ -862,8 +861,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mixed_signs_grow_from_an_axis() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn mixed_signs_grow_from_an_axis() {
         let opts = TextChartOpts {
             width: 21,
             unicode: false,

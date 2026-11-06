@@ -649,8 +649,7 @@ fn entry_from_timeclock_in_out(
     })
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn day(y: i64, m: u32, d: u32) -> Day {
@@ -685,8 +684,8 @@ mod tests {
     }
 
     /// tests_Timeclock: "timeclockToTransactions tests", with a fixed now.
-    #[test]
-    fn timeclock_to_transactions_tests() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn timeclock_to_transactions_tests() {
         let today = day(2024, 3, 15);
         let now = LocalTime {
             day: today,

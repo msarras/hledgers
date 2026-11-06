@@ -2364,8 +2364,7 @@ pub fn read_int(s: &str) -> Option<i64> {
     Some(n as i64)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::regex::to_regex;
 
@@ -2404,8 +2403,8 @@ mod tests {
     }
 
     // tests_RulesReader: parseCsvRules, rulesp
-    #[test]
-    fn rules_parsing() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn rules_parsing() {
         let skip = |r: CsvRules| r.directives;
         assert!(parse("").unwrap().directives.is_empty());
         for text in ["skip\n# \n#\n", "skip\n\n  \n", "skip"] {
@@ -2427,8 +2426,8 @@ mod tests {
 
     // tests_RulesReader: conditionalblockp, csvfieldreferencep, recordmatcherp,
     // fieldmatcherp, regexp, "Combine multiple matchers on the same line"
-    #[test]
-    fn matchers_and_blocks() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn matchers_and_blocks() {
         let lines = Lines::new("", "");
         let block = |s: &str| conditionalblockp(&mut Parser::new(s), &lines);
         assert_eq!(
@@ -2520,8 +2519,8 @@ mod tests {
     }
 
     // tests_RulesReader: hledgerField
-    #[test]
-    fn field_templates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn field_templates() {
         use MatcherPrefix::*;
         let one = [("csvdate", 1)];
         let two = [("csvdate", 1), ("description", 2)];
@@ -2580,8 +2579,8 @@ mod tests {
     }
 
     // tests_RulesReader: hledgerFieldValue (scoped match groups, #2158)
-    #[test]
-    fn field_values_with_match_groups() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn field_values_with_match_groups() {
         use MatcherPrefix::*;
         let r = rules_with(
             &[("date", 1), ("description", 2)],
@@ -2609,8 +2608,8 @@ mod tests {
     }
 
     // the doctests of isAmountExpression and simplifySign
-    #[test]
-    fn amount_texts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amount_texts() {
         let inputs = [
             "5",
             "-5",
@@ -2680,10 +2679,12 @@ mod tests {
         assert_eq!(max_backref("\\1 \\\\3x\\12"), 12);
     }
 
+    #[cfg(test)]
     fn big(n: i64) -> IBig {
         IBig::from(n)
     }
 
+    #[cfg(test)]
     fn allocated(units: i64, weights: &[i64]) -> Vec<i64> {
         let ws: Vec<IBig> = weights.iter().map(|&w| big(w)).collect();
         allocate(&big(units), &ws)

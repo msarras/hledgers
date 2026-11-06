@@ -365,13 +365,12 @@ pub fn set_account_anchor<T>(
     set_account_anchor_with(&LinkOpts::default(), base, query, account, cell)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // The doctests of composeAnchor and composeAnchorWith.
-    #[test]
-    fn anchors() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn anchors() {
         let q = ["date:2024".to_string()];
         assert_eq!(compose_anchor_with(&[], None, &q), "");
         assert_eq!(

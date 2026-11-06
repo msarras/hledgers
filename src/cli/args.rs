@@ -1175,8 +1175,7 @@ pub fn highlight_help(help: &str) -> String {
     out
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn strings(args: &[&str]) -> Vec<String> {
@@ -1212,8 +1211,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unsupported_flags_and_cli_specific_flags_are_dropped() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn unsupported_flags_and_cli_specific_flags_are_dropped() {
         // upstream's doctests
         for args in [
             &["--debug", "1", "-f", "file"][..],

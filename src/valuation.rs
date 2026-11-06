@@ -557,8 +557,7 @@ pub fn journal_to_cost(op: ConversionOp, j: &mut Journal) {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn day(y: i64, m: u32, d: u32) -> Day {
@@ -609,8 +608,8 @@ mod tests {
         Some((c.to_string(), r.parse().unwrap()))
     }
 
-    #[test]
-    fn price_lookup() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn price_lookup() {
         let ps1 = [
             price(2000, 1, 1, "A", "10", "B"),
             price(2000, 1, 1, "B", "10", "C"),
@@ -653,8 +652,8 @@ mod tests {
         assert_eq!(lookup(&o, day(2000, 1, 1), "D", None), None);
     }
 
-    #[test]
-    fn market_price_reversed() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn market_price_reversed() {
         let p = |rate: &str| MarketPrice {
             date: null_date(),
             from: "".into(),

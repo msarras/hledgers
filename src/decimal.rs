@@ -425,8 +425,7 @@ impl FromStr for Decimal {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A decimal as the literal is written, keeping its places.
@@ -512,8 +511,8 @@ mod tests {
 
     // Amount.hs tests_Amount "multiplyQuantities": the same result and
     // representation as Data.Decimal's `*`, which is the only `*` here.
-    #[test]
-    fn multiplication_is_exact_and_normalized() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn multiplication_is_exact_and_normalized() {
         assert_eq!(rep(&(lit("0.71") * lit("3"))), ("213".into(), 2));
         assert_eq!(rep(&(lit("1.50") * lit("-2.0"))), ("-3".into(), 0));
         assert_eq!(rep(&(lit("0") * lit("100"))), ("0".into(), 0));

@@ -589,14 +589,16 @@ pub fn show_mixed_amounts_distinctly(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::super::{AmountStyle, eur, gbp, hrs, num, per, usd};
+pub(crate) mod tests {
+    use super::super::{eur, gbp, usd};
     use super::*;
-    use crate::dates::Day;
     use crate::decimal::Decimal;
+    #[cfg(test)]
+    use {
+        super::super::{AmountStyle, hrs, num, per},
+        crate::dates::Day,
+        std::sync::Arc,
+    };
 
     fn d(s: &str) -> Decimal {
         s.parse::<Decimal>().unwrap().normalize()
@@ -606,6 +608,7 @@ mod tests {
         MixedAmount::from_amounts(amounts)
     }
 
+    #[cfg(test)]
     fn styled(q: &str, style: AmountStyle) -> Amount {
         Amount {
             commodity: Sym::from("X"),
@@ -614,6 +617,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn groups(sep: char, sizes: &[u8]) -> Option<DigitGroups> {
         Some(DigitGroups {
             sep,
@@ -621,6 +625,7 @@ mod tests {
         })
     }
 
+    #[cfg(test)]
     fn style(precision: u8) -> AmountStyle {
         AmountStyle {
             precision: Precision::Fixed(precision),
@@ -629,14 +634,14 @@ mod tests {
     }
 
     // tests_Amount "showAmount".
-    #[test]
-    fn show_amount_of_zero() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn show_amount_of_zero() {
         assert_eq!(show_amount(&(&usd(d("0")) + &gbp(d("0")))), "0");
     }
 
     // tests_Amount "showMixedAmount".
-    #[test]
-    fn show_mixed_amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn show_mixed_amounts() {
         assert_eq!(
             show_mixed_amount(&MixedAmount::from_amount(usd(d("1")))),
             "$1.00"
@@ -654,8 +659,8 @@ mod tests {
     }
 
     // tests_Amount "showMixedAmountWithoutCost".
-    #[test]
-    fn show_mixed_amount_without_cost() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn show_mixed_amount_without_cost() {
         let a = usd(d("1")).at(eur(d("2")));
         let fmt = AmountFormat::NO_COST;
         assert_eq!(
@@ -665,6 +670,7 @@ mod tests {
         assert_eq!(show_mixed_amount_b(&fmt, &mixed([a.clone(), -a])).s, "0");
     }
 
+    #[cfg(test)]
     /// All thirteen fields, in upstream's order.
     #[allow(clippy::too_many_arguments)]
     fn format(
@@ -944,6 +950,7 @@ mod tests {
         );
     }
 
+    #[cfg(test)]
     fn three() -> MixedAmount {
         mixed([usd(d("1")), eur(d("2")), gbp(d("3"))])
     }

@@ -277,8 +277,7 @@ fn summarise_posting_accounts(ps: &[&Posting]) -> Vec<AccountName> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::account::AccountType;
     use crate::amount::render::show_mixed_amount;
@@ -292,8 +291,8 @@ mod tests {
 
     // tests_AccountTransactionsReport. The sample journal's amounts are
     // written without decimals here, so show as $1 rather than $1.00.
-    #[test]
-    fn account_transactions_report_with_start() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn account_transactions_report_with_start() {
         let j = sample_journal();
         let checking = Query::Acct(crate::regex::to_regex("assets:bank:checking").unwrap());
         let from_june = DateSpan::exact(Some(day(2008, 6, 1)), None);
@@ -330,8 +329,8 @@ mod tests {
         assert_eq!(show_mixed_amount(&start), "$1");
     }
 
-    #[test]
-    fn transaction_register_date_with_types() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn transaction_register_date_with_types() {
         let one = |n: i64| usd(Decimal::from_i64(n));
         let t = Transaction {
             date: day(2008, 1, 1),

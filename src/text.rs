@@ -424,8 +424,7 @@ pub fn words_quoted(s: &str) -> Option<Vec<String>> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // Values and results from GHC 9.10's Text.Printf.
@@ -523,8 +522,8 @@ mod tests {
     }
 
     // tests_Text "fitText", and more.
-    #[test]
-    fn fitting_text() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn fitting_text() {
         assert_eq!(fit_text(None, Some(-2), true, true, ""), "");
         assert_eq!(fit_text(None, Some(0), true, true, ""), "");
         assert_eq!(fit_text(None, Some(6), true, true, "Test Text"), "Test..");
@@ -558,8 +557,8 @@ mod tests {
     }
 
     // tests_Text "quoteIfSpaced".
-    #[test]
-    fn quoting() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn quoting() {
         assert_eq!(quote_if_spaced("a'a"), "a'a");
         assert_eq!(quote_if_spaced("a\"a"), "a\"a");
         assert_eq!(quote_if_spaced("a a"), "\"a a\"");
@@ -594,8 +593,8 @@ mod tests {
     }
 
     // The doctests of words' and wordsmay.
-    #[test]
-    fn quoted_words() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn quoted_words() {
         let words = |s: &str| words_quoted(s).unwrap();
         assert_eq!(words("a b"), ["a", "b"]);
         assert_eq!(words("'a b' c"), ["a b", "c"]);

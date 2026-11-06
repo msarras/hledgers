@@ -349,8 +349,7 @@ fn postings_report_items<'j>(
     items
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::regex::to_regex;
     use crate::reports::periodic::tests::sample_journal;
@@ -368,8 +367,8 @@ mod tests {
     }
 
     // tests_PostingsReport
-    #[test]
-    fn postings_report_counts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn postings_report_counts() {
         let j = sample_journal();
         let count = |opts: ReportOpts, q: Query, j: &Journal| {
             postings_report(&spec(opts, q), j).unwrap().len()
@@ -400,8 +399,8 @@ mod tests {
         assert_eq!(count(def(), acct("assets:bank:checking"), &j), 5);
     }
 
-    #[test]
-    fn summarise_nothing() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn summarise_nothing() {
         assert!(
             summarise_postings_by_interval(false, &DepthSpec::default(), false, &[], vec![])
                 .is_empty()

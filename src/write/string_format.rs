@@ -197,8 +197,7 @@ fn is_print(c: char) -> bool {
     PRINT.is_match(c.encode_utf8(&mut [0; 4]))
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::text::format_text;
 
@@ -212,8 +211,8 @@ mod tests {
     }
 
     // tests_StringFormat "formatStringHelper".
-    #[test]
-    fn formatting_fields() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn formatting_fields() {
         let t = |left, min, max, s: &str| format_text(left, min, max, s);
         assert_eq!(t(false, None, None, " "), " ");
         assert_eq!(t(false, None, None, "description"), "description");
@@ -235,8 +234,8 @@ mod tests {
     }
 
     // tests_StringFormat "parseStringFormat".
-    #[test]
-    fn parsing_formats() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn parsing_formats() {
         use Field::*;
         use StringFormat::BottomAligned as B;
         let gives = |s: &str, f: StringFormat| assert_eq!(parse_string_format(s), Ok(f), "{s}");

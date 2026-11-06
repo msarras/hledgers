@@ -990,7 +990,6 @@ fn perdivide(a: &MixedAmount, b: &MixedAmount) -> Result<MixedAmount, String> {
     Ok(MixedAmount::from_amount(per(q)))
 }
 
-#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::amount::usd;
@@ -1051,8 +1050,8 @@ pub(crate) mod tests {
     }
 
     // tests_BalanceReport.
-    #[test]
-    fn balance_reports() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn balance_reports() {
         let j = sample_journal();
         let gives = |s: ReportSpec, j: &Journal, rows: Vec<_>, total: MixedAmount| {
             let r = balance_report(&s, j).unwrap();
@@ -1168,8 +1167,8 @@ pub(crate) mod tests {
     }
 
     // tests_MultiBalanceReport.
-    #[test]
-    fn multi_balance_reports() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn multi_balance_reports() {
         let r = multi_balance_report(
             &spec(ReportOpts::default(), Query::Any),
             &Journal::default(),

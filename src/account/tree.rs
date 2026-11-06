@@ -484,8 +484,7 @@ impl AccountTree<BalanceData> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::usd;
     use crate::decimal::Decimal;
@@ -507,16 +506,16 @@ mod tests {
     }
 
     // tests_BalanceData.
-    #[test]
-    fn balance_data_ops() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn balance_data_ops() {
         let (a, b) = (bd(1, 2, 5), bd(3, 4, 0));
         assert_eq!(a.op(&b, |x, y| x + y), bd(4, 6, 5));
         assert_eq!(a.op(&b, |x, y| x - y), bd(-2, -2, 5));
     }
 
     // tests_PeriodData.
-    #[test]
-    fn period_data_semigroup() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn period_data_semigroup() {
         let list = |h: i64, x: i64, y: i64| {
             PeriodData::from_list(
                 bd(h, 0, 0),
@@ -537,8 +536,8 @@ mod tests {
     }
 
     // tests_Account.
-    #[test]
-    fn account_from_no_postings() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn account_from_no_postings() {
         let t = AccountTree::from_postings([]);
         let empty: AccountTree<BalanceData> =
             AccountTree::from_names("root", PeriodData::default(), [], |_| PeriodData::default());

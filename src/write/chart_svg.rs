@@ -2025,8 +2025,7 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
     lines.into_iter().map(|l| l + "\n").collect()
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -2037,9 +2036,9 @@ mod tests {
     }
 
     // tests_Hledger_Write_Chart_Svg's pure cases.
-    #[test]
+    #[cfg_attr(test, test)]
     #[allow(clippy::approx_constant)]
-    fn nums() {
+    pub(crate) fn nums() {
         let shown: Vec<String> = [0.0, -0.04, 1.0, 1.26, -3.14159, 760.0]
             .iter()
             .map(|x| num(*x))
@@ -2047,8 +2046,8 @@ mod tests {
         assert_eq!(shown, ["0", "0", "1", "1.3", "-3.1", "760"]);
     }
 
-    #[test]
-    fn nice_scales() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn nice_scales() {
         assert_eq!(
             nice_scale(5, 0.0, 87.0),
             (0.0, 100.0, vec![0.0, 20.0, 40.0, 60.0, 80.0, 100.0], 0)
@@ -2090,8 +2089,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn plot_interval_counts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn plot_interval_counts() {
         let counts: Vec<usize> = [260.0, 150.0, 100.0, 40.0]
             .iter()
             .map(|h| plot_intervals(*h))
@@ -2099,8 +2098,8 @@ mod tests {
         assert_eq!(counts, [5, 3, 2, 2]);
     }
 
-    #[test]
-    fn bar_paths() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn bar_paths() {
         assert_eq!(
             bar_path(true, 10.0, 100.0, 20.0, -50.0, true),
             "M 10 100 V 53 Q 10 50 13 50 H 27 Q 30 50 30 53 V 100 Z"
@@ -2174,22 +2173,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn long_line_tooltips() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn long_line_tooltips() {
         let hits = chart_as_svg(true, &line_chart((1..=1000).collect()))
             .matches("class=\"hit\"")
             .count();
         assert!((150..=220).contains(&hits), "tooltip targets: {hits}");
     }
 
-    #[test]
-    fn line_by_date_tooltips_where_it_changes() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn line_by_date_tooltips_where_it_changes() {
         let svg = chart_as_svg(true, &line_chart(vec![1, 1, 1, 2, 2, 2]));
         assert_eq!(svg.matches("class=\"hit\"").count(), 2);
     }
 
-    #[test]
-    fn net_total_marks() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn net_total_marks() {
         let marks = |n| {
             chart_as_svg(true, &net_chart(Mark::Marker, n))
                 .matches("class=\"mark total\"")
@@ -2203,16 +2202,16 @@ mod tests {
         assert!(!svg.contains("line total"));
     }
 
-    #[test]
-    fn one_point_line_is_a_dash() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn one_point_line_is_a_dash() {
         let svg = chart_as_svg(true, &line_chart(vec![5]));
         let points = svg.split("points=\"").nth(1).unwrap();
         let points = &points[..points.find('"').unwrap()];
         assert_eq!(points.split_whitespace().count(), 2);
     }
 
-    #[test]
-    fn flat_runs() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn flat_runs() {
         assert_eq!(
             drop_flat(vec![
                 (0.0, 1.0),

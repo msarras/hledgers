@@ -512,16 +512,15 @@ fn compare_strings(s1: &[char], s2: &[char]) -> f64 {
     2.0 * common as f64 / (p1.len() + p2.len()) as f64
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::cli::args::RawOpts;
     use crate::dates::Day;
     use crate::reports::periodic::tests::read;
 
     // tests_Register
-    #[test]
-    fn unicode_in_register_layout() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn unicode_in_register_layout() {
         let j = read("2009/01/01 * медвежья шкура\n  расходы:покупки  100\n  актив:наличные\n");
         let today = Day::from_ymd(2026, 1, 1).unwrap();
         let opts = CliOpts::from_raw_opts(RawOpts::default(), today, false).unwrap();

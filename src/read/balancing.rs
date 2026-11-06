@@ -1125,8 +1125,7 @@ impl Balancer {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::{
         AmountStyle, DigitGroups, Side, commodity_styles_from_amounts, eur, num, usd,
@@ -1163,8 +1162,8 @@ mod tests {
     }
 
     // tests_Balancing "transactionInferBalancingAmount".
-    #[test]
-    fn inferring_balancing_amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn inferring_balancing_amounts() {
         let none = CommodityStyles::new();
         let infer = |ps| infer_balancing_amount(&none, txn(ps)).unwrap().0.postings;
         assert_eq!(infer(vec![]), vec![]);
@@ -1187,8 +1186,8 @@ mod tests {
     }
 
     // tests_Balancing "balanceSingleTransaction".
-    #[test]
-    fn balancing_single_transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn balancing_single_transactions() {
         let bopts = BalancingOpts::default();
         let balance = |ps| balance_single_transaction(&bopts, txn(ps));
         assert!(balance(vec![post("a", usd(d("1"))), post("b", usd(d("1")))]).is_err());
@@ -1217,8 +1216,8 @@ mod tests {
     }
 
     // tests_Balancing "isTransactionBalanced".
-    #[test]
-    fn checking_balance() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn checking_balance() {
         let virt = |a: &str, x: &str, r: Realness| Posting {
             realness: r,
             ..post(a, usd(d(x)))
@@ -1252,8 +1251,8 @@ mod tests {
     }
 
     // tests_Balancing "commodityStylesFromAmounts" 1091a, 1091b.
-    #[test]
-    fn commodity_styles_1091() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn commodity_styles_1091() {
         let style = |groups: Option<DigitGroups>, mark: char, precision: u8| AmountStyle {
             side: Side::L,
             spaced: false,
@@ -1388,8 +1387,8 @@ mod tests {
     }
 
     // tests_Balancing "journalBalanceTransactions".
-    #[test]
-    fn balancing_journals() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn balancing_journals() {
         let postings = |ts: &[Transaction]| -> Vec<Posting> {
             ts.iter().flat_map(|t| t.postings.clone()).collect()
         };
@@ -1480,8 +1479,8 @@ mod tests {
     }
 
     // tests_Balancing "transactionCheckAssertions".
-    #[test]
-    fn checking_a_transaction_s_assertions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn checking_a_transaction_s_assertions() {
         let bopts = BalancingOpts::default();
         let v = |a: &str, x: Amount| posting(a, true, Some(x), None);
         let check = |ts: Vec<Transaction>, t: Transaction| {

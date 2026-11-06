@@ -184,15 +184,14 @@ pub fn border_classes<T>(cell: &Cell<T>) -> Vec<String> {
     .collect()
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::Amount;
     use crate::write::spreadsheet::Border;
 
     // tests_Hledger_Write_Html.
-    #[test]
-    fn format_cells() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn format_cells() {
         let str_ = |s: &str| Cell::new(s.to_string());
         assert_eq!(format_cell(&str_("a")), "<td>a</td>");
         assert_eq!(
@@ -280,8 +279,8 @@ mod tests {
         assert_eq!(format_cell(&spanned(Span::Covered)), "");
     }
 
-    #[test]
-    fn rows_and_tables() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn rows_and_tables() {
         assert_eq!(
             format_row(&[Cell::new("a".to_string()), Cell::new("b".to_string())]),
             "<tr><td>a</td><td>b</td></tr>\n"

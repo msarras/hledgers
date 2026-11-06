@@ -1151,8 +1151,7 @@ impl Sum<MixedAmount> for MixedAmount {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use Precision::Fixed;
 
@@ -1165,13 +1164,14 @@ mod tests {
         MixedAmount::from_amounts(amounts)
     }
 
+    #[cfg(test)]
     fn sym(s: &str) -> Sym {
         Sym::from(s)
     }
 
     // tests_Amount "amountCost".
-    #[test]
-    fn amount_cost() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amount_cost() {
         assert_eq!(eur(d("1")).to_cost(), eur(d("1")));
         assert_eq!(eur(d("2")).at(usd(d("2"))).to_cost(), usd(d("4")));
         assert_eq!(eur(d("1")).at_total(usd(d("2"))).to_cost(), usd(d("2")));
@@ -1179,8 +1179,8 @@ mod tests {
     }
 
     // tests_Amount "amountLooksZero".
-    #[test]
-    fn amount_looks_zero() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amount_looks_zero() {
         assert!(Amount::null().looks_zero());
         assert!(usd(d("0")).looks_zero());
     }
@@ -1206,8 +1206,8 @@ mod tests {
     }
 
     // tests_Amount "negating amounts".
-    #[test]
-    fn negating_amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn negating_amounts() {
         assert_eq!(
             -usd(d("1")),
             Amount {
@@ -1229,8 +1229,8 @@ mod tests {
     }
 
     // tests_Amount "adding amounts without costs".
-    #[test]
-    fn adding_amounts_without_costs() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn adding_amounts_without_costs() {
         assert_eq!(&usd(d("1.23")) + &usd(d("-1.23")), usd(d("0")));
         assert_eq!(&usd(d("-1.23")) + &usd(d("-1.23")), usd(d("-2.46")));
         let sum = |amounts: &[Amount]| amounts.iter().fold(num(Decimal::ZERO), |t, a| &t + a);
@@ -1384,6 +1384,7 @@ mod tests {
         assert!(Amount::missing().is_missing() && !Amount::null().is_missing());
     }
 
+    #[cfg(test)]
     fn style(precision: Precision, rounding: Rounding) -> Arc<AmountStyle> {
         Arc::new(AmountStyle {
             spaced: true,
@@ -1397,6 +1398,7 @@ mod tests {
         })
     }
 
+    #[cfg(test)]
     /// The precisions of an amount (with old precision `old` and quantity
     /// `q`) and of its unit cost (precision `old` too), after styling both
     /// commodities with `new` and `rounding`.
@@ -1539,8 +1541,8 @@ mod tests {
     }
 
     // tests_Amount "comparing mixed amounts compares based on quantities".
-    #[test]
-    fn comparing_mixed_amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn comparing_mixed_amounts() {
         let usdpos = mixed([usd(d("1"))]);
         let usdneg = mixed([usd(d("-1"))]);
         let eurneg = mixed([eur(d("-12"))]);
@@ -1555,8 +1557,8 @@ mod tests {
 
     // tests_Amount "adding mixed amounts to zero, the commodity and amount
     // style are preserved".
-    #[test]
-    fn adding_mixed_amounts_to_zero() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn adding_mixed_amounts_to_zero() {
         let total: MixedAmount = [
             usd(d("1.25")),
             usd(d("-1")).with_precision(Fixed(3)),
@@ -1573,8 +1575,8 @@ mod tests {
     }
 
     // tests_Amount "adding mixed amounts with total costs".
-    #[test]
-    fn adding_mixed_amounts_with_total_costs() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn adding_mixed_amounts_with_total_costs() {
         let total: MixedAmount = [
             usd(d("1")).at_total(eur(d("1"))),
             usd(d("-2")).at_total(eur(d("1"))),
@@ -1590,8 +1592,8 @@ mod tests {
     }
 
     // tests_Amount "amounts".
-    #[test]
-    fn amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amounts() {
         // A missing amount overrides any other amounts.
         assert_eq!(
             mixed([usd(d("1")), Amount::missing()]).amounts(),
@@ -1647,8 +1649,8 @@ mod tests {
     }
 
     // tests_Amount "mixedAmountStripCosts".
-    #[test]
-    fn mixed_amount_strip_costs() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn mixed_amount_strip_costs() {
         assert_eq!(
             MixedAmount::null().strip_costs().amounts(),
             [Amount::null()]

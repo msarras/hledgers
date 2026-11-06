@@ -1851,8 +1851,7 @@ fn glob_tokens_match(tokens: &[GlobToken], name: &str) -> bool {
     go(tokens, &chars)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::{num, usd};
     use crate::dates::{DateSpan, EfDay, Interval};
@@ -1907,15 +1906,15 @@ commodity kt  ; alias: 10 users
         );
     }
 
-    #[test]
-    fn account_names() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn account_names() {
         let t = txn("2000-01-01\n  a:b:c  1\n  a b:c\n");
         assert_eq!(&*t.postings[0].account, "a:b:c");
         assert_eq!(&*t.postings[1].account, "a b:c");
     }
 
-    #[test]
-    fn periodic_transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn periodic_transactions() {
         let pos = |l| {
             (
                 SourcePos::new(&Arc::from(""), 1, 1),
@@ -1958,8 +1957,8 @@ commodity kt  ; alias: 10 users
         );
     }
 
-    #[test]
-    fn postings() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn postings() {
         let p = posting("  expenses:food:dining  $10.00   ; a: a a \n   ; b: b b \n").unwrap();
         assert_eq!(&*p.account, "expenses:food:dining");
         assert_eq!(
@@ -2008,8 +2007,8 @@ commodity kt  ; alias: 10 users
         assert!(e.contains("unexpected '{'"), "{e}");
     }
 
-    #[test]
-    fn transaction_modifiers() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn transaction_modifiers() {
         let m = parse("= (some value expr)\n some:postings  1.\n")
             .unwrap()
             .txn_modifiers
@@ -2020,8 +2019,8 @@ commodity kt  ; alias: 10 users
         assert!(!m.rules[0].is_multiplier);
     }
 
-    #[test]
-    fn transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn transactions() {
         let t = txn("2015/1/1\n");
         assert_eq!((t.date, t.postings.len()), (day(2015, 1, 1), 0));
         let t = txn(concat!(
@@ -2065,8 +2064,8 @@ commodity kt  ; alias: 10 users
         assert_eq!(t.postings.len(), 2);
     }
 
-    #[test]
-    fn directives() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn directives() {
         assert!(parse("!account a\n").is_ok());
         assert!(parse("!D 1.0\n").is_ok());
         assert!(parse("account a:b  ; a comment\n").is_ok());
