@@ -12,10 +12,12 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 7 of 10: the journal reader and writer, valuation, cost
-conversion, lot tracking, the listing commands, the balance reports, the
-register reports and holdings, with all their output formats, the CSV,
-timeclock and timedot readers and the import command are complete. `hledgers` reads journal files with every directive,
+Milestone 8 of 10, first part: the journal reader and writer, valuation,
+cost conversion, lot tracking, the listing commands, the balance reports,
+the register reports and holdings, with all their output formats, the CSV,
+timeclock and timedot readers, the import command, and most of the
+command-line interface (help, config files, command aliases, add-ons,
+translations) are complete. `hledgers` reads journal files with every directive,
 include globs, amount expressions, costs, balance assertions and
 assignments, auto postings and periodic transactions; it balances and
 checks entries as hledger 1.99 does and prints the same error messages; it
@@ -76,11 +78,31 @@ units, letters), directly or included. `import` appends the new
 transactions of data files, or of the rules files in `rules/`, to the
 journal, remembering how far each was read in `.latest` files (as `print
 --new` does), with `--dry-run`, `--catchup`, `--strict` and the `archive`
-rule. Of hledger's 2420 functional test cases 2182 pass byte-identically,
-all of them gated, with this repo's 27. Translations, `import --get`,
-beancount and ledger output, and the remaining commands are the later
-milestones. Register widths come from `--width` or are 80 columns: the
-terminal's width is not yet queried, and local time is UTC for now.
+rule.
+
+The command line is processed as hledger's is: flags before the command
+are moved after it, commands are found by name, alias or unique prefix,
+`@FILE` arguments are expanded, and errors read as cmdargs' do. Each
+command's `-h`/`--help` and `hledger -h` show the same help, laid out as
+cmdargs lays it out, with the program's name as invoked. The `help`
+command shows the quick reference, the commands list (with installed
+add-ons and config file aliases), a command's usage, the embedded hledger,
+hledger-ui and hledger-web manuals at a topic (in info, man, a pager or as
+text), topic lists, and tldr examples; `--info`, `--man`, `--webman` and
+`--examples` work too. Config files (`hledger.conf` in the current
+directory or above, `~/.hledger.conf`, the XDG one, or `--conf`; `-n` for
+none) add general and per-command arguments and command aliases, shell
+aliases only from a trusted file. `hledger-*` executables in PATH run as
+add-on commands. `--lang` (or `auto`, following the locale) translates
+report titles, headings, month names and chart labels with hledger's
+eleven built-in catalogs or the user's own, and `--write-lang` starts a
+translation. Today's date and CSV time zones use the local time zone;
+register and text charts use the terminal's width; long help and reports
+go through a pager on a terminal; `--view` opens the output in a viewer;
+`--test` runs the built-in self-tests. Of hledger's 2420 functional test
+cases 2311 pass byte-identically, all of them gated, with this repo's 27.
+`run`, `repl`, `add`, `get`, `setup`, `import --get`, beancount, ledger
+and sql output and `--obfuscate` are the second part of milestone 8.
 
 ## Build
 
