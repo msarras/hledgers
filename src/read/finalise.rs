@@ -14,7 +14,7 @@ use super::journal::ParseState;
 use crate::account::{AccountName, AccountType, account_name_infer_type, expand_account_names};
 use crate::amount::{
     Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, Precision,
-    Rounding, Sym, add_amount_style, styles_with_rounding,
+    Rounding, Sym, add_amount_style, add_amount_style_as, styles_with_rounding,
 };
 use crate::dates::DateSpan;
 use crate::decimal::Decimal;
@@ -177,14 +177,25 @@ pub fn journal_style_amounts(j: &mut Journal) -> Result<(), String> {
 /// and of the D and P directives, the directives' winning; with the
 /// precision from the amounts that were written (journalInferCommodityStyles).
 pub fn journal_infer_commodity_styles(j: &mut Journal) {
-    // amounts are added last first, so the first one's style wins
+    // amounts are added last first, so the first one's style wins; the
+    // posting amounts, with their symbols and styles, are gathered from
+    // runs of transactions on all cores, then added in that order
+    let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
+    let amounts = crate::par::map(&runs, |ts| {
+        (ts.iter().rev())
+            .flat_map(|t| t.postings.iter().rev())
+            .flat_map(|p| {
+                let explicit = p.is_explicit_amount();
+                (p.amount.amounts_raw().iter().rev())
+                    .map(move |a| (a, &*a.commodity, &*a.style, explicit))
+            })
+            .collect::<Vec<_>>()
+    });
     let (mut all, mut explicit) = (CommodityStyles::new(), CommodityStyles::new());
-    for p in j.txns.iter().rev().flat_map(|t| t.postings.iter().rev()) {
-        for a in p.amount.amounts_raw().iter().rev() {
-            add_amount_style(a, &mut all);
-            if p.is_explicit_amount() {
-                add_amount_style(a, &mut explicit);
-            }
+    for &(a, commodity, style, is_explicit) in amounts.iter().rev().flatten() {
+        add_amount_style_as(a, commodity, style, &mut all);
+        if is_explicit {
+            add_amount_style_as(a, commodity, style, &mut explicit);
         }
     }
     let default_amount = j.default_commodity.as_ref().map(|(c, s)| Amount {

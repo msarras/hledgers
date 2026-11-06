@@ -509,12 +509,23 @@ fn canonical_style(a: &AmountStyle, b: &AmountStyle) -> AmountStyle {
 /// Amounts are added in reverse order of appearance, so the first one's
 /// general style wins.
 pub fn add_amount_style(a: &Amount, styles: &mut CommodityStyles) {
-    match styles.get(&a.commodity) {
+    add_amount_style_as(a, &a.commodity, &a.style, styles);
+}
+
+/// [`add_amount_style`] given the amount's commodity symbol and style,
+/// read already; the amount itself is read only to keep its style.
+pub fn add_amount_style_as(
+    a: &Amount,
+    commodity: &str,
+    style: &AmountStyle,
+    styles: &mut CommodityStyles,
+) {
+    match styles.get(commodity) {
         None => {
             styles.insert(a.commodity.clone(), a.style.clone());
         }
         Some(old) => {
-            let new = canonical_style(&a.style, old);
+            let new = canonical_style(style, old);
             if new != **old {
                 styles.insert(a.commodity.clone(), Arc::new(new));
             }
