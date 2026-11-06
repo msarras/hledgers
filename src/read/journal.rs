@@ -6,6 +6,7 @@
 //! megaparsec's where hledger's tests or a direct comparison show them; an
 //! error in an included file is shown after the files that include it.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,10 +15,10 @@ use super::amount::{
     AmountCtx, AmountKind, amountp, balance_assertionp, commodity_symbolp, posting_amountp,
 };
 use super::common::{
-    account_aliasp, accountnamep, codep, datep, double_quoted_textp, empty_or_comment_linep,
-    following_commentp, is_line_comment_start, multiline_commentp, noncomment_textp,
-    peek_after_spaces, posting_commentp, rest_of_line, secondary_datep, statusp, timeofdayp,
-    transaction_commentp,
+    Interned, account_aliasp, accountnamep, codep, datep, double_quoted_textp,
+    empty_or_comment_linep, following_commentp, is_line_comment_start, multiline_commentp,
+    noncomment_textp, peek_after_spaces, posting_commentp, rest_of_line, secondary_datep, statusp,
+    timeofdayp, transaction_commentp,
 };
 use crate::account::{
     AccountAlias, AccountType, Realness, account_name_apply_aliases, account_name_posting_type,
@@ -106,6 +107,7 @@ pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule
         j: &mut j,
         iopts,
         anchor: (0, 1, 0),
+        interned: RefCell::default(),
     };
     let rule = match p.postingp(true, None) {
         Ok(Some((posting, is_multiplier))) if p.c.at_end() => Ok(TmPostingRule {
@@ -181,6 +183,7 @@ fn parse_file(
         j,
         iopts,
         anchor: (0, 1, 0),
+        interned: RefCell::default(),
     };
     match p.journalp() {
         Err(Failure::Here(e)) => Err(Failure::Included(e.pretty(file, text))),
@@ -201,15 +204,22 @@ struct JournalParser<'a, 's> {
     iopts: &'s InputOpts,
     /// A known position: offset, line, and the offset of that line's start.
     anchor: (usize, usize, usize),
+    /// The account names, commodity symbols and amount styles read so far.
+    interned: RefCell<Interned>,
 }
 
 /// The amount parsers' view of the parse state.
-fn amount_ctx<'s>(st: &'s ParseState, j: &'s Journal) -> AmountCtx<'s> {
+fn amount_ctx<'s>(
+    st: &'s ParseState,
+    j: &'s Journal,
+    interned: &'s RefCell<Interned>,
+) -> AmountCtx<'s> {
     AmountCtx {
         decimal_mark: st.decimal_mark,
         default_commodity: st.default_commodity.as_ref(),
         commodities: Some(&j.declared_commodities),
         year: st.year,
+        interned: Some(interned),
     }
 }
 
@@ -799,7 +809,7 @@ impl<'a> JournalParser<'a, '_> {
         let pos = self.pos();
         if self.c.skip_spaces() {
             let off = self.c.pos;
-            let ctx = amount_ctx(self.st, self.j);
+            let ctx = amount_ctx(self.st, self.j, &self.interned);
             if let Ok(a) = amountp(&mut self.c, &ctx, AmountKind::Style) {
                 self.c.skip_spaces();
                 let comment_off = self.c.pos;
@@ -856,7 +866,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.eat_str("format");
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style).map_err(|e| {
             if self.c.pos == off {
                 self.c.unexpected(&[Item::label("amount")])
@@ -1031,7 +1041,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.bump();
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style)?;
         rest_of_line(&mut self.c);
         if a.style.decimal_mark.is_none() {
@@ -1164,7 +1174,7 @@ impl<'a> JournalParser<'a, '_> {
     fn commodity_conversion_directivep(&mut self) -> R<()> {
         self.c.bump();
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         self.c.skip_spaces();
         if !self.c.eat('=') {
@@ -1219,9 +1229,9 @@ impl<'a> JournalParser<'a, '_> {
                 self.c = save;
             }
         }
-        let symbol = Sym::from(commodity_symbolp(&mut self.c)?);
+        let symbol = (self.interned.borrow_mut()).name(commodity_symbolp(&mut self.c)?);
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let amount = amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         rest_of_line(&mut self.c);
         Ok(PriceDirective {
@@ -1388,11 +1398,12 @@ impl<'a> JournalParser<'a, '_> {
             self.apply_parent_and_option_aliases(&aliased)?
         };
         let realness = account_name_posting_type(&account);
-        let account: Arc<str> = account_name_without_posting_type(&account).into();
+        let account =
+            (self.interned.borrow_mut()).name(account_name_without_posting_type(&account));
         self.c.skip_spaces();
         let multiplier = is_rule && self.c.eat('*');
         let amount_start = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let amount = if multiplier {
             amountp(&mut self.c, &ctx, AmountKind::Multiplier)
         } else {
@@ -1408,7 +1419,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.skip_spaces();
         let assertion = if self.c.peek() == Some('=') {
             let pos = self.pos();
-            let ctx = amount_ctx(self.st, self.j);
+            let ctx = amount_ctx(self.st, self.j, &self.interned);
             Some(Box::new(balance_assertionp(&mut self.c, &ctx, pos)?))
         } else {
             None
