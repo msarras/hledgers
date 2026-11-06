@@ -154,11 +154,16 @@ pub fn journal_add_account_types(j: &mut Journal) {
 /// The account names declared, or posted to or implied as parents by the
 /// postings, sorted (journalAccountNamesDeclaredOrImplied).
 pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
-    let used: BTreeSet<&str> = j
-        .txns
-        .iter()
-        .flat_map(|t| t.postings.iter().map(|p| &*p.account))
-        .collect();
+    // the names posted to, gathered from runs of transactions on all cores
+    let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
+    let used: BTreeSet<&str> = crate::par::map(&runs, |ts| {
+        (ts.iter())
+            .flat_map(|t| t.postings.iter().map(|p| &*p.account))
+            .collect::<BTreeSet<&str>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     let mut names: BTreeSet<&str> = expand_account_names(used).into_iter().collect();
     names.extend(j.declared_accounts.iter().map(|(a, _)| &**a));
     names.into_iter().map(AccountName::from).collect()
