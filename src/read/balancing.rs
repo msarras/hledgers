@@ -36,6 +36,13 @@ pub const ROUNDED_POSTING_TAG: &str = "_rounded-posting";
 /// changed by this are tagged, so that an unbalanced entry's error can
 /// mention the rounding (transactionRoundCalculatedAmounts).
 pub fn transaction_round_calculated_amounts(mut t: Transaction) -> Transaction {
+    // nothing to round, as is usual: the styles need not be found
+    if !(t.postings.iter())
+        .flat_map(|p| p.amount.amounts_raw())
+        .any(is_calculated)
+    {
+        return t;
+    }
     let assigned: Vec<Posting> = t
         .postings
         .iter()
@@ -65,10 +72,6 @@ pub fn transaction_round_calculated_amounts(mut t: Transaction) -> Transaction {
 /// their commodity's precision in these styles or their own if that is more.
 /// Returns whether any quantity changed (postingRoundCalculatedAmounts).
 pub fn posting_round_calculated_amounts(styles: &CommodityStyles, p: &mut Posting) -> bool {
-    let is_calculated = |a: &Amount| match a.style.precision {
-        Precision::Fixed(n) => a.internal_precision() > n,
-        Precision::Natural => false,
-    };
     if !p.amount.amounts_raw().iter().any(is_calculated) {
         return false;
     }
@@ -100,6 +103,15 @@ pub fn posting_round_calculated_amounts(styles: &CommodityStyles, p: &mut Postin
         }
     });
     changed
+}
+
+/// Whether an amount was calculated with `*` or `/`: it has more decimal
+/// places than its precision.
+fn is_calculated(a: &Amount) -> bool {
+    match a.style.precision {
+        Precision::Fixed(n) => a.internal_precision() > n,
+        Precision::Natural => false,
+    }
 }
 
 /// Whether a posting is a disposal's realised gain posting, which balancing
