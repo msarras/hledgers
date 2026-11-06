@@ -307,16 +307,10 @@ pub fn multi_balance_report_as_chart(
         .collect();
     Chart {
         title: title.to_string(),
-        x_axis: XAxis::Periods(
-            (report.dates.iter())
-                .map(|s| {
-                    (
-                        *s,
-                        crate::cli::commands::balance::report_period_name(ropts, &report.dates, s),
-                    )
-                })
-                .collect(),
-        ),
+        x_axis: XAxis::Periods({
+            let name = report_period_name(ropts, &report.dates);
+            (report.dates.iter()).map(|s| (*s, name(s))).collect()
+        }),
         panels,
     }
 }
@@ -495,6 +489,7 @@ pub fn compound_balance_report_as_chart(
         })
         .collect();
     let spans = &cbr.dates;
+    let name = report_period_name(ropts, spans);
     Chart {
         title: cbr.title.clone(),
         // the title names a single period
@@ -504,7 +499,7 @@ pub fn compound_balance_report_as_chart(
                     let name = if spans.len() == 1 {
                         String::new()
                     } else {
-                        crate::cli::commands::balance::report_period_name(ropts, spans, s)
+                        name(s)
                     };
                     (*s, name)
                 })
@@ -793,13 +788,10 @@ pub fn postings_report_as_chart(
         }
         Some(panel(unit_amount(&c, &all_amounts), ss))
     };
+    let name = report_period_name(&name_ropts, &spans);
     Chart {
         title: title.to_string(),
-        x_axis: XAxis::Periods(
-            (spans.iter())
-                .map(|s| (*s, report_period_name(&name_ropts, &spans, s)))
-                .collect(),
-        ),
+        x_axis: XAxis::Periods((spans.iter()).map(|s| (*s, name(s))).collect()),
         panels: commodities_by_use(&cells)
             .into_iter()
             .filter_map(bars_panel)

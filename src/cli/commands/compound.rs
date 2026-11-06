@@ -553,9 +553,10 @@ fn compound_balance_report_as_spreadsheet(
                 translations: Default::default(),
                 ..ropts.clone()
             };
+            let name = report_period_name(&english, colspans);
             data_headers.extend(colspans.iter().map(|s| spr::Cell {
                 border: Border::default(),
-                content: report_period_name(&english, colspans, s),
+                content: name(s),
                 ..header_date_span_cell(
                     ropts.date2,
                     ropts.period_titles,
