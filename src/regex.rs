@@ -432,21 +432,21 @@ fn literal(c: char, out: &mut String) {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn re(s: &str) -> Regexp {
         to_regex(s).unwrap()
     }
 
+    #[cfg(test)]
     fn invalid(s: &str) -> bool {
         to_regex(s).is_err()
     }
 
     // The doctests of regexReplaceUnmemo.
-    #[test]
-    fn replace() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn replace() {
         assert_eq!(re("a").replace("b", "banana"), Ok("bbnbnb".into()));
         assert_eq!(
             re("([0-9]+)-([0-9]+)").replace(r"\2/\1", "x 1-2 y 30-40"),

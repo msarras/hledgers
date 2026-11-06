@@ -1386,8 +1386,7 @@ pub fn in_account_query(opts: &[QueryOpt]) -> Option<Query> {
     Some(Query::Acct(r))
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::{Amount, usd};
     use crate::dates::EfDay;
@@ -1434,8 +1433,8 @@ mod tests {
     }
 
     // The doctests of parseQuery and parseBooleanQuery.
-    #[test]
-    fn doctests() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn doctests() {
         assert_eq!(
             q("expenses:dining out"),
             just(Query::Or(vec![acct("expenses:dining"), acct("out")]))
@@ -1552,8 +1551,8 @@ mod tests {
     }
 
     // tests_Query "simplifyQuery".
-    #[test]
-    fn simplifying() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn simplifying() {
         use Query::{And, Any, Date, Or};
         let (b2012, e2013) = (day(2012, 1, 1), day(2013, 1, 1));
         assert_eq!(
@@ -1586,8 +1585,8 @@ mod tests {
     }
 
     // tests_Query "parseQuery".
-    #[test]
-    fn parsing_queries() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn parsing_queries() {
         assert_eq!(
             q("acct:'expenses:autres d\u{e9}penses' desc:b"),
             just(Query::And(vec![
@@ -1634,8 +1633,8 @@ mod tests {
     }
 
     // tests_Query "parseBooleanQuery".
-    #[test]
-    fn parsing_boolean_queries() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn parsing_boolean_queries() {
         use Query::{And, Not, Or};
         let tag = |n: &str, v: &str| Query::Tag(ci(n), Some(ci(v)));
         let not = |q| Not(Box::new(q));
@@ -1694,8 +1693,8 @@ mod tests {
     }
 
     // tests_Query "words''".
-    #[test]
-    fn splitting_words() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn splitting_words() {
         assert_eq!(query_words(&[], "a b"), ["a", "b"]);
         assert_eq!(query_words(&[], "'a b'"), ["a b"]);
         assert_eq!(query_words(&[], "not:a b"), ["not:a", "b"]);
@@ -1710,8 +1709,8 @@ mod tests {
     }
 
     // tests_Query "filterQuery".
-    #[test]
-    fn filtering() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn filtering() {
         use Query::{And, Any, Depth, Not, Or, StatusQ};
         assert_eq!(Any.filter(Query::is_depth), Any);
         assert_eq!(Depth(1).filter(Query::is_depth), Depth(1));
@@ -1730,8 +1729,8 @@ mod tests {
     }
 
     // tests_Query "parseQueryTerm".
-    #[test]
-    fn parsing_terms() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn parsing_terms() {
         let not = |q| Query::Not(Box::new(q));
         assert_eq!(term("a"), just(acct("a")));
         assert_eq!(
@@ -1786,8 +1785,8 @@ mod tests {
     }
 
     // tests_Query "parseAmountQueryTerm".
-    #[test]
-    fn parsing_amount_terms() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn parsing_amount_terms() {
         use OrdPlus::*;
         let d = |s: &str| s.parse::<Decimal>().unwrap();
         let p = parse_amount_query_term;
@@ -1804,8 +1803,8 @@ mod tests {
     }
 
     // tests_Query "queryStartDate" and "queryEndDate".
-    #[test]
-    fn start_and_end_dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn start_and_end_dates() {
         use Query::{And, Date, Or};
         let (small, big) = (Some(day(2000, 1, 1)), Some(day(2000, 1, 2)));
         let from = |d| Date(DateSpan::exact(d, None));
@@ -1822,8 +1821,8 @@ mod tests {
     }
 
     // tests_Query "matchesAccount" and "matchesAccountExtra".
-    #[test]
-    fn matching_accounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn matching_accounts() {
         assert!(Query::Acct(cs("b:c")).matches_account("a:bb:c:d"));
         assert!(!Query::Acct(cs("^a:b")).matches_account("c:a:b"));
         assert!(Query::Depth(2).matches_account("a"));
@@ -1854,8 +1853,8 @@ mod tests {
     }
 
     // tests_Query "matchesPosting".
-    #[test]
-    fn matching_postings() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn matching_postings() {
         let cleared = Posting {
             status: Status::Cleared,
             ..Posting::default()
@@ -1922,8 +1921,8 @@ mod tests {
     }
 
     // tests_Query "any: and all: match a posting by looking at its siblings".
-    #[test]
-    fn matching_siblings() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn matching_siblings() {
         let tie = |ps: Vec<Posting>| Transaction {
             postings: ps,
             ..Transaction::default()
@@ -1966,8 +1965,8 @@ mod tests {
     }
 
     // tests_Query "matchesTransaction".
-    #[test]
-    fn matching_transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn matching_transactions() {
         let txn = |description: &str| Transaction {
             description: description.to_string(),
             ..Transaction::default()

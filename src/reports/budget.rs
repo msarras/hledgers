@@ -63,7 +63,7 @@ pub fn budget_report(
         .collect();
     let actualj = journal_with_budget_account_names(&budgeted, ropts.empty, j);
     let budgetj = journal_add_budget_goal_transactions(bopts, &ropts, report_span, j)?;
-    let oracle = PriceOracle::new(ropts.infer_prices, j);
+    let oracle = PriceOracle::new(ropts.infer_prices, ropts.debug, j);
     let budget_spec = ReportSpec {
         query: budget_goal_query(&spec.query),
         ..spec.clone()

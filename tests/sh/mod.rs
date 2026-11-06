@@ -70,6 +70,17 @@ fn check(list: &List, dir: &Path) -> Result<(), String> {
             match cmd {
                 Command::Subshell(inner, _) => check(inner, dir)?,
                 Command::Simple(s) => check_simple(s, dir)?,
+                Command::For { words, body, .. } => {
+                    for w in words {
+                        for part in &w.0 {
+                            if let Part::Subst { cmd, .. } = part {
+                                check_simple(cmd, dir)?;
+                            }
+                        }
+                        exec::check_glob(w, dir)?;
+                    }
+                    check(body, dir)?;
+                }
             }
         }
     }
@@ -151,8 +162,13 @@ mod tests {
         );
         assert_eq!(shape("hledger x | ls"), Shape::Compound);
         assert_eq!(shape("sh -c 'ls'"), Shape::Compound);
+        assert_eq!(
+            shape("for a in b 'c d'; do hledger $a || echo \"failed: $a\"; done; rm -f x"),
+            Shape::Compound
+        );
         for cmd in [
-            "for a in b; do hledger $a; done",
+            "for a in b; do ls -a; done",
+            "for a in *; do hledger $a; done",
             "hledger x | grep -i y",
             "hledger x | sed 1d",
             "ls -a",
@@ -282,5 +298,16 @@ mod tests {
             stdout(d, "printf '1\\n2\\n3\\n' | tail -n +2", ""),
             "2\n3\n"
         );
+        // the loop's words are split as unquoted expansions are; the status is
+        // the body's last
+        assert_eq!(
+            stdout(
+                d,
+                "x='p q'; for a in $x 'r s' \"$x\"; do echo \"<$a>\"; false; done; echo $? $a",
+                ""
+            ),
+            "<p>\n<q>\n<r s>\n<p q>\n1 p q\n"
+        );
+        assert_eq!(stdout(d, "for a in; do echo x; done; echo $?", ""), "0\n");
     }
 }

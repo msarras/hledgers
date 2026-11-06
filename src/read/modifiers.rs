@@ -192,8 +192,7 @@ pub fn run_periodic_transaction(
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::{MixedAmount, num, usd};
     use crate::model::TransactionModifier;
@@ -266,8 +265,8 @@ mod tests {
         })
     }
 
-    #[test]
-    fn periodic_transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn periodic_transactions() {
         let gen_dates = |expr: &str, span: DateSpan| -> Vec<String> {
             ptgen(expr, span)
                 .split("\n\n")
@@ -345,8 +344,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn auto_postings() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn auto_postings() {
         assert_eq!(
             apply("", vec![rule("pong", usd(d("2")), false)]),
             "0000-01-01\n    ping                                          $1.00\n    pong                                          $2.00  ; generated-posting: =\n\n"

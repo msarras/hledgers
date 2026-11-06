@@ -2136,15 +2136,14 @@ fn show_budget_display_cell(
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::dates::Day;
     use crate::reports::opts::ReportSpec;
 
     // tests_Balance "unicode in balance layout".
-    #[test]
-    fn unicode_in_balance_layout() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn unicode_in_balance_layout() {
         let s = "2009/01/01 * медвежья шкура\n  расходы:покупки  100\n  актив:наличные\n";
         let iopts = crate::read::InputOpts::default();
         let (j, st) = crate::read::journal::parse_journal(&iopts, "f.j", s).unwrap();

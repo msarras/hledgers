@@ -270,7 +270,7 @@ fn is_count(calc: BalanceCalculation) -> bool {
 /// with --invert's and --percent's signs and proportions, without the
 /// accounts the options make boring (multiBalanceReport).
 pub fn multi_balance_report(spec: &ReportSpec, j: &Journal) -> Result<MultiBalanceReport, String> {
-    let oracle = PriceOracle::new(spec.opts.infer_prices, j);
+    let oracle = PriceOracle::new(spec.opts.infer_prices, spec.opts.debug, j);
     multi_balance_report_with(spec, j, &oracle)
 }
 
@@ -300,7 +300,7 @@ pub fn compound_balance_report(
     j: &Journal,
     sections: &[SubreportSpec],
 ) -> Result<CompoundPeriodicReport<DisplayName, MixedAmount>, String> {
-    let oracle = PriceOracle::new(spec.opts.infer_prices, j);
+    let oracle = PriceOracle::new(spec.opts.infer_prices, spec.opts.debug, j);
     let (span, colspans) = spec.report_span(j);
     let spec = make_report_query(spec, span);
     let valued = get_postings(&spec, j, &oracle, span)?;
@@ -990,7 +990,6 @@ fn perdivide(a: &MixedAmount, b: &MixedAmount) -> Result<MixedAmount, String> {
     Ok(MixedAmount::from_amount(per(q)))
 }
 
-#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::amount::usd;
@@ -1051,8 +1050,8 @@ pub(crate) mod tests {
     }
 
     // tests_BalanceReport.
-    #[test]
-    fn balance_reports() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn balance_reports() {
         let j = sample_journal();
         let gives = |s: ReportSpec, j: &Journal, rows: Vec<_>, total: MixedAmount| {
             let r = balance_report(&s, j).unwrap();
@@ -1168,8 +1167,8 @@ pub(crate) mod tests {
     }
 
     // tests_MultiBalanceReport.
-    #[test]
-    fn multi_balance_reports() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn multi_balance_reports() {
         let r = multi_balance_report(
             &spec(ReportOpts::default(), Query::Any),
             &Journal::default(),

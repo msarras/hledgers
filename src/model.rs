@@ -1002,13 +1002,12 @@ impl Journal {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // tests_Posting "commentAddTag", "commentAddTagNextLine".
-    #[test]
-    fn comment_tags() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn comment_tags() {
         let a = ("a".to_string(), String::new());
         assert_eq!(comment_add_tag("", &a), "a: ");
         assert_eq!(comment_add_tag("[1/2]", &a), "[1/2], a: ");
@@ -1040,8 +1039,8 @@ mod tests {
     }
 
     // tests_Journal "journalDateSpan".
-    #[test]
-    fn journal_date_span() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn journal_date_span() {
         let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
         let j = Journal {
             txns: vec![

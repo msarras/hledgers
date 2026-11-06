@@ -2771,8 +2771,7 @@ pub fn parse_date_with_format(
     })
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn day(y: i64, m: u32, d: u32) -> Day {
@@ -2890,8 +2889,8 @@ mod tests {
     use crate::parse::ParseError;
 
     // The doctests of showDateSpanForQuery.
-    #[test]
-    fn spans_for_queries() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn spans_for_queries() {
         let s = |b, e| DateSpan(b, e).show_for_query();
         assert_eq!(s(ex(2025, 1, 1), ex(2026, 1, 1)), "2025");
         assert_eq!(
@@ -2909,8 +2908,8 @@ mod tests {
 
     // The doctests of spanIntersect, spanDefaultsFrom,
     // spanValidDefaultsFrom, spanUnion and spanExtend.
-    #[test]
-    fn span_operations() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn span_operations() {
         let a = DateSpan(fl(2018, 1, 1), fl(2018, 1, 3));
         let b = DateSpan(fl(2018, 1, 3), fl(2018, 1, 5));
         assert_eq!(
@@ -2954,8 +2953,8 @@ mod tests {
     }
 
     // The doctests of fixSmartDate.
-    #[test]
-    fn fixing_smart_dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn fixing_smart_dates() {
         let t = |s| fix_smart_date_str(day(2008, 11, 26), s).unwrap();
         for (s, d) in [
             ("0000-01-01", "0000-01-01"),
@@ -3010,8 +3009,8 @@ mod tests {
     // The doctests of nextmonthandday, nextnthdayofmonth,
     // nthdayofweekcontaining, nextNthWeekdayOfMonth and
     // prevNthWeekdayOfMonth.
-    #[test]
-    fn next_and_previous_dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn next_and_previous_dates() {
         let wed22nd = day(2017, 11, 22);
         assert_eq!(nextmonthandday(11, 21, wed22nd), day(2018, 11, 21));
         assert_eq!(nextmonthandday(11, 22, wed22nd), day(2017, 11, 22));
@@ -3030,8 +3029,8 @@ mod tests {
     }
 
     // The doctests of parsedate, and edge cases checked in GHCi.
-    #[test]
-    fn simple_dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn simple_dates() {
         assert_eq!(parsedate("2008/02/03"), Some(day(2008, 2, 3)));
         assert_eq!(parsedate("2008/02/03/"), None);
         assert_eq!(parsedate("2008/02/30"), None);
@@ -3050,8 +3049,8 @@ mod tests {
     }
 
     // The doctests of smartdate.
-    #[test]
-    fn smart_dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn smart_dates() {
         let sd = |s| parse_all(s, smartdate);
         assert_eq!(
             sd("20181201"),
@@ -3064,8 +3063,8 @@ mod tests {
     }
 
     // The doctests of periodexprp.
-    #[test]
-    fn period_expressions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn period_expressions() {
         let p = |s| show_pair(&parse_period_expr(day(2008, 11, 26), s).unwrap());
         for (s, r) in [
             (
@@ -3124,8 +3123,8 @@ mod tests {
 
     // The doctests of doubledatespanp, fromdatespanp, todatespanp,
     // indatespanp, quarterspanp and quarterstartp.
-    #[test]
-    fn span_forms() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn span_forms() {
         let d =
             |s| parse_all(s, |p| double_date_span(p, day(2018, 1, 1))).map(|s| format!("{s:?}"));
         assert_eq!(d("20180101-201804").unwrap(), "DateSpan 2018Q1");
@@ -3359,8 +3358,8 @@ mod tests {
     }
 
     // The doctests of Period.hs.
-    #[test]
-    fn periods() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn periods() {
         assert_eq!(
             Period::MonthPeriod(2000, 1).as_date_span(),
             DateSpan(fl(2000, 1, 1), fl(2000, 2, 1))
@@ -3397,8 +3396,8 @@ mod tests {
     }
 
     // The doctest of boundariesToDayPartition.
-    #[test]
-    fn day_partitions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn day_partitions() {
         let p = DayPartition::from_boundaries([day(2025, 1, 1), day(2025, 2, 1)]).unwrap();
         assert_eq!(
             p.to_period_data(),
@@ -3441,8 +3440,8 @@ mod tests {
     }
 
     // The doctests of splitSpan and splitSpanToDateSpans.
-    #[test]
-    fn splitting_spans() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn splitting_spans() {
         use Interval::*;
         let t = |i, b, e| split(true, i, b, e);
         let d = |y, m, dd| day(y, m, dd);
@@ -3533,8 +3532,8 @@ mod tests {
     }
 
     // tests_DayPartition "weekday".
-    #[test]
-    fn splitting_by_weekdays() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn splitting_by_weekdays() {
         let d = |m, dd| day(2021, m, dd);
         assert_eq!(
             split(
@@ -3570,8 +3569,8 @@ mod tests {
     }
 
     // tests_DayPartition "match dayOfWeek".
-    #[test]
-    fn splitting_by_one_weekday() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn splitting_by_one_weekday() {
         let dayofweek = |n: i64, ds| {
             let next = move |w: i64, d: Day| {
                 if w == 0 {
@@ -3605,8 +3604,8 @@ mod tests {
 
     // tests_DayPartition "splitSpanToDateSpans and splitSpanStartEnd agree
     // with splitSpan".
-    #[test]
-    fn split_forms_agree() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn split_forms_agree() {
         use Interval::*;
         let intervals = [
             NoInterval,

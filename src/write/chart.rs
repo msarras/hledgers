@@ -700,8 +700,7 @@ impl ToJson for Chart {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn d(n: i64) -> Decimal {
@@ -726,8 +725,8 @@ mod tests {
     }
 
     // tests_Hledger_Write_Chart.
-    #[test]
-    fn scale_spans_cases() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn scale_spans_cases() {
         let spans = |s, p, n| scale_spans(&d(s), &d(p), &d(n));
         assert_eq!(spans(100, 80, 0), (d(100), d(0)));
         assert_eq!(spans(100, 0, 30), (d(0), d(100)));
@@ -736,8 +735,8 @@ mod tests {
         assert_eq!(spans(100, 0, 0), (d(100), d(0)));
     }
 
-    #[test]
-    fn total_is_bar_end_cases() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn total_is_bar_end_cases() {
         let s = |vs: Vec<Option<i64>>| ser("s", None, vs.into_iter().map(|v| v.map(d)).collect());
         let ends = |bars: Vec<Series>, total: Series| {
             total_is_bar_end(&bars.iter().collect::<Vec<_>>(), &total)
@@ -760,8 +759,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn series_colour_choices() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn series_colour_choices() {
         use AccountType::*;
         let one = |n: &str, t| ser(n, t, vec![Some(d(1))]);
         let colours = |c, ss: &[Series]| series_colours(c, &ss.iter().collect::<Vec<_>>());
@@ -872,8 +871,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stable_slot_choices() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn stable_slot_choices() {
         let items: Vec<(String, Decimal)> = [("a", 3), ("b", 2), ("c", 1)]
             .map(|(n, s)| (n.to_string(), d(s)))
             .to_vec();
@@ -896,8 +895,8 @@ mod tests {
     }
 
     // tests_Hledger_Write_Chart_Palette.
-    #[test]
-    fn palette() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn palette() {
         assert_eq!(
             colour_hex(false, Colour::Type(AccountType::Revenue, 0)),
             "#008300"

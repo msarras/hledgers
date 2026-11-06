@@ -131,13 +131,12 @@ const CURRENCIES: &[(&str, &str, &str)] = &[
     ("Zimbabwe Dollar", "ZWD", "Z$"),
 ];
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // The doctests of currencySymbolToCode and toCurrencyCode.
-    #[test]
-    fn symbols_and_codes() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn symbols_and_codes() {
         assert_eq!(currency_symbol_to_code(""), None);
         assert_eq!(currency_symbol_to_code("$"), Some("USD"));
         assert_eq!(to_currency_code("$"), "USD");

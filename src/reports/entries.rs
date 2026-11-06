@@ -35,23 +35,21 @@ pub fn entries_report_unsorted(spec: &ReportSpec, mut j: Journal) -> Result<Jour
     Ok(j)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::dates::{DateSpan, Day};
     use crate::query::Query;
-    use crate::read::{InputOpts, read_journal_file};
     use crate::regex::to_regex;
     use crate::reports::opts::ReportOpts;
 
-    // tests_EntriesReport, on examples/sample.journal for samplejournal.
-    #[test]
-    fn entries_report_selects() {
-        let path = concat!(
+    // tests_EntriesReport, on examples/sample.journal (built in, for --test)
+    // for samplejournal.
+    #[cfg_attr(test, test)]
+    pub(crate) fn entries_report_selects() {
+        let j = crate::reports::periodic::tests::read(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/hledger/examples/sample.journal"
-        );
-        let j = read_journal_file(&InputOpts::default(), path).unwrap();
+        )));
         let today = Day::from_ymd(2026, 1, 1).unwrap();
         let spec = |q| ReportSpec {
             query: q,

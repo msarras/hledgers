@@ -1101,8 +1101,7 @@ pub fn parse_amount_with(ctx: &AmountCtx, s: &str) -> Result<Amount, String> {
     Ok(a)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::usd;
 
@@ -1166,8 +1165,8 @@ mod tests {
     }
 
     // tests_Common "amountp".
-    #[test]
-    fn amounts() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amounts() {
         assert_eq!(amount("$47.18"), Ok(usd(dec("47.18"))));
         assert_eq!(
             amount("$1."),
@@ -1192,8 +1191,8 @@ mod tests {
     }
 
     // tests_Common "postingamountp".
-    #[test]
-    fn amount_expressions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amount_expressions() {
         assert_eq!(expr("$47.18"), Ok(usd(dec("47.18"))));
         eq("$-50.20 + $-209.00 + $-16.54 + $-438", "$", "-713.74", 2);
         eq("10 EUR-2.50 EUR", "EUR", "7.5", 2);
@@ -1267,8 +1266,8 @@ mod tests {
     }
 
     // tests_Common "numberp".
-    #[test]
-    fn numbers() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn numbers() {
         let ok = |s: &str, q: &str, p: u8, d: Option<char>, g: Option<DigitGroups>| {
             assert_eq!(number(s, None), Ok((dec(q), p, d, g)), "{s}");
         };
@@ -1303,8 +1302,8 @@ mod tests {
     }
 
     // tests_Common "numberp with a suggested decimal mark".
-    #[test]
-    fn numbers_with_a_suggested_decimal_mark() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn numbers_with_a_suggested_decimal_mark() {
         let hint = |c| {
             Some(NumberHint {
                 decimal_mark: Some(c),
@@ -1331,8 +1330,8 @@ mod tests {
     }
 
     // tests_Common "amountp with a decimal-mark directive".
-    #[test]
-    fn amounts_with_a_declared_decimal_mark() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn amounts_with_a_declared_decimal_mark() {
         let ctx = AmountCtx {
             decimal_mark: Some(','),
             ..AmountCtx::default()

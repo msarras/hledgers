@@ -143,6 +143,9 @@ pub struct ReportOpts {
     pub all_values_shown: bool,
     /// The language of the report's text (--lang).
     pub translations: std::sync::Arc<crate::i18n::Translations>,
+    /// How much debug output to show (`--debug`; debugLevel, a global
+    /// upstream).
+    pub debug: usize,
 }
 
 impl Default for ReportOpts {
@@ -192,6 +195,7 @@ impl Default for ReportOpts {
             subreport_titles: None,
             all_values_shown: false,
             translations: std::sync::Arc::new(crate::i18n::Translations::none()),
+            debug: 0,
         }
     }
 }
@@ -278,6 +282,7 @@ impl ReportOpts {
             subreport_titles: raw
                 .string("subreport-titles")
                 .map(|t| t.replace("\\n", "\n")),
+            debug: raw.posint("debug")?.unwrap_or(0),
             ..ReportOpts::default()
         })
     }
@@ -486,7 +491,7 @@ impl ReportSpec {
     /// cost and/or to value as the options say, using its own market
     /// prices (journalValueAndFilterPostings).
     pub fn journal_value_and_filter_postings(&self, j: &Journal) -> Result<Journal, String> {
-        let oracle = PriceOracle::new(self.opts.infer_prices, j);
+        let oracle = PriceOracle::new(self.opts.infer_prices, self.opts.debug, j);
         self.journal_value_and_filter_postings_with(j, &oracle)
     }
 
@@ -529,7 +534,7 @@ impl ReportSpec {
     /// value as the options say (-B, -V, -X, --value), using its own market
     /// prices (journalApplyValuationFromOpts).
     pub fn journal_apply_valuation(&self, j: Journal) -> Result<Journal, String> {
-        let oracle = PriceOracle::new(self.opts.infer_prices, &j);
+        let oracle = PriceOracle::new(self.opts.infer_prices, self.opts.debug, &j);
         self.journal_apply_valuation_with(j, &oracle)
     }
 

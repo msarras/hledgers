@@ -674,13 +674,12 @@ pub fn commodity_to_beancount(com: &str) -> String {
     b
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // commodityToBeancount's doctests.
-    #[test]
-    fn commodity_names() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn commodity_names() {
         assert_eq!(commodity_to_beancount(""), "CC");
         assert_eq!(commodity_to_beancount("$"), "USD");
         assert_eq!(commodity_to_beancount("Usd"), "USD");

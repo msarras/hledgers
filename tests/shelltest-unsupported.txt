@@ -1,3 +1,9 @@
-# Corpus cases the harness does not run, as FILE:CASE followed by the reason
-# (and, once there is one, the hand-ported test in tests/ported/ that covers it).
-cli/cli.test:48  milestone 0: shape not yet supported: `for`
+# Corpus cases the harness does not run, as FILE:CASE followed by the reason.
+# A case whose command line the sh subset can not run gives the reason and the
+# hand-ported test in tests/ported/ that covers it. A reason starting with
+# `by-design:` marks a case that can not pass by design; it is counted apart,
+# as neither passed nor failed.
+journal/fastpath.test:6  by-design: hledgers has no fast-path parser (HLEDGER_FASTPATH is accepted and ignored), so the `fast path was used for ...` statistics line this case greps for would be a made-up number
+journal/fastpath.test:9  by-design: as journal/fastpath.test:6, with HLEDGER_FASTPATH=check (no fast path to check against the general parser)
+journal/fastpath.test:11  by-design: as journal/fastpath.test:6, with HLEDGER_FASTPATH=check (no fast path to check against the general parser)
+journal/fastpath.test:13  by-design: as journal/fastpath.test:6, with HLEDGER_FASTPATH=check (no fast path to check against the general parser)

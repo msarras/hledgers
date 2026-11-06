@@ -558,8 +558,7 @@ pub fn account_aliasp(c: &mut Cursor) -> PResult<AccountAlias> {
     ))
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn date(s: &str, year: Option<i64>) -> Result<Day, String> {
@@ -568,8 +567,8 @@ mod tests {
     }
 
     // tests_JournalReader "datep".
-    #[test]
-    fn dates() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn dates() {
         assert_eq!(
             date("2018/01/01", None),
             Ok(Day::from_ymd(2018, 1, 1).unwrap())

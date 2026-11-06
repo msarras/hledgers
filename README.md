@@ -12,7 +12,7 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 8 of 10: the journal reader and writer, valuation, cost
+Milestone 9 of 10: the journal reader and writer, valuation, cost
 conversion, lot tracking, the listing commands, the balance reports, the
 register reports and holdings, with all their output formats, the CSV,
 timeclock and timedot readers, the import command, and the command-line
@@ -104,7 +104,8 @@ eleven built-in catalogs or the user's own, and `--write-lang` starts a
 translation. Today's date and CSV time zones use the local time zone;
 register and text charts use the terminal's width; long help and reports
 go through a pager on a terminal; `--view` opens the output in a viewer;
-`--test` runs the built-in self-tests. `run` runs commands one after
+`--test` runs the 131 unit tests and doctests ported from hledger's
+(whose own `--test` runs 326). `run` runs commands one after
 another, from its command line, files or standard input, reading each
 journal once, and can collect their outputs into one html page; `repl`
 does so at a prompt (with line editing on a terminal), reloading changed
@@ -115,10 +116,10 @@ journal's `data/getdata` and `prices/getprices` helpers, merging the
 prices into per-commodity files. `setup` checks the installation, the
 terminal and the default journal, contacting hledger.org over HTTPS (pure
 Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
-2420 functional test cases 2413 pass byte-identically, all of them gated,
-with this repo's 27; the others are `--debug` value dumps and fast-path
-debug messages (out of scope) and one `for` loop the harness does not
-interpret.
+2420 functional test cases 2416 pass byte-identically, all of them gated,
+with this repo's 27. The other four (`journal/fastpath.test` 6, 9, 11 and
+13) check the statistics line of hledger's fast-path journal parser, which
+hledgers does not have by design; they are listed as such and not run.
 
 ## Build
 
@@ -145,7 +146,9 @@ a separate process.
   that must pass; it grows with each milestone. Other cases are run and counted
   but do not fail the build.
 - `tests/shelltest-unsupported.txt` lists the cases whose command lines use
-  shell features the harness does not support, with the reason.
+  shell features the harness does not support, with the reason, and the cases
+  that can not pass by design (reason `by-design: ...`), which are not run and
+  are counted apart.
 - `HLEDGERS_TEST_FILTER=GLOB` runs only matching test files, eg `'cli/*.test'`.
 - `HLEDGERS_TEST_VERBOSE=1` shows the details of every failing case, not just
   gated ones.

@@ -599,8 +599,7 @@ pub fn journal_items_as_text(
     out
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::amount::{MixedAmount, hrs, num, usd};
     use crate::dates::Day;
@@ -638,8 +637,8 @@ mod tests {
     }
 
     // tests_Transaction "postingsAsLines".
-    #[test]
-    fn posting_lines() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn posting_lines() {
         let one = || usd(d("1"));
         assert!(lines(&[]).is_empty());
         assert_eq!(
@@ -685,8 +684,8 @@ mod tests {
     }
 
     // tests_Transaction "showTransaction".
-    #[test]
-    fn transactions() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn transactions() {
         let show = |t: &Transaction| show_transaction(t, PostingLayout::default(), false);
         assert_eq!(show(&Transaction::default()), "0000-01-01\n\n");
         let p = Posting {

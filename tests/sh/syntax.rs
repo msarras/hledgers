@@ -68,6 +68,12 @@ pub struct Simple {
 pub enum Command {
     Simple(Simple),
     Subshell(List, Vec<Redir>),
+    /// `for NAME in WORDS; do LIST; done`
+    For {
+        name: String,
+        words: Vec<Word>,
+        body: List,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,8 +179,15 @@ impl Parser {
         }
     }
 
+    /// Whether the reserved word `w` starts here.
+    fn at_reserved(&self, w: &str) -> bool {
+        let n = w.chars().count();
+        self.s[self.i..].iter().take(n).copied().eq(w.chars())
+            && self.peek_at(n).is_none_or(is_meta)
+    }
+
     /// and-or lists separated by `;` or newlines, up to the end or (inside a
-    /// subshell or command substitution) a `)`.
+    /// subshell, command substitution or `for` loop) a `)` or `done`.
     fn list(&mut self, nested: bool) -> Result<List, Unsupported> {
         let mut items = Vec::new();
         loop {
@@ -182,6 +195,7 @@ impl Parser {
             match self.peek() {
                 None => break,
                 Some(')') if nested => break,
+                _ if nested && self.at_reserved("done") => break,
                 _ => {}
             }
             items.push(self.and_or()?);
@@ -246,6 +260,9 @@ impl Parser {
             }
             return Ok(Command::Subshell(list, redirs));
         }
+        if self.at_reserved("for") {
+            return self.for_loop();
+        }
         let mut cmd = Simple::default();
         loop {
             self.blanks();
@@ -274,6 +291,40 @@ impl Parser {
             return Err("empty command".into());
         }
         Ok(Command::Simple(cmd))
+    }
+
+    /// `for NAME in WORDS; do LIST; done`, after `for`. The loop's own
+    /// redirections, `for NAME; do` and `for NAME do` are not supported.
+    fn for_loop(&mut self) -> Result<Command, Unsupported> {
+        self.i += "for".len();
+        self.blanks();
+        let name = self.name();
+        self.blanks();
+        if name.is_empty() || !self.at_reserved("in") {
+            return Err("`for` without `NAME in`".into());
+        }
+        self.i += "in".len();
+        let mut words = Vec::new();
+        loop {
+            self.blanks();
+            match self.peek() {
+                Some(';' | '\n') => break,
+                Some(c) if !is_meta(c) => words.push(self.word(false)?),
+                _ => return Err("`for` words not ended by `;`".into()),
+            }
+        }
+        self.i += 1;
+        self.blanks_and_newlines();
+        if !self.at_reserved("do") {
+            return Err("`for` without `do`".into());
+        }
+        self.i += "do".len();
+        let body = self.list(true)?;
+        if !self.at_reserved("done") {
+            return Err("`for` without `done`".into());
+        }
+        self.i += "done".len();
+        Ok(Command::For { name, words, body })
     }
 
     /// A redirection, if one starts here.
@@ -652,12 +703,25 @@ mod tests {
         let script =
             parse("#!/usr/bin/env -S sh\n# comment\ncd .. && hledger x\necho | y\n").unwrap();
         assert_eq!(script.0.len(), 2);
+        let l = parse("for a in x 'y z' $b; do echo $a || c; d; done; e").unwrap();
+        assert_eq!(l.0.len(), 2);
+        assert!(
+            matches!(&l.0[0].first.0[0], Command::For { name, words, body } if name == "a" && words.len() == 3 && body.0.len() == 2)
+        );
+        assert!(matches!(
+            &parse("for f in a\ndo\n  g $f\ndone").unwrap().0[0].first.0[0],
+            Command::For { .. }
+        ));
     }
 
     #[test]
     fn unsupported_shapes() {
         for src in [
-            "for a in x; do echo $a; done",
+            "for a; do echo $a; done",
+            "for a in x; do echo $a done",
+            "for a in x | y; do z; done",
+            "for a in x; do (echo $a; done)",
+            "for a in x; do echo $a; done >f",
             "ls *.j &",
             "echo `pwd`",
             "cat <<EOF",

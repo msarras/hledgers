@@ -641,8 +641,7 @@ pub fn elide_account_name(width: isize, s: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -656,8 +655,8 @@ mod tests {
     }
 
     // tests_AccountName "expandAccountNames".
-    #[test]
-    fn expand_names() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn expand_names() {
         assert_eq!(
             expand_account_names(["assets:cash", "assets:checking", "expenses:vacation"]),
             [
@@ -675,8 +674,8 @@ mod tests {
     }
 
     // tests_AccountName "isAccountNamePrefixOf".
-    #[test]
-    fn prefix_of() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn prefix_of() {
         assert!(!is_account_name_prefix_of("assets", "assets"));
         assert!(is_account_name_prefix_of("assets", "assets:bank"));
         assert!(is_account_name_prefix_of("assets", "assets:bank:checking"));
@@ -684,8 +683,8 @@ mod tests {
     }
 
     // tests_AccountName "isSubAccountNameOf".
-    #[test]
-    fn sub_account_of() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn sub_account_of() {
         assert!(!is_sub_account_name_of("assets", "assets"));
         assert!(is_sub_account_name_of("assets:bank", "assets"));
         assert!(!is_sub_account_name_of("assets:bank:checking", "assets"));
@@ -693,8 +692,8 @@ mod tests {
     }
 
     // tests_AccountName "accountNameInferType".
-    #[test]
-    fn infer_type() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn infer_type() {
         use AccountType::*;
         for (name, t) in [
             ("assets", Some(Asset)),
@@ -728,8 +727,8 @@ mod tests {
     }
 
     // tests_AccountName "joinAccountNames", tests_Posting "joinAccountNames".
-    #[test]
-    fn join_names() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn join_names() {
         assert_eq!(join_account_names("assets", "cash"), "assets:cash");
         assert_eq!(join_account_names("assets:cash", "a"), "assets:cash:a");
         assert_eq!(join_account_names("assets", "(cash)"), "(assets:cash)");
@@ -742,8 +741,8 @@ mod tests {
     }
 
     // tests_AccountName "concatAccountNames", tests_Posting "concatAccountNames".
-    #[test]
-    fn concat_names() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn concat_names() {
         assert_eq!(concat_account_names(&["assets", "cash"]), "assets:cash");
         assert_eq!(concat_account_names(&["assets:cash", "a"]), "assets:cash:a");
         assert_eq!(concat_account_names(&["assets", "(cash)"]), "(assets:cash)");
@@ -757,8 +756,8 @@ mod tests {
 
     // tests_Posting "accountNamePostingType", "accountNameWithoutPostingType",
     // "accountNameWithPostingType".
-    #[test]
-    fn posting_types() {
+    #[cfg_attr(test, test)]
+    pub(crate) fn posting_types() {
         assert_eq!(account_name_posting_type("a"), Realness::Real);
         assert_eq!(account_name_posting_type("(a)"), Realness::Virtual);
         assert_eq!(account_name_posting_type("[a]"), Realness::BalancedVirtual);
