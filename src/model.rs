@@ -707,6 +707,9 @@ pub struct Journal {
     pub default_commodity: Option<(Sym, Arc<AmountStyle>)>,
     /// When the files were read (jlastreadtime).
     pub last_read_time: Option<std::time::SystemTime>,
+    /// Other files the data came from, such as CSV rules files, whose
+    /// changes repl notices (jauxfiles).
+    pub aux_files: Vec<String>,
 }
 
 impl Journal {

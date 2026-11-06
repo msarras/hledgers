@@ -156,9 +156,10 @@ fn pretty_bytes(e: &ParseError, name: &str, b: &[u8]) -> String {
 /// checked (CsvReader's parse). `sep` is the separator its format implies.
 pub fn read_csv_file(iopts: &InputOpts, f: &str, sep: char) -> Result<Journal, String> {
     let rules_file = rules_file_for(f, iopts.rules_file.as_deref())?;
-    let (rules, _) = super::rules::read_rules(&rules_file)?;
+    let (rules, rules_files) = super::rules::read_rules(&rules_file)?;
     let text = read_data(f, &rules_file, &rules)?;
-    let (j, context) = read_journal_from_csv(iopts, &rules_file, &rules, f, &text, Some(sep))?;
+    let (mut j, context) = read_journal_from_csv(iopts, &rules_file, &rules, f, &text, Some(sep))?;
+    j.aux_files = rules_files;
     finalise_csv_journal(iopts, f, j, &context)
 }
 
@@ -188,7 +189,7 @@ pub fn read_rules_data_with(
     rules_file: &str,
     postprocess: impl FnOnce(Journal, &CsvContext) -> Result<Journal, String>,
 ) -> Result<Journal, String> {
-    let (rules, _) = super::rules::read_rules(rules_file)?;
+    let (rules, rules_files) = super::rules::read_rules(rules_file)?;
     let (pattern, command) = match rules.directive("source") {
         None => (None, None),
         Some(s) => {
@@ -265,7 +266,8 @@ pub fn read_rules_data_with(
         _ => String::new(),
     };
     let csv_file = data_file.as_deref().unwrap_or("(cmd)");
-    let (j, context) = read_journal_from_csv(iopts, rules_file, &rules, csv_file, &text, None)?;
+    let (mut j, context) = read_journal_from_csv(iopts, rules_file, &rules, csv_file, &text, None)?;
+    j.aux_files = rules_files.into_iter().chain(existing).collect();
     let j = postprocess(j, &context)?;
     if !text.is_empty() && iopts.importing && rules.directive("archive").is_some() && !iopts.dry_run
     {

@@ -23,12 +23,13 @@ pub mod quickref;
 pub mod register;
 pub mod rewrite;
 pub mod roi;
+pub mod run;
 pub mod stats;
 pub mod tags;
 pub mod transactions;
 
 use super::args::{Arity, Flag, General, Hidden, Mode};
-use super::opts::{CONF_FLAGS, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
+use super::opts::CONF_FLAGS;
 
 /// The mode used when no command is given (mainmode): the config file
 /// flags shown first, the legacy flags hidden.
@@ -71,8 +72,8 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &register::MODE,
     &rewrite::MODE,
     &roi::MODE,
-    &RUN_MODE,
-    &REPL_MODE,
+    &run::RUN_MODE,
+    &run::REPL_MODE,
     &SETUP_MODE,
     &stats::MODE,
     &tags::MODE,
@@ -119,33 +120,6 @@ static GET_MODE: Mode = Mode {
     general: General::Groups2,
     args: None,
     doc: crate::command_doc!("Get"),
-    ..Mode::DEFAULT
-};
-
-static RUN_MODE: Mode = Mode {
-    name: "run",
-    flags: &[
-        output_format_flag("select the output format. Supported formats:\nhtml."),
-        OUTPUT_FILE_FLAG,
-        OUTPUT_VIEW_FLAG,
-    ],
-    args: Some(
-        "[COMMANDS_FILE1 COMMANDS_FILE2 ...] OR [-- command1 args... -- command2 args... -- command3 args...]",
-    ),
-    doc: crate::command_doc!("Run"),
-    ..Mode::DEFAULT
-};
-
-static REPL_MODE: Mode = Mode {
-    name: "repl",
-    flags: &[Flag::new(
-        &["no-watch"],
-        Arity::None,
-        "",
-        "disable automatic reloading of changed input files, config aliases and addon commands",
-    )],
-    args: None,
-    doc: crate::command_doc!("Repl"),
     ..Mode::DEFAULT
 };
 

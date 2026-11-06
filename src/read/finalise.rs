@@ -708,6 +708,7 @@ pub fn journal_concat(mut j1: Journal, j2: Journal) -> Journal {
     j1.files.extend(j2.files);
     j1.default_commodity = j2.default_commodity;
     j1.last_read_time = j1.last_read_time.max(j2.last_read_time);
+    j1.aux_files.extend(j2.aux_files);
     journal_renumber_account_declarations(&mut j1);
     j1
 }
