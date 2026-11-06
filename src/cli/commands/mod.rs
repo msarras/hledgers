@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod activity;
+pub mod add;
 pub mod aregister;
 pub mod balance;
 pub mod check;
@@ -47,7 +48,7 @@ pub static MAIN_MODE: Mode = Mode {
 pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
     &activity::MODE,
-    &ADD_MODE,
+    &add::MODE,
     &aregister::MODE,
     &balance::MODE,
     &compound::BALANCESHEETEQUITY.mode,
@@ -81,24 +82,6 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
 ];
 
 // The modes of the commands milestone 8b implements.
-
-static ADD_MODE: Mode = Mode {
-    name: "add",
-    flags: &[
-        Flag::new(
-            &["no-new-accounts"],
-            Arity::None,
-            "",
-            "don't allow creating new accounts",
-        ),
-        print::LAYOUT_FLAG,
-    ],
-    general: General::Group2,
-    hidden: Hidden::Conf,
-    args: Some("[-f JOURNALFILE] [DATE [DESCRIPTION [ACCOUNT1 [ETC..]]]]]"),
-    doc: crate::command_doc!("Add"),
-    ..Mode::DEFAULT
-};
 
 static GET_MODE: Mode = Mode {
     name: "get",

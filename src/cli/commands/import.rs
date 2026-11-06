@@ -186,7 +186,7 @@ fn quote_if_needed(s: &str) -> String {
 /// ending with exactly one newline; or with `-`, write it to standard
 /// output (appendToJournalFileOrStdout). The file is created if need be,
 /// and the filesystem is first checked to append safely.
-fn append_to_journal_file_or_stdout(
+pub fn append_to_journal_file_or_stdout(
     f: &str,
     text: impl FnOnce() -> Result<String, String>,
 ) -> Result<(), String> {

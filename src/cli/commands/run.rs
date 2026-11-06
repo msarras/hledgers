@@ -469,9 +469,11 @@ impl<'a> Session<'a> {
                 let mut j = crate::read::read_possible_journal_files(&opts.input, &paths)?;
                 crate::cli::journal_transform(&opts, &mut j)?;
                 if cmdname == "add" {
-                    return Err(commands::not_yet("add", "8b").into());
+                    commands::add::add(&opts, j)?;
+                } else {
+                    commands::import::import(&opts, j)?;
                 }
-                return Ok(commands::import::import(&opts, j)?);
+                return Ok(());
             }
             _ => {}
         }

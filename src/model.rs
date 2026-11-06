@@ -705,6 +705,11 @@ pub struct Journal {
     /// end of parsing (jparsedefaultcommodity), whose style counts as a
     /// declared one.
     pub default_commodity: Option<(Sym, Arc<AmountStyle>)>,
+    /// The decimal mark and the default year in effect at the end of
+    /// parsing (jparsedecimalmark, jparsedefaultyear), which add's amounts
+    /// are read with.
+    pub parse_decimal_mark: Option<char>,
+    pub parse_year: Option<i64>,
     /// When the files were read (jlastreadtime).
     pub last_read_time: Option<std::time::SystemTime>,
     /// Other files the data came from, such as CSV rules files, whose

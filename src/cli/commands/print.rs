@@ -647,7 +647,7 @@ pub fn transaction_with_mostly_original_postings(
 /// The transaction whose description is most like this one, nearer dates
 /// preferred, among those the flags' query selects
 /// (journalSimilarTransaction).
-fn journal_similar_transaction(opts: &CliOpts, j: &Journal, desc: &str) -> Option<Transaction> {
+pub fn journal_similar_transaction(opts: &CliOpts, j: &Journal, desc: &str) -> Option<Transaction> {
     let today = opts.spec.today;
     let q = opts.spec.opts.query_from_flags();
     let mut scored: Vec<(f64, &Transaction)> = j
