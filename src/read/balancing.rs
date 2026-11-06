@@ -711,21 +711,25 @@ pub fn journal_balance_transactions(
         commodity_styles: Some(styles_with_rounding(Rounding::Hard, &j.commodity_styles())),
         ..bopts.clone()
     };
-    let mut items = Vec::new();
-    for i in 0..j.txns.len() {
-        if j.txns[i]
-            .postings
-            .iter()
-            .any(Posting::has_balance_assignment)
-        {
-            items.push(Item::Txn(i));
-            continue;
+    // the transactions without balance assignments are balanced on their
+    // own, independently; the first error, in journal order, is reported
+    let balanced = crate::par::map_owned(std::mem::take(&mut j.txns), |t| {
+        if t.postings.iter().any(Posting::has_balance_assignment) {
+            return (true, Ok(t));
         }
-        let t = std::mem::take(&mut j.txns[i]);
-        let (t, _) = balance_transaction_maybe_splitting_lot_fees(&bopts, t)?;
-        let (t, _) = transaction_maybe_add_imbalance_postings(&bopts, t);
-        items.extend((0..t.postings.len()).map(|k| Item::Posting(i, k)));
-        j.txns[i] = t;
+        let balanced = balance_transaction_maybe_splitting_lot_fees(&bopts, t)
+            .map(|(t, _)| transaction_maybe_add_imbalance_postings(&bopts, t).0);
+        (false, balanced)
+    });
+    let mut items = Vec::new();
+    for (i, (assigned, t)) in balanced.into_iter().enumerate() {
+        let t = t?;
+        if assigned {
+            items.push(Item::Txn(i));
+        } else {
+            items.extend((0..t.postings.len()).map(|k| Item::Posting(i, k)));
+        }
+        j.txns.push(t);
     }
     let mode = if bopts.ignore_assertions {
         Assertions::DontCheck
