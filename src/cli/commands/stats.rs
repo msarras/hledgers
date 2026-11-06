@@ -8,7 +8,6 @@ use crate::account::account_name_level;
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::{warn_if_large_multi_period_report, with_title};
 use crate::cli::opts::CliOpts;
-use crate::cli::version::PROGNAME_AND_VERSION;
 use crate::dates::{DateSpan, Day, maybe_day_partition_to_date_spans};
 use crate::model::{Journal, PostingRef, Transaction};
 use crate::query::Query;
@@ -68,7 +67,8 @@ pub fn stats(opts: &CliOpts, j: Journal) -> Result<String, String> {
     items.push(format!("{} s elapsed", show_ffloat(2, elapsed)));
     items.push(format!("{} txns/s", show_ffloat(0, txns as f32 / elapsed)));
     if oneline {
-        let version = PROGNAME_AND_VERSION.trim_start_matches("hledger ");
+        let version = crate::cli::version::progname_and_version("");
+        let version = version.trim_start();
         out.push_str(&format!("{version}\t{}\n", items.join("\t")));
     } else {
         let label = format!("{:<LABEL_WIDTH$}: ", "Runtime stats");

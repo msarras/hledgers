@@ -522,9 +522,18 @@ fn flag_args(f: &Flag) -> impl Iterator<Item = String> + '_ {
 /// highlighting: helpText HelpFormatDefault and showText (Wrap 80)): the
 /// usage line, the preamble, the flags (the command's own, then the general
 /// ones group by group), the postamble, and a blank line.
-pub fn mode_usage(mode: &Mode) -> String {
-    let (preamble, postamble) = parse_command_help(mode.doc);
-    let mut usage = format!("{} [OPTIONS]", mode.name);
+/// Where the main mode's name and preamble name the program, they use its
+/// name as invoked.
+pub fn mode_usage(mode: &Mode, progname: &str) -> String {
+    let (mut preamble, postamble) = parse_command_help(mode.doc);
+    let name = match mode.name.strip_prefix("hledger ") {
+        Some(rest) => {
+            preamble = preamble.replace("`hledger ", &format!("`{progname} "));
+            format!("{progname} {rest}")
+        }
+        None => mode.name.to_string(),
+    };
+    let mut usage = format!("{name} [OPTIONS]");
     if let Some(a) = mode.args {
         usage.push(' ');
         usage.push_str(a);
@@ -875,7 +884,7 @@ Spagetti Bolognaise  An Italian delight.
         let (pre, post) = parse_command_help(crate::cli::commands::help::MODE.doc);
         assert_eq!(pre, "Show some part of hledger's documentation.\n");
         assert_eq!(post[0], "The part shown is selected by arguments:");
-        let usage = mode_usage(&crate::cli::commands::codes::MODE);
+        let usage = mode_usage(&crate::cli::commands::codes::MODE, "hledger");
         assert!(usage.starts_with(
             "codes [OPTIONS] [QUERY]\n  List the codes seen in transactions, in the order parsed.\n\n\nGeneral input flags:\n  -f --file=[FMT:]FILE      Use this as the journal file (- means stdin). If\n"
         ));

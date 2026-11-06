@@ -28,11 +28,16 @@ pub fn write_output(opts: &CliOpts, text: &str) -> Result<(), String> {
 /// Show some text on standard output, for help and documentation, which
 /// --output-file does not redirect (runPager).
 pub fn run_pager(text: &str) -> Result<(), String> {
+    print_stdout(text);
+    Ok(())
+}
+
+/// Write text to standard output; a reader that stops early is not an error.
+pub fn print_stdout(text: &str) {
     let mut stdout = std::io::stdout().lock();
     let _ = stdout
         .write_all(text.as_bytes())
         .and_then(|()| stdout.flush());
-    Ok(())
 }
 
 /// The report's title, if --title gives one, and a blank line, before the

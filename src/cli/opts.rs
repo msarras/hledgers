@@ -291,6 +291,8 @@ pub struct CliOpts {
     /// When the program started, nearly: when its options were made
     /// (progstarttime_).
     pub start_time: std::time::Instant,
+    /// The program's name as invoked, for help.
+    pub progname: String,
 }
 
 impl CliOpts {
@@ -337,6 +339,7 @@ impl CliOpts {
             width: raw.string("width").map(str::to_string),
             available_width: 80,
             start_time: std::time::Instant::now(),
+            progname: "hledger".to_string(),
             raw,
         })
     }
