@@ -126,11 +126,24 @@ impl Day {
     }
 }
 
-/// The local time zone's offset from UTC at this time, in seconds, from the
-/// TZ variable's simple forms or /etc/localtime; UTC if unknown.
-pub fn local_utc_offset_seconds(_utc_secs: i64) -> i64 {
-    // M8: local time zones (tz-rs, per the plan); the tests run with explicit dates or in UTC.
-    0
+/// The local time zone's offset from UTC at this time, in seconds, as the C
+/// library finds it (the TZ variable, else /etc/localtime); UTC if unknown
+/// (getCurrentTimeZone).
+pub fn local_utc_offset_seconds(utc_secs: i64) -> i64 {
+    static LOCAL: std::sync::OnceLock<Option<tz::TimeZone>> = std::sync::OnceLock::new();
+    LOCAL
+        .get_or_init(|| match std::env::var("TZ") {
+            Ok(s) if s.is_empty() => Some(tz::TimeZone::utc()),
+            // a daylight saving zone without rules gets the C library's
+            // default, the US rules
+            Ok(s) => tz::TimeZone::from_posix_tz(&s)
+                .or_else(|_| tz::TimeZone::from_posix_tz(&format!("{s},M3.2.0,M11.1.0")))
+                .ok(),
+            Err(_) => tz::TimeZone::local().ok(),
+        })
+        .as_ref()
+        .and_then(|z| z.find_local_time_type(utc_secs).ok())
+        .map_or(0, |t| i64::from(t.ut_offset()))
 }
 
 /// Today's date, in the local time zone (getCurrentDay).
