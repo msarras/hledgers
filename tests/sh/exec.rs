@@ -217,6 +217,19 @@ impl Shell {
                 Err(status) => Ok(status),
             },
             Command::Simple(s) => self.run_simple(s, io),
+            Command::For { name, words, body } => {
+                let mut items = Vec::new();
+                for w in words {
+                    check_glob(w, &self.cwd).map_err(Flow::Unsupported)?;
+                    items.extend(self.expand(w, io)?);
+                }
+                let mut status = 0;
+                for item in items {
+                    self.set(name, item);
+                    status = self.run_list(body, io)?;
+                }
+                Ok(status)
+            }
         }
     }
 
