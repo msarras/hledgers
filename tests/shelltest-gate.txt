@@ -9,7 +9,7 @@ account-aliases.test
 accounts-sorting.test
 accounts.test
 activity.test
-add.test:19
+add.test
 amount-rendering.test
 aregister-charts.test
 aregister.test
@@ -56,7 +56,7 @@ check-tags.test
 check-uniqueleafnames.test
 cli/addons.test
 cli/cli.test:1-47,49-54
-cli/command-aliases.test:1-15,21-25,27-29,31-32
+cli/command-aliases.test
 cli/commodity-style.test
 cli/date-options.test
 cli/multiple-files.test
@@ -115,6 +115,7 @@ errors/tcorderedactions.test
 errors/tdquantity.test
 errors/uniqueleafnames.test
 forecast.test
+get.test
 help.test
 holdings-charts.test
 holdings.test
@@ -132,8 +133,9 @@ import/rulesdir.test
 incomestatement.test
 journal/account-display-order/account-display-order.test
 journal/account-types.test
-journal/amount-expressions.test:1-14,17-36
+journal/amount-expressions.test
 journal/amounts-and-commodities.test
+journal/anon.test
 journal/assertions.test
 journal/auto-postings.test
 journal/blank-description.test
@@ -165,7 +167,7 @@ journal/lots-none.test
 journal/lots-short.test
 journal/lots-transfer-entries.test
 journal/lots-transfer.test
-journal/lots.test:1-13,17,19
+journal/lots.test
 journal/numbers.test
 journal/parens-in-account-name.test
 journal/parse-errors.test
@@ -186,10 +188,11 @@ notes.test
 payees.test
 pivot.test
 prices.test
-print/beancount.test:7
+print/beancount.test
 print/csv.test
 print/date2.test
 print/explicit.test
+print/export-ledger.test
 print/export.test
 print/long-account-name.test
 print/print-style.test
@@ -217,6 +220,7 @@ rewrite.test
 roi.test
 rules/import-upstream.test
 rules/let-split.test
+run.test
 stats.test
 table-rendering.test
 tags.test
