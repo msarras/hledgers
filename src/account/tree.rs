@@ -448,15 +448,27 @@ impl AccountTree<BalanceData> {
     pub fn from_postings<'a>(
         postings: impl IntoIterator<Item = (Option<Day>, &'a str, &'a MixedAmount)>,
     ) -> AccountTree<BalanceData> {
-        let mut balances: HashMap<&str, PeriodData<BalanceData>> = HashMap::new();
+        // each account's postings, in order, are added up apart from the others'
+        let mut by_account: HashMap<&str, Vec<(Option<Day>, &MixedAmount)>> = HashMap::new();
         for (day, account, amount) in postings {
-            let b = BalanceData {
-                excl: amount.clone(),
-                incl: MixedAmount::null(),
-                postings: 1,
-            };
-            balances.entry(account).or_default().insert(day, b);
+            by_account.entry(account).or_default().push((day, amount));
         }
+        let by_account: Vec<_> = by_account.into_iter().collect();
+        let mut balances: HashMap<&str, PeriodData<BalanceData>> =
+            crate::par::map_owned(by_account, |(account, postings)| {
+                let mut data = PeriodData::default();
+                for (day, amount) in postings {
+                    let b = BalanceData {
+                        excl: amount.clone(),
+                        incl: MixedAmount::null(),
+                        postings: 1,
+                    };
+                    data.insert(day, b);
+                }
+                (account, data)
+            })
+            .into_iter()
+            .collect();
         let root_data = balances.remove("...").unwrap_or_default();
         let names: Vec<&str> = balances.keys().copied().collect();
         let mut tree = AccountTree::from_names("root", root_data, names, |n| {
