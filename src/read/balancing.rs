@@ -612,11 +612,10 @@ fn cost_inferrer_for(
         .iter()
         .filter(|p| p.realness == realness && !set_aside(p))
         .collect();
-    let commodities: Vec<Sym> = ps
-        .iter()
-        .flat_map(|p| p.amount.amounts())
-        .map(|a| a.commodity)
-        .collect();
+    // no postings sum to nothing, which needs no cost
+    if ps.is_empty() {
+        return None;
+    }
     let sum = sum_postings(&ps).amounts();
     let [a, b] = sum.as_slice() else { return None };
     if a.cost.is_some()
@@ -626,6 +625,11 @@ fn cost_inferrer_for(
     {
         return None;
     }
+    let commodities: Vec<Sym> = ps
+        .iter()
+        .flat_map(|p| p.amount.amounts())
+        .map(|a| a.commodity)
+        .collect();
     let prefer = |has: &dyn Fn(&Sym) -> bool| match (has(&a.commodity), has(&b.commodity)) {
         (true, false) => Some((a, b)),
         (false, true) => Some((b, a)),
