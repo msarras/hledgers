@@ -50,6 +50,16 @@ impl Default for PostingLayout {
 /// the comment lines, and the postings; multi-commodity amounts as one
 /// posting per commodity, unless `one_line_amounts`.
 pub fn show_transaction(t: &Transaction, layout: PostingLayout, one_line_amounts: bool) -> String {
+    show_transaction_with(&AmountFormat::DEFAULT, t, layout, one_line_amounts)
+}
+
+/// Like [`show_transaction`], with posting amounts in this format.
+pub fn show_transaction_with(
+    fmt: &AmountFormat,
+    t: &Transaction,
+    layout: PostingLayout,
+    one_line_amounts: bool,
+) -> String {
     let mut out = String::with_capacity(256);
     out.push_str(&t.preceding_comment);
     out.push_str(&transaction_first_line(t));
@@ -58,12 +68,7 @@ pub fn show_transaction(t: &Transaction, layout: PostingLayout, one_line_amounts
         out.push_str(c);
         out.push('\n');
     }
-    for l in postings_as_lines(
-        &AmountFormat::DEFAULT,
-        one_line_amounts,
-        layout,
-        &t.postings,
-    ) {
+    for l in postings_as_lines(fmt, one_line_amounts, layout, &t.postings) {
         out.push_str(&l);
         out.push('\n');
     }
@@ -511,6 +516,8 @@ fn truncate(q: &Decimal) -> Decimal {
 pub struct ItemRenderer<'a> {
     pub transaction: &'a dyn Fn(&Transaction) -> String,
     pub directive: &'a dyn Fn(&str) -> Option<String>,
+    pub comment: &'a dyn Fn(&str) -> String,
+    pub comment_block: &'a dyn Fn(&str) -> String,
 }
 
 /// A journal's items as text, with these transactions in place of the
@@ -543,9 +550,8 @@ pub fn journal_items_as_text(
                 }
             }
             JournalItem::Blank | JournalItem::Include(_) => blocks.push(Block::Break),
-            JournalItem::Comment(t) | JournalItem::CommentBlock(t) => {
-                blocks.push(Block::Lines(t.clone()))
-            }
+            JournalItem::Comment(t) => blocks.push(Block::Lines((r.comment)(t))),
+            JournalItem::CommentBlock(t) => blocks.push(Block::Lines((r.comment_block)(t))),
             JournalItem::Directive(t) => {
                 if let Some(s) = (r.directive)(t) {
                     blocks.push(Block::Lines(s));

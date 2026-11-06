@@ -268,6 +268,35 @@ pub fn read_journal_file(iopts: &InputOpts, prefixed: &str) -> Result<Journal, S
     Ok(j)
 }
 
+/// Read and finalise one journal file as run and repl read each file
+/// (readJournalFile), with the strict checks if enabled; standard input
+/// (`-`) is read from `stdin`, its text read before, in the input options'
+/// format or as a journal (readJournal with no file path).
+pub fn read_journal_file_checked(
+    iopts: &InputOpts,
+    prefixed: &str,
+    stdin: &str,
+) -> Result<Journal, String> {
+    let f = journal::split_reader_prefix(prefixed).1;
+    let j = if f == "-" {
+        match iopts.format.as_deref().unwrap_or("journal") {
+            "timeclock" => timeclock::read_timeclock(iopts, "-", stdin)?,
+            "timedot" => timedot::read_timedot(iopts, "-", stdin)?,
+            "journal" => {
+                let (j, st) = journal::parse_journal(iopts, "-", stdin)?;
+                finalise::journal_finalise(iopts, "-", stdin, j, st)?
+            }
+            _ => read_journal_file(iopts, prefixed)?,
+        }
+    } else {
+        read_journal_file(iopts, prefixed)?
+    };
+    if iopts.strict && !iopts.defer {
+        checks::journal_strict_checks(&j)?;
+    }
+    Ok(j)
+}
+
 /// Read and finalise one journal file; with --new, keep only the
 /// transactions it has added since its latest dates were saved, and give
 /// its new latest dates (readJournalFileAndLatestDates).

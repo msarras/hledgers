@@ -7,7 +7,6 @@ use crate::amount::render::{AmountFormat, show_amount_b};
 use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
 use crate::cli::anchor::set_account_anchor;
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::not_yet;
 use crate::cli::io::with_title;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::dates::Day;
@@ -17,6 +16,10 @@ use crate::model::{
 };
 use crate::reports::entries::{entries_report, entries_report_unsorted};
 use crate::text::{is_space, strip};
+use crate::write::beancount::{
+    beancount_comment_block, beancount_comment_line, beancount_directives,
+    beancount_rename_accounts, beancount_transactions, show_transaction_beancount,
+};
 use crate::write::csv::{print_csv, print_tsv};
 use crate::write::fods::{locale_encoding_name, print_fods};
 use crate::write::html::titled_table_html;
@@ -24,6 +27,7 @@ use crate::write::journal::{
     ItemRenderer, PostingLayout, journal_items_as_text, show_account_name, show_transaction,
 };
 use crate::write::json::to_json_text;
+use crate::write::ledger::{ledger_directive, show_transaction_ledger};
 use crate::write::spreadsheet::{
     Cell, CellType, add_header_borders, add_row_span_header, cell_from_amount, integer_cell,
     raw_table_content,
@@ -206,34 +210,80 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             })
             .collect()
     };
+    let forecasting = opts.input.forecast.is_some();
+    let auto = opts.input.auto;
+    let without_applied_rules = |d: &str| {
+        let applied = (forecasting && d.starts_with('~')) || (auto && d.starts_with('='));
+        !applied
+    };
+    let strip_nl = |s: String| s.strip_suffix('\n').map(str::to_string).unwrap_or(s);
+    let verbatim = |t: &str| t.to_string();
     if raw.bool("export") {
+        let mut j = entries_report_unsorted(&opts.spec, j)?;
+        let txns = std::mem::take(&mut j.txns);
         return match fmt.as_str() {
-            "journal" => {
-                let j = entries_report_unsorted(&opts.spec, j)?;
-                let txns: Vec<Transaction> = j
-                    .txns
+            "journal" | "ledger" => {
+                let txns: Vec<Transaction> = txns
                     .into_iter()
                     .map(|t| maybe_original_amounts(opts, false, t))
                     .collect();
                 let txns = style_all(txns, &styles);
-                let forecasting = opts.input.forecast.is_some();
-                let auto = opts.input.auto;
+                let ledger = fmt == "ledger";
                 let show = |t: &Transaction| {
-                    let s = show_transaction(t, layout, false);
-                    s.strip_suffix('\n').map(str::to_string).unwrap_or(s)
+                    strip_nl(if ledger {
+                        show_transaction_ledger(t)
+                    } else {
+                        show_transaction(t, layout, false)
+                    })
                 };
                 let directive = |d: &str| {
-                    let applied =
-                        (forecasting && d.starts_with('~')) || (auto && d.starts_with('='));
-                    (!applied).then(|| d.to_string())
+                    let d = if ledger {
+                        ledger_directive(d)
+                    } else {
+                        d.to_string()
+                    };
+                    without_applied_rules(&d).then_some(d)
                 };
                 let renderer = ItemRenderer {
                     transaction: &show,
                     directive: &directive,
+                    comment: &verbatim,
+                    comment_block: &verbatim,
                 };
                 Ok(journal_items_as_text(&renderer, &j.items, &txns))
             }
-            "ledger" | "beancount" => Err(not_yet(&format!("print -O {fmt}"), "8")),
+            "beancount" => {
+                for pd in &mut j.price_directives {
+                    pd.amount = pd.amount.clone().styled(&styles);
+                }
+                let txns = txns
+                    .into_iter()
+                    .map(|t| fill_balance_assignments(opts, t))
+                    .collect();
+                let mut txns = beancount_transactions(style_all(txns, &styles));
+                beancount_rename_accounts(&mut j, &mut txns);
+                let directives = beancount_directives(&j, &txns)?;
+                // the first account name Beancount can't take is the error
+                let err = std::cell::RefCell::new(None);
+                let show = |t: &Transaction| match show_transaction_beancount(t) {
+                    Ok(s) => strip_nl(s),
+                    Err(e) => {
+                        err.borrow_mut().get_or_insert(e);
+                        String::new()
+                    }
+                };
+                let renderer = ItemRenderer {
+                    transaction: &show,
+                    directive: &|_| None,
+                    comment: &beancount_comment_line,
+                    comment_block: &beancount_comment_block,
+                };
+                let items = journal_items_as_text(&renderer, &j.items, &txns);
+                match err.into_inner() {
+                    Some(e) => Err(e),
+                    None => Ok(directives + "\n" + &items),
+                }
+            }
             _ => Err(
                 "print --export supports only the journal, ledger and beancount output formats"
                     .to_string(),
@@ -241,7 +291,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
         };
     }
     match fmt.as_str() {
-        "journal" => {
+        "journal" | "ledger" => {
             let txns: Vec<Transaction> = entries_report(&opts.spec, j)?
                 .into_iter()
                 .map(|t| maybe_original_amounts(opts, true, t))
@@ -249,10 +299,34 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             let txns = style_all(txns, &styles);
             let mut out = String::new();
             for t in &txns {
-                out.push_str(&show_transaction(t, layout, false));
+                out.push_str(&if fmt == "ledger" {
+                    show_transaction_ledger(t)
+                } else {
+                    show_transaction(t, layout, false)
+                });
             }
             Ok(with_title(opts, out))
         }
+        "beancount" => {
+            let mut j = entries_report_unsorted(&opts.spec, j)?;
+            let mut txns = std::mem::take(&mut j.txns);
+            txns.sort_by_key(|t| opts.spec.opts.transaction_date(t));
+            let txns = txns
+                .into_iter()
+                .map(|t| fill_balance_assignments(opts, t))
+                .collect();
+            let mut txns = beancount_transactions(style_all(txns, &styles));
+            beancount_rename_accounts(&mut j, &mut txns);
+            let mut out = String::new();
+            for t in &txns {
+                out.push_str(&show_transaction_beancount(t)?);
+            }
+            Ok(out)
+        }
+        "sql" => Ok(entries_report_as_sql(&style_all(
+            entries_report(&opts.spec, j)?,
+            &styles,
+        ))),
         "csv" | "tsv" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
             let rows = raw_table_content(entries_report_as_spreadsheet(
@@ -287,9 +361,68 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             entries_report(&opts.spec, j)?,
             &styles,
         ))),
-        "ledger" | "beancount" | "sql" => Err(not_yet(&format!("print -O {fmt}"), "8")),
         _ => Err(unsupported_output_format_error(&fmt)),
     }
+}
+
+/// Transactions as SQL statements creating a postings table and inserting a
+/// row for each posting amount, as in csv output with `.` decimal marks and
+/// no heading, an empty field as NULL (entriesReportAsSql).
+fn entries_report_as_sql(txns: &[Transaction]) -> String {
+    let mut out = String::from(
+        "create table if not exists postings(id serial,txnidx int,date1 date,date2 date,status text,code text,description text,comment text,account text,amount numeric,commodity text,debit numeric,credit numeric,posting_status text,posting_comment text);\n\
+         insert into postings(txnidx,date1,date2,status,code,description,comment,account,amount,commodity,debit,credit,posting_status,posting_comment) values\n",
+    );
+    let mut rows = Vec::new();
+    for t in txns {
+        let mut t = t.clone();
+        for p in &mut t.postings {
+            p.amount = p.amount.map(|a| {
+                let mut a = a.clone();
+                let mut style = (*a.style).clone();
+                style.decimal_mark = Some('.');
+                a.style = style.into();
+                a
+            });
+        }
+        let cells = transaction_to_spreadsheet(&AmountFormat::MACHINE, None, &[], &t);
+        rows.extend(raw_table_content(cells));
+    }
+    let values: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let vs: Vec<String> = row
+                .iter()
+                .map(|v| {
+                    if v.is_empty() {
+                        "NULL".to_string()
+                    } else {
+                        format!("'{}'", v.replace('\'', "''"))
+                    }
+                })
+                .collect();
+            format!("({})\n", vs.join(","))
+        })
+        .collect();
+    out.push_str(&values.join(","));
+    out.push_str(";\n");
+    out
+}
+
+/// The transaction with its amounts as written, as for --export, except
+/// that balance assignments show their inferred amounts, since Beancount
+/// needs every amount (fillBalanceAssignments). The postings are paired by
+/// position, as upstream pairs them.
+fn fill_balance_assignments(opts: &CliOpts, t: Transaction) -> Transaction {
+    let inferred = t.postings.clone();
+    let mut reverted = maybe_original_amounts(opts, false, t);
+    for (r, i) in reverted.postings.iter_mut().zip(&inferred) {
+        let orig = i.original();
+        if orig.assertion.is_some() && orig.amount.is_missing() {
+            r.amount = i.amount.clone();
+        }
+    }
+    reverted
 }
 
 /// Transactions as a table with a row for each posting amount, its
@@ -514,7 +647,7 @@ pub fn transaction_with_mostly_original_postings(
 /// The transaction whose description is most like this one, nearer dates
 /// preferred, among those the flags' query selects
 /// (journalSimilarTransaction).
-fn journal_similar_transaction(opts: &CliOpts, j: &Journal, desc: &str) -> Option<Transaction> {
+pub fn journal_similar_transaction(opts: &CliOpts, j: &Journal, desc: &str) -> Option<Transaction> {
     let today = opts.spec.today;
     let q = opts.spec.opts.query_from_flags();
     let mut scored: Vec<(f64, &Transaction)> = j

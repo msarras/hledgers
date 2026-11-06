@@ -35,6 +35,8 @@ pub fn journal_finalise(
     let check_lots = has_lots && !lenient;
     j.global_commodity_styles = iopts.balancing.commodity_styles.clone().unwrap_or_default();
     j.default_commodity = st.default_commodity;
+    j.parse_decimal_mark = st.decimal_mark;
+    j.parse_year = st.year;
     warn_if_many_forecast_transactions(iopts, &j);
     // setup
     journal_set_last_read_time(&mut j);
@@ -707,7 +709,10 @@ pub fn journal_concat(mut j1: Journal, j2: Journal) -> Journal {
     j1.items.extend(j2.items);
     j1.files.extend(j2.files);
     j1.default_commodity = j2.default_commodity;
+    j1.parse_decimal_mark = j2.parse_decimal_mark;
+    j1.parse_year = j2.parse_year;
     j1.last_read_time = j1.last_read_time.max(j2.last_read_time);
+    j1.aux_files.extend(j2.aux_files);
     journal_renumber_account_declarations(&mut j1);
     j1
 }

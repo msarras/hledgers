@@ -152,7 +152,7 @@ fn find_executable(p: &str) -> bool {
 
 /// The LESS value to run less with (lessVarValue): HLEDGER_LESS if set,
 /// else LESS with hledger's preferred options added, or just those.
-fn less_var_value(hledger_less: Option<&str>, less: Option<&str>, color: bool) -> String {
+pub fn less_var_value(hledger_less: Option<&str>, less: Option<&str>, color: bool) -> String {
     let mut extra = vec![
         "--chop-long-lines",
         "--hilite-unread",
@@ -186,7 +186,7 @@ fn less_var_value(hledger_less: Option<&str>, less: Option<&str>, color: bool) -
 
 /// Whether `less --version` succeeds quietly, within 0.3 s, with this LESS
 /// value (the opposite of lessIsWorking, which returns whether it fails).
-fn less_is_working(less: &str) -> bool {
+pub fn less_is_working(less: &str) -> bool {
     let child = std::process::Command::new("less")
         .arg("--version")
         .env("LESS", less)

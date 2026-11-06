@@ -177,6 +177,27 @@ pub fn elide_left(width: isize, s: &str) -> String {
     }
 }
 
+/// Haskell's isLetter: a character in one of Unicode's letter categories
+/// (Lu, Ll, Lt, Lm, Lo).
+pub fn is_letter(c: char) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    c.is_ascii_alphabetic()
+        || (!c.is_ascii()
+            && RE
+                .get_or_init(|| Regex::new(r"^\p{L}$").unwrap())
+                .is_match(c.encode_utf8(&mut [0; 4])))
+}
+
+/// Haskell's isUpper: an uppercase or titlecase letter (Lu, Lt).
+pub fn is_upper(c: char) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    c.is_ascii_uppercase()
+        || (!c.is_ascii()
+            && RE
+                .get_or_init(|| Regex::new(r"^[\p{Lu}\p{Lt}]$").unwrap())
+                .is_match(c.encode_utf8(&mut [0; 4])))
+}
+
 /// Haskell's isSpace: the ASCII white space characters, no-break space, and
 /// the other Unicode space separators.
 pub fn is_space(c: char) -> bool {

@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod activity;
+pub mod add;
 pub mod aregister;
 pub mod balance;
 pub mod check;
@@ -12,6 +13,7 @@ pub mod compound;
 pub mod descriptions;
 pub mod diff;
 pub mod files;
+pub mod get;
 pub mod help;
 pub mod holdings;
 pub mod import;
@@ -23,12 +25,14 @@ pub mod quickref;
 pub mod register;
 pub mod rewrite;
 pub mod roi;
+pub mod run;
+pub mod setup;
 pub mod stats;
 pub mod tags;
 pub mod transactions;
 
-use super::args::{Arity, Flag, General, Hidden, Mode};
-use super::opts::{CONF_FLAGS, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
+use super::args::{Hidden, Mode};
+use super::opts::CONF_FLAGS;
 
 /// The mode used when no command is given (mainmode): the config file
 /// flags shown first, the legacy flags hidden.
@@ -46,7 +50,7 @@ pub static MAIN_MODE: Mode = Mode {
 pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
     &activity::MODE,
-    &ADD_MODE,
+    &add::MODE,
     &aregister::MODE,
     &balance::MODE,
     &compound::BALANCESHEETEQUITY.mode,
@@ -59,7 +63,7 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &descriptions::MODE,
     &diff::MODE,
     &files::MODE,
-    &GET_MODE,
+    &get::MODE,
     &help::MODE,
     &holdings::MODE,
     &import::MODE,
@@ -71,97 +75,13 @@ pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &register::MODE,
     &rewrite::MODE,
     &roi::MODE,
-    &RUN_MODE,
-    &REPL_MODE,
-    &SETUP_MODE,
+    &run::RUN_MODE,
+    &run::REPL_MODE,
+    &setup::MODE,
     &stats::MODE,
     &tags::MODE,
     &transactions::MODE,
 ];
-
-// The modes of the commands milestone 8b implements.
-
-static ADD_MODE: Mode = Mode {
-    name: "add",
-    flags: &[
-        Flag::new(
-            &["no-new-accounts"],
-            Arity::None,
-            "",
-            "don't allow creating new accounts",
-        ),
-        print::LAYOUT_FLAG,
-    ],
-    general: General::Group2,
-    hidden: Hidden::Conf,
-    args: Some("[-f JOURNALFILE] [DATE [DESCRIPTION [ACCOUNT1 [ETC..]]]]]"),
-    doc: crate::command_doc!("Add"),
-    ..Mode::DEFAULT
-};
-
-static GET_MODE: Mode = Mode {
-    name: "get",
-    flags: &[
-        Flag::new(
-            &["transactions"],
-            Arity::None,
-            "",
-            "fetch transactions only",
-        ),
-        Flag::new(&["prices"], Arity::None, "", "fetch prices only"),
-        Flag::new(
-            &["dry-run"],
-            Arity::None,
-            "",
-            "just print the commands that would be run",
-        ),
-    ],
-    general: General::Groups2,
-    args: None,
-    doc: crate::command_doc!("Get"),
-    ..Mode::DEFAULT
-};
-
-static RUN_MODE: Mode = Mode {
-    name: "run",
-    flags: &[
-        output_format_flag("select the output format. Supported formats:\nhtml."),
-        OUTPUT_FILE_FLAG,
-        OUTPUT_VIEW_FLAG,
-    ],
-    args: Some(
-        "[COMMANDS_FILE1 COMMANDS_FILE2 ...] OR [-- command1 args... -- command2 args... -- command3 args...]",
-    ),
-    doc: crate::command_doc!("Run"),
-    ..Mode::DEFAULT
-};
-
-static REPL_MODE: Mode = Mode {
-    name: "repl",
-    flags: &[Flag::new(
-        &["no-watch"],
-        Arity::None,
-        "",
-        "disable automatic reloading of changed input files, config aliases and addon commands",
-    )],
-    args: None,
-    doc: crate::command_doc!("Repl"),
-    ..Mode::DEFAULT
-};
-
-static SETUP_MODE: Mode = Mode {
-    name: "setup",
-    general: General::Group3,
-    hidden: Hidden::None,
-    args: None,
-    doc: crate::command_doc!("Setup"),
-    ..Mode::DEFAULT
-};
-
-/// The error for something a later milestone provides.
-pub fn not_yet(what: &str, milestone: &str) -> String {
-    format!("{what} is not supported yet (hledgers milestone {milestone})")
-}
 
 /// The builtin command with this exact name or alias.
 pub fn find(name: &str) -> Option<&'static Mode> {

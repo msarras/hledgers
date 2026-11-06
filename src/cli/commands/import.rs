@@ -7,7 +7,6 @@ use std::io::Write;
 
 use super::print::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::not_yet;
 use crate::cli::opts::CliOpts;
 use crate::model::{Journal, Transaction};
 use crate::read::latest::save_latest_dates_for_files;
@@ -51,8 +50,9 @@ pub static MODE: Mode = Mode {
 /// dry run shows the transactions on standard output.
 pub fn import(opts: &CliOpts, j: Journal) -> Result<(), String> {
     let raw = &opts.raw;
+    // with --get, fetch new data first
     if raw.bool("get") {
-        return Err(not_yet("import --get", "8"));
+        super::get::get(opts, &j)?;
     }
     let journal_file = j
         .files
@@ -186,7 +186,7 @@ fn quote_if_needed(s: &str) -> String {
 /// ending with exactly one newline; or with `-`, write it to standard
 /// output (appendToJournalFileOrStdout). The file is created if need be,
 /// and the filesystem is first checked to append safely.
-fn append_to_journal_file_or_stdout(
+pub fn append_to_journal_file_or_stdout(
     f: &str,
     text: impl FnOnce() -> Result<String, String>,
 ) -> Result<(), String> {
@@ -244,7 +244,7 @@ fn ensure_journal_file_exists(f: &str) -> Result<(), String> {
 /// Whether appending to a file in this directory adds to its end, as it
 /// does on most filesystems, tried with a temporary file
 /// (ensureFilesystemCanAppend).
-fn filesystem_can_append(dir: &str) -> Result<bool, String> {
+pub fn filesystem_can_append(dir: &str) -> Result<bool, String> {
     let path =
         std::path::Path::new(dir).join(format!(".hledger-append-test-{}", std::process::id()));
     let tried = (|| -> std::io::Result<bool> {
@@ -256,11 +256,6 @@ fn filesystem_can_append(dir: &str) -> Result<bool, String> {
         Ok(std::fs::read(&path)? == b"can this filesystem\nappend ?\n")
     })();
     let _ = std::fs::remove_file(&path);
-    tried.map_err(|e| {
-        format!(
-            "{}: openTempFile: {}",
-            path.display(),
-            crate::read::io_error_text(&e)
-        )
-    })
+    // the error names the directory, as openTempFile's does
+    tried.map_err(|e| format!("{dir}: openTempFile: {}", crate::read::io_error_text(&e)))
 }

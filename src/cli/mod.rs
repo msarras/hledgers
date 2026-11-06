@@ -2,6 +2,7 @@
 
 pub mod addons;
 pub mod anchor;
+pub mod anon;
 pub mod args;
 pub mod chart;
 pub mod commands;
@@ -43,7 +44,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> i32 {
 }
 
 /// `-NUM` arguments made `--depth=NUM` (replaceNumericFlags).
-fn replace_numeric_flags(args: &[String]) -> Vec<String> {
+pub fn replace_numeric_flags(args: &[String]) -> Vec<String> {
     args.iter()
         .map(|a| match a.strip_prefix('-') {
             Some(ds) if !ds.is_empty() && ds.bytes().all(|b| b.is_ascii_digit()) => {
@@ -56,7 +57,7 @@ fn replace_numeric_flags(args: &[String]) -> Vec<String> {
 
 /// The --debug level the command line asks for: the value of the last
 /// --debug, 1 if it has none, or 0 (debugLevel).
-fn debug_level(args: &[String]) -> usize {
+pub fn debug_level(args: &[String]) -> usize {
     let mut level = 0;
     for (i, a) in args.iter().enumerate() {
         if a == "--debug" {
@@ -273,7 +274,11 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     finalargs.extend(confcmdargs);
     finalargs.extend(aliasargs.iter().cloned());
     finalargs.extend(cliargswithoutcmd.iter().cloned());
-    let finalargs = replace_numeric_flags(&finalargs);
+    let mut finalargs = replace_numeric_flags(&finalargs);
+    // mark run's inline commands, whose -- the parse consumes
+    if cmdname == "run" {
+        finalargs = commands::run::args_mark_run_commands(&finalargs);
+    }
     let raw = cmdargs_parse_with(
         &finalreqvalflagargs,
         "final command line",
@@ -353,6 +358,28 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
             Some("info") => docs::run_info_for_topic("hledger", topic)?,
             Some("man") => docs::run_man_for_topic("hledger", topic)?,
             Some("webman") => docs::open_browser_on(&docs::web_manual_url("hledger", topic)),
+            _ if mode.name == "run" || mode.name == "repl" => {
+                // the config file and the options to read it again with,
+                // so that repl can reload aliases
+                let conf_info = conffile
+                    .clone()
+                    .filter(|_| mode.name == "repl")
+                    .map(|f| (f, cliconfrawopts.clone()));
+                let ctx = commands::run::Context::new(
+                    progname,
+                    prog_args,
+                    color,
+                    addons.clone(),
+                    cmdaliases.clone(),
+                    shell_aliases_allowed,
+                    conf_info,
+                );
+                return if mode.name == "run" {
+                    commands::run::run(&ctx, &opts)
+                } else {
+                    commands::run::repl(&ctx, &opts)
+                };
+            }
             _ => {
                 run_builtin(mode, &opts, &conf)?;
             }
@@ -388,7 +415,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
 }
 
 /// Run a shell command line with sh, returning its exit status (system).
-fn run_shell(cmd: &str) -> Result<i32, String> {
+pub fn run_shell(cmd: &str) -> Result<i32, String> {
     let status = std::process::Command::new("sh")
         .args(["-c", cmd])
         .status()
@@ -397,7 +424,7 @@ fn run_shell(cmd: &str) -> Result<i32, String> {
 }
 
 /// A child process's exit status as ours.
-fn exit_code(status: std::process::ExitStatus) -> i32 {
+pub fn exit_code(status: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     status
         .code()
@@ -443,7 +470,31 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
     if mode.name == "import" {
         return commands::import::import(opts, with_possible_journal(opts)?);
     }
-    let run: fn(&CliOpts, Journal) -> Result<String, String> = match mode.name {
+    if mode.name == "add" {
+        return commands::add::add(opts, with_possible_journal(opts)?);
+    }
+    if mode.name == "setup" {
+        return commands::setup::setup(opts);
+    }
+    if mode.name == "get" {
+        return commands::get::get(opts, &with_journal(opts)?);
+    }
+    let Some((run, paged)) = journal_command(mode.name) else {
+        return Err(format!("the {} command is not implemented yet", mode.name));
+    };
+    let j = with_journal(opts)?;
+    let out = run(opts, j)?;
+    write_command_output(opts, paged, &out)
+}
+
+/// A command that reads the journal and gives its output as text.
+pub type JournalCommand = fn(&CliOpts, Journal) -> Result<String, String>;
+
+/// The builtin command of this name that reads the journal and gives its
+/// output as text, and whether that output may go through a pager, as the
+/// reports upstream writes with writeOutputLazyText.
+pub fn journal_command(name: &str) -> Option<(JournalCommand, bool)> {
+    let run: JournalCommand = match name {
         "accounts" => |o, j| commands::accounts::accounts(o, &j),
         "activity" => |o, j| commands::activity::activity(o, &j),
         "aregister" => |o, j| commands::aregister::aregister(o, &j),
@@ -470,11 +521,8 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
         "stats" => commands::stats::stats,
         "tags" => commands::tags::tags,
         "transactions" => commands::transactions::transactions,
-        name => return Err(format!("the {name} command is not implemented yet")),
+        _ => return None,
     };
-    let j = with_journal(opts)?;
-    let out = run(opts, j)?;
-    // the reports upstream writes with writeOutputLazyText may be paged
     let paged = [
         "aregister",
         "balance",
@@ -487,10 +535,15 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
         "register",
         "transactions",
     ];
-    if paged.contains(&mode.name) {
-        io::write_output_paged(opts, &out)
+    Some((run, paged.contains(&name)))
+}
+
+/// Write a command's output, through a pager if it may be paged.
+pub fn write_command_output(opts: &CliOpts, paged: bool, out: &str) -> Result<(), String> {
+    if paged {
+        io::write_output_paged(opts, out)
     } else {
-        io::write_output(opts, &out)
+        io::write_output(opts, out)
     }
 }
 
@@ -498,46 +551,59 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
 /// command (withJournal, journalTransform), after a warning if the
 /// valuation commodity can not be reached
 /// (maybeWarnUnknownValuationCommodity).
-fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
+pub fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
     let iopts = journal_input_opts(opts, &paths)?;
     let mut j = crate::read::read_journal_files(&iopts, &paths)?;
-    journal_transform(opts, &mut j);
+    journal_transform(opts, &mut j)?;
     maybe_warn_unknown_valuation_commodity(opts, &j);
     Ok(j)
 }
 
 /// The journal the options say to read, of which the first file need not
 /// exist yet, for the commands that write to it (withPossibleJournal).
-fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
+pub fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.possible_journal_file_paths()?;
     let iopts = journal_input_opts(opts, &paths)?;
     let mut j = crate::read::read_possible_journal_files(&iopts, &paths)?;
-    journal_transform(opts, &mut j);
+    journal_transform(opts, &mut j)?;
     Ok(j)
 }
 
 /// The input options for reading these journal files: the data directory
 /// is beside the first.
-fn journal_input_opts(opts: &CliOpts, paths: &[String]) -> Result<crate::read::InputOpts, String> {
+pub fn journal_input_opts(
+    opts: &CliOpts,
+    paths: &[String],
+) -> Result<crate::read::InputOpts, String> {
     let mut iopts = opts.input.clone();
     iopts.journal_dir = paths.first().map(|p| {
         crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
     });
-    if iopts.anon {
-        return Err("--obfuscate is not supported yet (hledgers milestone 8)".to_string());
-    }
     Ok(iopts)
 }
 
 /// The journal transformed for the report after reading (journalTransform):
-/// pivoted with --pivot, even an empty one (maybePivot), and its lot detail
-/// prepared.
-fn journal_transform(opts: &CliOpts, j: &mut Journal) {
+/// pivoted with --pivot, even an empty one (maybePivot); an error with
+/// --anon (maybeWarnAboutAnon); obfuscated with --obfuscate
+/// (maybeObfuscate); and its lot detail prepared.
+pub fn journal_transform(opts: &CliOpts, j: &mut Journal) -> Result<(), String> {
     if let Some(name) = opts.raw.string("pivot") {
         j.pivot(name);
     }
+    if opts.raw.bool("anon") {
+        return Err(
+            "--anon does not give privacy, and perhaps should be avoided;\n\
+                    please see https://github.com/hledgerorg/hledger/issues/2133 .\n\
+                    For now it has been renamed to --obfuscate (a hidden flag)."
+                .to_string(),
+        );
+    }
+    if opts.input.anon {
+        anon::anon_journal(j);
+    }
     prepare_lot_detail(opts, j);
+    Ok(())
 }
 
 /// Prepare the journal's lot detail for the report (journalPrepareLotDetail):
@@ -568,7 +634,7 @@ fn prepare_lot_detail(opts: &CliOpts, j: &mut Journal) {
 /// denominated, and which is no commodity alias; suggesting a journal
 /// commodity with the same ISO 4217 currency code, if any
 /// (maybeWarnUnknownValuationCommodity).
-fn maybe_warn_unknown_valuation_commodity(opts: &CliOpts, j: &Journal) {
+pub fn maybe_warn_unknown_valuation_commodity(opts: &CliOpts, j: &Journal) {
     let Some(c) = opts.spec.opts.value.as_ref().and_then(|v| v.commodity()) else {
         return;
     };
