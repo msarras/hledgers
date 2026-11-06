@@ -113,7 +113,7 @@ pub struct Context {
     /// The config file, and the options to read it again with, for repl.
     pub conf: Option<(String, RawOpts)>,
     /// The journals read, by input options and file (journalCache).
-    cache: RefCell<Vec<(InputOpts, String, Journal)>>,
+    cache: RefCell<Vec<Cached>>,
     /// Standard input's text, once read (stdinCache).
     stdin: OnceCell<Result<String, String>>,
 }
@@ -140,6 +140,30 @@ impl Context {
             stdin: OnceCell::new(),
         }
     }
+}
+
+/// A journal read by run or repl: the input options and file it was read
+/// with, and the latest modification time of its files then.
+struct Cached {
+    key: InputOpts,
+    file: String,
+    journal: Journal,
+    seen: SystemTime,
+}
+
+/// A journal's files, the included ones and CSV rules files too
+/// (journalAllFilePaths).
+fn journal_all_files(j: &Journal) -> Vec<String> {
+    (j.files.iter().map(|(f, _)| f.clone()))
+        .chain(j.aux_files.iter().cloned())
+        .collect()
+}
+
+/// The latest modification time of these files.
+fn newest_modification(files: &[String]) -> SystemTime {
+    (files.iter().filter_map(|f| modification_time(f)))
+        .max()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 /// Run the run command, giving the program's exit status (run).
@@ -532,8 +556,8 @@ impl<'a> Session<'a> {
         let mut journals = Vec::new();
         for fp in &jpaths {
             let cached = (self.ctx.cache.borrow().iter())
-                .find(|(k, f, _)| *k == key && f == fp)
-                .map(|(_, _, j)| j.clone());
+                .find(|c| c.key == key && c.file == *fp)
+                .map(|c| c.journal.clone());
             let j = match cached {
                 Some(j) => {
                     self.debug(&format!("readAndCacheJournalFile using cache for {fp}:"));
@@ -552,7 +576,13 @@ impl<'a> Session<'a> {
                         String::new()
                     };
                     let j = crate::read::read_journal_file_checked(&opts.input, fp, &stdin)?;
-                    (self.ctx.cache.borrow_mut()).push((key.clone(), fp.clone(), j.clone()));
+                    let seen = newest_modification(&journal_all_files(&j));
+                    self.ctx.cache.borrow_mut().push(Cached {
+                        key: key.clone(),
+                        file: fp.clone(),
+                        journal: j.clone(),
+                        seen,
+                    });
                     j
                 }
             };
@@ -689,34 +719,37 @@ impl<'a> Session<'a> {
 
     /// Read again the cached journals whose files have changed since they
     /// were read, saying so; one that no longer reads is kept, with the
-    /// error, until its files change again (refreshStaleJournals).
+    /// error, until its files change again (refreshStaleJournals). A change
+    /// is a modification time later than any the files had when read:
+    /// upstream compares with the time of reading, which misses a change
+    /// made within a filesystem timestamp tick of it.
     fn refresh_stale_journals(&self) {
         let n = self.ctx.cache.borrow().len();
         for i in 0..n {
-            let (iopts, fp, read_time, files) = {
-                let cache = self.ctx.cache.borrow();
-                let (k, f, j) = &cache[i];
-                let files: Vec<String> = (j.files.iter().map(|(f, _)| f.clone()))
-                    .chain(j.aux_files.iter().cloned())
-                    .collect();
-                (k.clone(), f.clone(), j.last_read_time, files)
+            let (iopts, fp, seen, files) = {
+                let c = &self.ctx.cache.borrow()[i];
+                (
+                    c.key.clone(),
+                    c.file.clone(),
+                    c.seen,
+                    journal_all_files(&c.journal),
+                )
             };
-            let read_time = read_time.unwrap_or(SystemTime::UNIX_EPOCH);
-            if !files
-                .iter()
-                .any(|f| modification_time(f).is_some_and(|m| m > read_time))
-            {
+            let newest = newest_modification(&files);
+            if newest <= seen {
                 continue;
             }
             eprintln!("(reloading {fp})");
             match crate::read::read_journal_file_checked(&iopts, &fp, "") {
-                Ok(j) => self.ctx.cache.borrow_mut()[i].2 = j,
+                Ok(j) => {
+                    let seen = newest_modification(&journal_all_files(&j));
+                    let c = &mut self.ctx.cache.borrow_mut()[i];
+                    c.journal = j;
+                    c.seen = seen;
+                }
                 Err(e) => {
                     eprintln!("could not reload {fp}, keeping previous version:\n{e}");
-                    let newest = (files.iter().filter_map(|f| modification_time(f)))
-                        .chain([read_time])
-                        .max();
-                    self.ctx.cache.borrow_mut()[i].2.last_read_time = newest;
+                    self.ctx.cache.borrow_mut()[i].seen = newest;
                 }
             }
         }
