@@ -192,7 +192,7 @@ pub fn account_transactions_report(
         } else {
             sum_postings(this.iter().copied())
         };
-        bal = running(i, &bal, &amount);
+        bal = running(i, bal, &amount);
         i += 1;
         let split = other_names.len() > 1;
         items.push(AccountTransactionsReportItem {
