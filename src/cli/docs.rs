@@ -351,6 +351,17 @@ pub fn web_manual_url(tool: &str, heading: Option<&str>) -> String {
 /// Open a web browser on a URL with the first launcher that succeeds, or
 /// say what was tried and print the URL (openBrowserOn).
 pub fn open_browser_on(url: &str) {
+    if let Err(tried) = launch(url) {
+        super::io::print_stdout(&format!(
+            "Could not start a web browser (tried: {})\nPlease open your browser and visit {url}\n",
+            tried.join(", ")
+        ));
+    }
+}
+
+/// Open a URL or file with the first of the platform's launchers that
+/// succeeds, or say which were tried (launch).
+pub fn launch(url: &str) -> Result<(), Vec<&'static str>> {
     const LAUNCHERS: [&str; 4] = [
         "xdg-open",
         "sensible-browser",
@@ -365,13 +376,10 @@ pub fn open_browser_on(url: &str) {
             .status()
             .is_ok_and(|s| s.success());
         if ok {
-            return;
+            return Ok(());
         }
     }
-    super::io::print_stdout(&format!(
-        "Could not start a web browser (tried: {})\nPlease open your browser and visit {url}\n",
-        LAUNCHERS.join(", ")
-    ));
+    Err(LAUNCHERS.to_vec())
 }
 
 /// The names of the files in the directories of PATH, sorted and without

@@ -341,7 +341,9 @@ impl CliOpts {
             debug: raw.posint("debug")?.unwrap_or(0),
             no_new_accounts: raw.bool("no-new-accounts"),
             width: raw.string("width").map(str::to_string),
-            available_width: 80,
+            // the terminal's width, or 80 (getTerminalWidth, defaultWidth)
+            available_width: terminal_size::terminal_size_of(std::io::stdout())
+                .map_or(80, |(w, _)| usize::from(w.0)),
             start_time: std::time::Instant::now(),
             progname: "hledger".to_string(),
             raw,

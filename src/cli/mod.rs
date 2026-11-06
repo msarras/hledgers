@@ -292,7 +292,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     opts.input.prog_args = prog_args.to_vec();
     opts.progname = progname.to_string();
     let raw = &opts.raw;
-    let quickref = || io::run_pager(&commands::quickref::render(progname));
+    let quickref = || io::run_pager(&opts, &commands::quickref::render(progname));
     let doc_flag = ["quickref", "help", "examples", "info", "man", "webman"]
         .into_iter()
         .find(|f| raw.bool(f));
@@ -301,7 +301,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
         if color && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
             usage = args::highlight_help(&usage);
         }
-        io::run_pager(&usage)
+        io::run_pager(&opts, &usage)
     };
     // 6.1 no command and a help or documentation flag
     if nocmdprovided {
@@ -464,7 +464,24 @@ fn run_builtin(mode: &args::Mode, opts: &CliOpts, conf: &conf::Conf) -> Result<(
     };
     let j = with_journal(opts)?;
     let out = run(opts, j)?;
-    io::write_output(opts, &out)
+    // the reports upstream writes with writeOutputLazyText may be paged
+    let paged = [
+        "aregister",
+        "balance",
+        "balancesheet",
+        "balancesheetequity",
+        "cashflow",
+        "incomestatement",
+        "holdings",
+        "print",
+        "register",
+        "transactions",
+    ];
+    if paged.contains(&mode.name) {
+        io::write_output_paged(opts, &out)
+    } else {
+        io::write_output(opts, &out)
+    }
 }
 
 /// The journal the options say to read, read and transformed for the

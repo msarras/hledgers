@@ -77,14 +77,14 @@ pub fn help(opts: &CliOpts, aliases: &[(String, String)]) -> Result<(), String> 
         Ok(())
     };
     match args.as_slice() {
-        [] | ["quickref", ..] => run_pager(&super::quickref::render(&opts.progname)),
+        [] | ["quickref", ..] => run_pager(opts, &super::quickref::render(&opts.progname)),
         ["commands", ..] => commands(opts, aliases),
         ["usage", rest @ ..] => {
             let mode = rest
                 .first()
                 .and_then(|c| super::find(c))
                 .unwrap_or(&super::MAIN_MODE);
-            run_pager(&crate::cli::args::mode_usage(mode, &opts.progname))
+            run_pager(opts, &crate::cli::args::mode_usage(mode, &opts.progname))
         }
         ["manual", rest @ ..] => manual(opts, rest.first().copied()),
         ["examples", rest @ ..] => {
@@ -117,7 +117,7 @@ fn manual(opts: &CliOpts, topic: Option<&str>) -> Result<(), String> {
             let indent = if list_all { level - 1 } else { 2 };
             out.push_str(&format!("{}{name}\n", " ".repeat(indent)));
         }
-        run_pager(&out)
+        run_pager(opts, &out)
     };
     let not_found = || {
         eprintln!(
@@ -355,7 +355,7 @@ fn commands(opts: &CliOpts, aliases: &[(String, String)]) -> Result<(), String> 
             out.push(format!(" {alias}{pad} = {def}"));
         }
     }
-    run_pager(&(out.join("\n") + "\n"))
+    run_pager(opts, &(out.join("\n") + "\n"))
 }
 
 /// A title heading, bold when colour is on (titleLine, without upstream's
