@@ -56,6 +56,8 @@ pub static MODE: Mode = Mode {
         OUTPUT_VIEW_FLAG,
         CHART_FLAG,
     ],
+    doc: crate::command_doc!("Register"),
+    ..Mode::DEFAULT
 };
 
 /// The register commands' --width flag.

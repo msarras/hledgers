@@ -49,6 +49,8 @@ pub static MODE: Mode = Mode {
         )
         .sets(&["pnl"]),
     ],
+    doc: crate::command_doc!("Roi"),
+    ..Mode::DEFAULT
 };
 
 /// One report period's figures (OneSpan): its start and exclusive end,

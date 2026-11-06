@@ -103,6 +103,8 @@ pub static BALANCESHEET: CompoundBalanceCommandSpec = CompoundBalanceCommandSpec
         name: "balancesheet",
         aliases: &["bs"],
         flags: &HISTORICAL_FLAGS,
+        doc: crate::command_doc!("Balancesheet"),
+        ..Mode::DEFAULT
     },
     name: "Balance Sheet",
     sections: &[ASSETS, LIABILITIES],
@@ -116,6 +118,8 @@ pub static BALANCESHEETEQUITY: CompoundBalanceCommandSpec = CompoundBalanceComma
         name: "balancesheetequity",
         aliases: &["bse"],
         flags: &HISTORICAL_FLAGS,
+        doc: crate::command_doc!("Balancesheetequity"),
+        ..Mode::DEFAULT
     },
     name: "Balance Sheet With Equity",
     sections: &[ASSETS, LIABILITIES, EQUITY],
@@ -129,6 +133,8 @@ pub static INCOMESTATEMENT: CompoundBalanceCommandSpec = CompoundBalanceCommandS
         name: "incomestatement",
         aliases: &["is"],
         flags: &PER_PERIOD_FLAGS,
+        doc: crate::command_doc!("Incomestatement"),
+        ..Mode::DEFAULT
     },
     name: "Income Statement",
     sections: &[REVENUES, EXPENSES],
@@ -141,6 +147,8 @@ pub static CASHFLOW: CompoundBalanceCommandSpec = CompoundBalanceCommandSpec {
         name: "cashflow",
         aliases: &["cf"],
         flags: &PER_PERIOD_FLAGS,
+        doc: crate::command_doc!("Cashflow"),
+        ..Mode::DEFAULT
     },
     name: "Cashflow Statement",
     sections: &[CASH_FLOWS],

@@ -19,6 +19,8 @@ pub static MODE: Mode = Mode {
         "fuzzy search for one recent transaction with description closest to DESC",
     )
     .short(&['m'])],
+    doc: crate::command_doc!("Transactions"),
+    ..Mode::DEFAULT
 };
 
 /// Run the transactions command (transactions): the first line (date,

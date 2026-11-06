@@ -105,11 +105,138 @@ fn short_name(c: char) -> &'static str {
     NAMES.find(c).map_or("?", |i| &NAMES[i..i + c.len_utf8()])
 }
 
-/// A command (or the main program), with its flags beyond the general ones.
+/// A command (or the main program), as a cmdargs Mode: its names, its own
+/// flags, which general flags it accepts (shown as named groups in its help)
+/// and which hidden ones, what its positional arguments are called in help
+/// (none if it takes none), and its help text file (hledgerCommandMode).
+#[derive(Clone, Copy)]
 pub struct Mode {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
+    /// The command's own flags (the unnamed group); hidden ones follow the
+    /// common hidden flags in the hidden group.
     pub flags: &'static [Flag],
+    pub general: General,
+    pub hidden: Hidden,
+    pub args: Option<&'static str>,
+    /// The text file of the command's help (`Commands/NAME.txt`): its name,
+    /// its official abbreviation in parentheses, the preamble, a snapshot of
+    /// its flags help, and the postamble (parseCommandHelp).
+    pub doc: &'static str,
+}
+
+impl Mode {
+    /// A command's mode as most are: the general input, output and help
+    /// flags, the common hidden flags, and a `[QUERY]` argument.
+    pub const DEFAULT: Mode = Mode {
+        name: "",
+        aliases: &[],
+        flags: &[],
+        general: General::Groups1,
+        hidden: Hidden::All,
+        args: Some("[QUERY]"),
+        doc: "",
+    };
+
+    /// Its flags in cmdargs' order (modeFlags): its own, the hidden ones,
+    /// then the general ones group by group.
+    pub fn all_flags(&self) -> impl Iterator<Item = &'static Flag> + use<> {
+        let (flags, hidden) = (self.flags, self.hidden.flags());
+        (flags.iter().filter(|f| !f.hidden))
+            .chain(hidden.iter().flat_map(|fs| fs.iter()))
+            .chain(flags.iter().filter(|f| f.hidden))
+            .chain(
+                self.general
+                    .groups()
+                    .iter()
+                    .flat_map(|(_, fs)| fs.iter().flat_map(|g| g.iter())),
+            )
+    }
+
+    /// Its names: the official one, then the abbreviations.
+    pub fn names(&self) -> impl Iterator<Item = &'static str> + use<> {
+        std::iter::once(self.name).chain(self.aliases.iter().copied())
+    }
+}
+
+/// The text file of a builtin command's help, embedded from the reference
+/// source.
+#[macro_export]
+macro_rules! command_doc {
+    ($name:literal) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/hledger/hledger/Hledger/Cli/Commands/",
+            $name,
+            ".txt"
+        ))
+    };
+}
+
+/// Which general flags a command accepts, shown in its help as named groups
+/// after its own flags: one of upstream's group lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum General {
+    /// Input, output and help flags, in three groups (cligeneralflagsgroups1).
+    Groups1,
+    /// Input and help flags, in two groups (cligeneralflagsgroups2).
+    Groups2,
+    /// Help flags (cligeneralflagsgroups3).
+    Groups3,
+    /// Input and help flags, in one group (generalflagsgroup2).
+    Group2,
+    /// Help flags, in one group titled General flags (generalflagsgroup3).
+    Group3,
+}
+
+/// A named group of flags: its title, as cmdargs shows it, and its flags.
+type FlagGroup = (&'static str, &'static [&'static [Flag]]);
+
+impl General {
+    /// The named groups.
+    pub fn groups(self) -> &'static [FlagGroup] {
+        use super::opts::{HELP_FLAGS, INPUT_FLAGS, REPORT_FLAGS};
+        const INPUT: &str = "\nGeneral input flags";
+        const OUTPUT: &str = "\nGeneral output flags (affecting some commands)";
+        const HELP: &str = "\nGeneral help flags";
+        const GENERAL: &str = "\nGeneral flags";
+        match self {
+            General::Groups1 => &[
+                (INPUT, &[INPUT_FLAGS]),
+                (OUTPUT, &[REPORT_FLAGS]),
+                (HELP, &[HELP_FLAGS]),
+            ],
+            General::Groups2 => &[(INPUT, &[INPUT_FLAGS]), (HELP, &[HELP_FLAGS])],
+            General::Groups3 => &[(HELP, &[HELP_FLAGS])],
+            General::Group2 => &[(GENERAL, &[INPUT_FLAGS, HELP_FLAGS])],
+            General::Group3 => &[(GENERAL, &[HELP_FLAGS])],
+        }
+    }
+}
+
+/// Which of the common hidden flags a command accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hidden {
+    /// The legacy flags and the config file flags (hiddenflags).
+    All,
+    /// The config file flags (confflags).
+    Conf,
+    /// The legacy flags (hiddenflagsformainmode).
+    Legacy,
+    /// None.
+    None,
+}
+
+impl Hidden {
+    fn flags(self) -> &'static [&'static [Flag]] {
+        use super::opts::{CONF_FLAGS, LEGACY_FLAGS};
+        match self {
+            Hidden::All => &[LEGACY_FLAGS, CONF_FLAGS],
+            Hidden::Conf => &[CONF_FLAGS],
+            Hidden::Legacy => &[LEGACY_FLAGS],
+            Hidden::None => &[],
+        }
+    }
 }
 
 /// The flags accepted by every command: the general input, output and help
@@ -119,7 +246,8 @@ pub fn general_flags() -> impl Iterator<Item = &'static Flag> {
         .iter()
         .chain(super::opts::REPORT_FLAGS)
         .chain(super::opts::HELP_FLAGS)
-        .chain(super::opts::HIDDEN_FLAGS)
+        .chain(super::opts::LEGACY_FLAGS)
+        .chain(super::opts::CONF_FLAGS)
 }
 
 /// Parsed options as (name, value) pairs in command-line order; positional
@@ -198,25 +326,12 @@ impl RawOpts {
     }
 }
 
-/// The flags of a mode in cmdargs' order: the command's own, the hidden
-/// ones (the general ones first), then the general input, output and
-/// help flags.
-fn cmdargs_flags(mode: &'static Mode) -> impl Iterator<Item = &'static Flag> {
-    use super::opts::{HELP_FLAGS, HIDDEN_FLAGS, INPUT_FLAGS, REPORT_FLAGS};
-    (mode.flags.iter().filter(|f| !f.hidden))
-        .chain(HIDDEN_FLAGS)
-        .chain(mode.flags.iter().filter(|f| f.hidden))
-        .chain(INPUT_FLAGS)
-        .chain(REPORT_FLAGS)
-        .chain(HELP_FLAGS)
-}
-
 /// The flag a long name selects (cmdargs' lookupName): the one with that
 /// name, or else the one with a name it is the start of; if several are,
 /// an error naming them.
 fn lookup_long(mode: &'static Mode, name: &str) -> Result<&'static Flag, String> {
     let matching = |m: &dyn Fn(&str) -> bool| -> Vec<(&'static str, &'static Flag)> {
-        (cmdargs_flags(mode))
+        (mode.all_flags())
             .filter_map(|f| f.longs.iter().find(|l| m(l)).map(|l| (*l, f)))
             .collect()
     };
@@ -232,6 +347,20 @@ fn lookup_long(mode: &'static Mode, name: &str) -> Result<&'static Flag, String>
         _ => Err(format!(
             "Ambiguous flag '--{name}', could be any of: {}",
             found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join(" ")
+        )),
+    }
+}
+
+/// The flag a short name selects (lookupName): the one with that name; if
+/// several have it, an error.
+fn lookup_short(mode: &'static Mode, c: char) -> Result<&'static Flag, String> {
+    let found: Vec<&Flag> = mode.all_flags().filter(|f| f.shorts.contains(&c)).collect();
+    match found.as_slice() {
+        [] => Err(format!("Unknown flag: -{c}")),
+        [f] => Ok(f),
+        _ => Err(format!(
+            "Ambiguous flag '-{c}', could be any of: {}",
+            vec![c.to_string(); found.len()].join(" ")
         )),
     }
 }
@@ -274,9 +403,9 @@ pub fn command_index(args: &[String]) -> Option<usize> {
 }
 
 static NO_MODE: Mode = Mode {
-    name: "",
-    aliases: &[],
-    flags: &[],
+    general: General::Group3,
+    hidden: Hidden::None,
+    ..Mode::DEFAULT
 };
 
 /// Parse arguments (without the command name) against a mode's flags.
@@ -311,7 +440,7 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
             opts.set_all(flag, value)?;
         } else if let Some(shorts) = a.strip_prefix('-').filter(|s| !s.is_empty()) {
             for (i, c) in shorts.char_indices() {
-                let flag = find_short(mode, c).ok_or_else(|| format!("Unknown flag: -{c}"))?;
+                let flag = lookup_short(mode, c)?;
                 let joined = &shorts[i + c.len_utf8()..];
                 match flag.arity {
                     Arity::None => opts.set_all(flag, flag.default)?,
@@ -389,6 +518,235 @@ fn flag_args(f: &Flag) -> impl Iterator<Item = String> + '_ {
     (f.longs.iter().map(|l| format!("--{l}"))).chain(f.shorts.iter().map(|c| format!("-{c}")))
 }
 
+/// A mode's help, laid out as cmdargs does (showModeUsage without its
+/// highlighting: helpText HelpFormatDefault and showText (Wrap 80)): the
+/// usage line, the preamble, the flags (the command's own, then the general
+/// ones group by group), the postamble, and a blank line.
+pub fn mode_usage(mode: &Mode) -> String {
+    let (preamble, postamble) = parse_command_help(mode.doc);
+    let mut usage = format!("{} [OPTIONS]", mode.name);
+    if let Some(a) = mode.args {
+        usage.push(' ');
+        usage.push_str(a);
+    }
+    let mut text = vec![Text::Line(usage)];
+    if !preamble.is_empty() {
+        text.push(Text::Line(format!("  {preamble}")));
+    }
+    let own: Vec<&Flag> = mode.flags.iter().filter(|f| !f.hidden).collect();
+    let groups = mode.general.groups();
+    let mut flags = Vec::new();
+    if !own.is_empty() && !groups.is_empty() {
+        flags.push(Text::Line("Flags:".to_string()));
+    }
+    flags.extend(own.into_iter().map(help_flag));
+    for (title, fs) in groups {
+        flags.push(Text::Line(format!("{title}:")));
+        flags.extend(fs.iter().flat_map(|g| g.iter()).map(help_flag));
+    }
+    let space = |text: &mut Vec<Text>, xs: Vec<Text>| {
+        if !xs.is_empty() {
+            text.push(Text::Line(String::new()));
+            text.extend(xs);
+        }
+    };
+    space(&mut text, flags);
+    let postamble = postamble.into_iter().map(|l| Text::Line(l.to_string()));
+    space(&mut text, postamble.collect());
+    show_wrap(80, &text) + "\n"
+}
+
+/// A command help file's preamble, and its postamble lines
+/// (parseCommandHelp): the name line, a blank line, the official
+/// abbreviation in parentheses if any, the preamble, a `Flags:` block ending
+/// at a blank line, and the postamble.
+fn parse_command_help(doc: &str) -> (String, Vec<&str>) {
+    let lines = hs_lines(doc);
+    if lines.len() < 3 {
+        return (String::new(), Vec::new());
+    }
+    let l3 = lines[2].trim_end_matches(crate::text::is_space);
+    let rest = if l3.starts_with('(') && l3.ends_with(')') {
+        &lines[3..]
+    } else {
+        &lines[2..]
+    };
+    let rest: Vec<&str> = rest.iter().copied().skip_while(|l| l.is_empty()).collect();
+    let flags_at = rest
+        .iter()
+        .position(|l| *l == "Flags:")
+        .unwrap_or(rest.len());
+    let mut pre = &rest[..flags_at];
+    while let [init @ .., ""] = pre {
+        pre = init;
+    }
+    let preamble = pre.iter().map(|l| format!("{l}\n")).collect();
+    let post = (rest[flags_at..].iter().copied())
+        .skip_while(|l| !l.is_empty())
+        .skip_while(|l| l.is_empty())
+        .collect();
+    (preamble, post)
+}
+
+/// Text with basic formatting (cmdargs' Text): a paragraph, wrapped with its
+/// leading space as indent, or a row of columns, aligned with the other rows
+/// of as many columns, the last column wrapped.
+enum Text {
+    Line(String),
+    Cols(Vec<String>),
+}
+
+/// A flag's row in help (helpFlag): its short names, its long names with
+/// the value's name after the first long (or short) one, and its help.
+fn help_flag(f: &Flag) -> Text {
+    let value = match f.arity {
+        Arity::None => String::new(),
+        Arity::Req => format!("={}", value_name(f)),
+        Arity::Opt => format!("[={}]", value_name(f)),
+    };
+    let mut shorts: Vec<String> = f.shorts.iter().map(|c| format!("-{c}")).collect();
+    let mut longs: Vec<String> = f.longs.iter().map(|l| format!("--{l}")).collect();
+    if let Some(first) = longs.first_mut().or(shorts.first_mut()) {
+        first.push_str(&value);
+    }
+    Text::Cols(vec![
+        format!("  {}", shorts.join(" ")),
+        format!(" {}", longs.join(" ")),
+        format!("  {}", f.help),
+    ])
+}
+
+/// The name of a flag's value in help: ITEM if it has none.
+fn value_name(f: &Flag) -> &str {
+    if f.value_name.is_empty() {
+        "ITEM"
+    } else {
+        f.value_name
+    }
+}
+
+/// Text laid out at this width (showWrap).
+fn show_wrap(width: usize, xs: &[Text]) -> String {
+    let len = |s: &str| s.chars().count();
+    // the widths of every column but the last, for rows of each length
+    let mut widths: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    for x in xs {
+        if let Text::Cols(cs) = x {
+            let ws = widths
+                .entry(cs.len())
+                .or_insert_with(|| vec![0; cs.len() - 1]);
+            for (w, c) in ws.iter_mut().zip(cs) {
+                *w = (*w).max(len(c));
+            }
+        }
+    }
+    let width = width as isize;
+    let mut out = String::new();
+    for x in xs {
+        match x {
+            Text::Line(x) => {
+                let b = x.trim_start_matches(crate::text::is_space);
+                let a = &x[..x.len() - b.len()];
+                for l in wrap1(width - len(a) as isize, b) {
+                    out.push_str(a);
+                    out.push_str(&l);
+                    out.push('\n');
+                }
+            }
+            Text::Cols(cs) => {
+                let ws = &widths[&cs.len()];
+                let last = &cs[cs.len() - 1];
+                let indent = len(last) - len(last.trim_start_matches(crate::text::is_space));
+                let n = ws.iter().sum::<usize>() + indent;
+                for (i, l) in wrap1(width - n as isize, last).into_iter().enumerate() {
+                    if i == 0 {
+                        for (c, w) in cs.iter().zip(ws) {
+                            out.push_str(c);
+                            out.extend(std::iter::repeat_n(' ', w - len(c)));
+                        }
+                    } else {
+                        out.extend(std::iter::repeat_n(' ', n));
+                    }
+                    out.push_str(&l);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Text split into lines of at most this width, or one empty line (wrap1).
+fn wrap1(width: isize, x: &str) -> Vec<String> {
+    let res = wrap(width, x);
+    if res.is_empty() {
+        vec![String::new()]
+    } else {
+        res
+    }
+}
+
+/// Each line of the text split into strips of at most this width, at
+/// spaces, keeping a line's leading space; a word longer than that is a
+/// strip of its own (wrap).
+fn wrap(width: isize, x: &str) -> Vec<String> {
+    let is_space = crate::text::is_space;
+    let mut out = Vec::new();
+    for line in hs_lines(x) {
+        // words, each with the number of spaces after it
+        let mut chunks: Vec<(String, usize)> = Vec::new();
+        let mut rest = line;
+        while !rest.is_empty() {
+            let word_end = rest.find(is_space).unwrap_or(rest.len());
+            let after = &rest[word_end..];
+            let next = after.trim_start_matches(is_space);
+            let spaces = after[..after.len() - next.len()].chars().count();
+            chunks.push((rest[..word_end].to_string(), spaces));
+            rest = next;
+        }
+        let mut chunks = chunks.into_iter();
+        let Some((mut a, mut b)) = chunks.next() else {
+            continue;
+        };
+        for (c, d) in chunks {
+            if ((a.chars().count() + b + c.chars().count()) as isize) < width {
+                a.extend(std::iter::repeat_n(' ', b));
+                a.push_str(&c);
+            } else {
+                out.push(std::mem::replace(&mut a, c));
+            }
+            b = d;
+        }
+        out.push(a);
+    }
+    out
+}
+
+/// The lines of a text, as Haskell's `lines` splits them: at each newline,
+/// with no empty last line for a final newline.
+fn hs_lines(s: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = s.split('\n').collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+    lines
+}
+
+/// Help made bold on its first line and its headings (highlightHelp).
+pub fn highlight_help(help: &str) -> String {
+    let mut out = String::with_capacity(help.len() + 200);
+    for (i, l) in hs_lines(help).into_iter().enumerate() {
+        let heading = l.chars().next().is_some_and(char::is_alphanumeric) && l.ends_with(':');
+        if i == 0 || heading {
+            out.push_str(&format!("\x1b[1m{l}\x1b[22m\n"));
+        } else {
+            out.push_str(l);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,5 +803,83 @@ mod tests {
             err(&["--file", "--begin=2020"]),
             "--file needs a value, but the next argument is another flag: --begin=2020"
         );
+    }
+    #[test]
+    fn show_wrap_lays_out_lines_and_columns() {
+        // the example in cmdargs' System.Console.CmdArgs.Text
+        let line = |s: &str| Text::Line(s.to_string());
+        let cols = |cs: &[&str]| Text::Cols(cs.iter().map(|c| c.to_string()).collect());
+        let demo = [
+            line("Cooking for hungry people."),
+            line("Welcome to my cookery recipe program, I sure hope you enjoy using it!"),
+            line(""),
+            cols(&["Omlette", "  A tasty eggy treat."]),
+            cols(&[
+                "  -m",
+                " --mushrooms",
+                "  Some mushrooms, or in fact any other ingredients you have in the cupboards",
+            ]),
+            cols(&["  -e", " --eggs", "  But always you need eggs"]),
+            line(""),
+            cols(&["Spagetti Bolognaise", "  An Italian delight."]),
+            cols(&["  -s", " --spagetti", "  The first word in the name"]),
+            cols(&["  -b", " --bolognaise", "  The second word in the name"]),
+            cols(&["  -d", " --dolmio", "  The magic ingredient!"]),
+            line(""),
+            line(
+                "    The author of this program explicitly disclaims any liability for poisoning people who get their recipes off the internet.",
+            ),
+        ];
+        assert_eq!(
+            show_wrap(50, &demo),
+            "Cooking for hungry people.
+Welcome to my cookery recipe program, I sure hope
+you enjoy using it!
+
+Omlette              A tasty eggy treat.
+  -m --mushrooms   Some mushrooms, or in fact
+                   any other ingredients you have
+                   in the cupboards
+  -e --eggs        But always you need eggs
+
+Spagetti Bolognaise  An Italian delight.
+  -s --spagetti    The first word in the name
+  -b --bolognaise  The second word in the name
+  -d --dolmio      The magic ingredient!
+
+    The author of this program explicitly
+    disclaims any liability for poisoning people
+    who get their recipes off the internet.
+"
+        );
+    }
+
+    #[test]
+    fn command_names_are_those_in_their_help_files() {
+        for m in crate::cli::commands::BUILTIN_COMMANDS {
+            let lines = hs_lines(m.doc);
+            assert_eq!(lines[0], m.name);
+            let l3 = lines[2].trim_end();
+            let alias = l3.strip_prefix('(').and_then(|a| a.strip_suffix(')'));
+            assert_eq!(
+                alias.into_iter().collect::<Vec<_>>(),
+                m.aliases,
+                "{}",
+                m.name
+            );
+        }
+    }
+
+    #[test]
+    fn command_help_files_parse() {
+        let (pre, post) = parse_command_help(crate::cli::commands::help::MODE.doc);
+        assert_eq!(pre, "Show some part of hledger's documentation.\n");
+        assert_eq!(post[0], "The part shown is selected by arguments:");
+        let usage = mode_usage(&crate::cli::commands::codes::MODE);
+        assert!(usage.starts_with(
+            "codes [OPTIONS] [QUERY]\n  List the codes seen in transactions, in the order parsed.\n\n\nGeneral input flags:\n  -f --file=[FMT:]FILE      Use this as the journal file (- means stdin). If\n"
+        ));
+        assert!(usage.contains("\n                            ru, uk, zh, or auto\n\n"));
+        assert!(usage.ends_with("\n\n"));
     }
 }

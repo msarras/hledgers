@@ -58,6 +58,8 @@ pub static MODE: Mode = Mode {
         )
         .short(&['A']),
     ],
+    doc: crate::command_doc!("Activity"),
+    ..Mode::DEFAULT
 };
 
 /// Run the activity command (activity): the balance command's chart of

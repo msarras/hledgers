@@ -60,6 +60,9 @@ pub static MODE: Mode = Mode {
         OUTPUT_VIEW_FLAG,
         CHART_FLAG,
     ],
+    args: Some("ACCTPAT [QUERY]"),
+    doc: crate::command_doc!("Aregister"),
+    ..Mode::DEFAULT
 };
 
 /// What the report shows and how, besides the options: the report query

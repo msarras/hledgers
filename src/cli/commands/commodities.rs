@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use crate::amount::Amount;
 use crate::amount::render::{AmountFormat, show_amount_b};
-use crate::cli::args::{Arity, Flag, Mode};
+use crate::cli::args::{Arity, Flag, General, Hidden, Mode};
 use crate::cli::io::lines_with_title;
 use crate::cli::opts::{CliOpts, Declarables, find_matched_by_argument};
 use crate::decimal::Decimal;
@@ -56,6 +56,10 @@ pub static MODE: Mode = Mode {
             "show as commodity directives (with their display styles), for use in journals",
         ),
     ],
+    general: General::Group2,
+    hidden: Hidden::Conf,
+    args: Some("[QUERY..]"),
+    doc: crate::command_doc!("Commodities"),
 };
 
 /// Run the commodities command (commodities): the commodities declared,

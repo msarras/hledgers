@@ -47,6 +47,9 @@ pub static MODE: Mode = Mode {
             "show tag names as tag directives, for use in journals",
         ),
     ],
+    args: Some("[TAGREGEX [QUERY..]]"),
+    doc: crate::command_doc!("Tags"),
+    ..Mode::DEFAULT
 };
 
 /// Run the tags command (tags): the first argument is a regular

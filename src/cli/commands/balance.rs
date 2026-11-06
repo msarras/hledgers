@@ -99,6 +99,8 @@ pub static MODE: Mode = Mode {
         CHART_WIDTH_FLAG,
         Flag::new(&["commodity-column"], NONE, "", "show commodity symbols in a separate column, amounts as bare numbers, one row per commodity").hidden(),
     ],
+    doc: crate::command_doc!("Balance"),
+    ..Mode::DEFAULT
 };
 
 /// The --chart flag (chartFlag).

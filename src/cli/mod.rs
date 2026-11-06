@@ -93,10 +93,27 @@ fn dispatch(prog_args: &[String]) -> Result<(), String> {
         !to_file && crate::console::use_color_on_stdout(crate::console::color_option(prog_args));
     let mut opts = CliOpts::from_raw_opts(raw, crate::dates::current_day(), color)?;
     opts.input.prog_args = prog_args.to_vec();
-    if opts.raw.bool("quickref") {
+    // help and version flags first (Cli.hs 6.1-6.4.1)
+    let help = || {
+        let mut usage = args::mode_usage(mode);
+        if color && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            usage = args::highlight_help(&usage);
+        }
+        io::run_pager(&usage)
+    };
+    let raw = &opts.raw;
+    if raw.bool("quickref") {
         return io::write_output(&opts, &commands::quickref::render());
     }
-    if opts.raw.bool("version") {
+    if raw.bool("help") {
+        return help();
+    }
+    for doc in ["examples", "info", "man", "webman"] {
+        if raw.bool(doc) {
+            return Err(commands::not_yet(&format!("--{doc}"), "8b"));
+        }
+    }
+    if raw.bool("version") {
         let out = format!("{}\n", version::PROGNAME_AND_VERSION);
         return io::write_output(&opts, &out);
     }

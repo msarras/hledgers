@@ -12,6 +12,9 @@ pub static MODE: Mode = Mode {
     name: "check",
     aliases: &[],
     flags: &[],
+    args: Some("[CHECKS]"),
+    doc: crate::command_doc!("Check"),
+    ..Mode::DEFAULT
 };
 
 /// The checks, in the order they run (Check).

@@ -14,7 +14,7 @@ const REQ: Arity = Arity::Req;
 const OPT: Arity = Arity::Opt;
 
 /// The general input flags (inputflags).
-pub static INPUT_FLAGS: &[Flag] = &[
+pub const INPUT_FLAGS: &[Flag] = &[
     Flag::new(&["file"], REQ, "[FMT:]FILE", "Use this as the journal file (- means stdin). If not specified, $LEDGER_FILE or ~/.hledger.journal will be used. If specified more than once, the files will be read in order. Each file's format (journal, csv, timeclock, timedot, rules..) is inferred from the file extension or a FMT: prefix. Some commands (add, import) write to the (first) file, and expect it to be in journal format.").short(&['f']),
     Flag::new(&["rules"], REQ, "RULESFILE", "Use rules defined in this rules file for converting subsequent CSV/SSV/TSV files. If not specified, uses FILE.csv.rules for each FILE.csv."),
     Flag::new(&["alias"], REQ, "A=B|/RGX/=RPL", "transform account names from A to B, or by replacing regular expression matches"),
@@ -33,7 +33,7 @@ pub static INPUT_FLAGS: &[Flag] = &[
 ];
 
 /// The general output flags (reportflags).
-pub static REPORT_FLAGS: &[Flag] = &[
+pub const REPORT_FLAGS: &[Flag] = &[
     Flag::new(&["begin"], REQ, "DATE", "include postings/transactions on/after this date").short(&['b']),
     Flag::new(&["end"], REQ, "DATE", "include postings/transactions before this date (with a report interval, will be adjusted to following subperiod end)").short(&['e']),
     Flag::new(&["daily"], NONE, "", "set report interval: 1 day").short(&['D']),
@@ -63,7 +63,7 @@ pub static REPORT_FLAGS: &[Flag] = &[
 ];
 
 /// The general help flags, and the terminal flags (helpflags).
-pub static HELP_FLAGS: &[Flag] = &[
+pub const HELP_FLAGS: &[Flag] = &[
     Flag::new(&[], NONE, "", "show the hledger quick reference")
         .short(&['?'])
         .sets(&["quickref"]),
@@ -108,23 +108,77 @@ pub static HELP_FLAGS: &[Flag] = &[
         "YNA",
         "use ANSI color ? y/yes, n/no, or auto (default)",
     ),
-    Flag::new(&["lang"], REQ, "LANG", "select the user interface language"),
+    Flag::new(
+        &["lang"],
+        REQ,
+        "LANG",
+        "select the user interface language:\nen (default), de, es, fr, ga, haw, it, ja, pt-BR, ru, uk, zh, or auto",
+    ),
 ];
 
-/// Legacy and config file flags, accepted but not shown in help
-/// (hiddenflags).
-pub static HIDDEN_FLAGS: &[Flag] = &[
-    Flag::new(&["effective", "aux-date"], NONE, "", "Ledger-compatible aliases for --date2").sets(&["date2"]).hidden(),
-    Flag::new(&["infer-value"], NONE, "", "legacy flag that was renamed").sets(&["infer-market-prices"]).hidden(),
-    Flag::new(&["pretty-tables"], NONE, "", "legacy flag that was renamed").sets(&["pretty"]).default("always").hidden(),
+/// Legacy flags, accepted but not shown in help (hiddenflagsformainmode).
+pub const LEGACY_FLAGS: &[Flag] = &[
+    Flag::new(
+        &["effective", "aux-date"],
+        NONE,
+        "",
+        "Ledger-compatible aliases for --date2",
+    )
+    .sets(&["date2"])
+    .hidden(),
+    Flag::new(&["infer-value"], NONE, "", "legacy flag that was renamed")
+        .sets(&["infer-market-prices"])
+        .hidden(),
+    Flag::new(&["pretty-tables"], NONE, "", "legacy flag that was renamed")
+        .sets(&["pretty"])
+        .default("always")
+        .hidden(),
     Flag::new(&["anon"], NONE, "", "deprecated, renamed to --obfuscate").hidden(),
-    Flag::new(&["obfuscate"], NONE, "", "slightly obfuscate hledger's output. Warning, does not give privacy. Formerly --anon.").hidden(),
-    Flag::new(&["old-timeclock", "timeclock-old"], NONE, "", "don't pair timeclock entries by account name").sets(&["oldtimeclock"]).hidden(),
-    Flag::new(&["old-glob"], NONE, "", "deprecated, no longer used as of 1.50.4").sets(&["oldglob"]).hidden(),
-    Flag::new(&["rules-file"], REQ, "RULESFILE", "was renamed to --rules").sets(&["rules"]).hidden(),
-    Flag::new(&["txn-balancing"], REQ, "...", "was renamed to --txn-tolerance").hidden(),
-    Flag::new(&["conf"], REQ, "CONFFILE", "Use extra options defined in this config file. If not specified, searches upward and in XDG config dir for hledger.conf (or .hledger.conf in $HOME).").hidden(),
-    Flag::new(&["no-conf"], NONE, "", "ignore any config file").short(&['n']).hidden(),
+    Flag::new(
+        &["obfuscate"],
+        NONE,
+        "",
+        "slightly obfuscate hledger's output. Warning, does not give privacy. Formerly --anon.",
+    )
+    .hidden(),
+    Flag::new(
+        &["old-timeclock", "timeclock-old"],
+        NONE,
+        "",
+        "don't pair timeclock entries by account name",
+    )
+    .sets(&["oldtimeclock"])
+    .hidden(),
+    Flag::new(
+        &["old-glob"],
+        NONE,
+        "",
+        "deprecated, no longer used as of 1.50.4",
+    )
+    .sets(&["oldglob"])
+    .hidden(),
+    Flag::new(&["rules-file"], REQ, "RULESFILE", "was renamed to --rules")
+        .sets(&["rules"])
+        .hidden(),
+    Flag::new(
+        &["txn-balancing"],
+        REQ,
+        "...",
+        "was renamed to --txn-tolerance",
+    )
+    .hidden(),
+];
+
+/// The config file flags (confflags): shown in the main help, hidden in
+/// commands'.
+pub const CONF_FLAGS: &[Flag] = &[
+    Flag::new(
+        &["conf"],
+        REQ,
+        "CONFFILE",
+        "Use extra options defined in this config file. If not specified, searches upward and in XDG config dir for hledger.conf (or .hledger.conf in $HOME).",
+    ),
+    Flag::new(&["no-conf"], NONE, "", "ignore any config file").short(&['n']),
 ];
 
 /// The output format flag, with the formats a command supports

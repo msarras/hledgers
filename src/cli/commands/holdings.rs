@@ -25,9 +25,7 @@ use crate::amount::{
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{chart_requested, check_chart_format, render_chart};
 use crate::cli::commands::balance::{CHART_FLAG, CHART_WIDTH_FLAG};
-use crate::cli::commands::print::{
-    ROUND_FLAG, round_from_raw_opts, unsupported_output_format_error,
-};
+use crate::cli::commands::print::{round_from_raw_opts, unsupported_output_format_error};
 use crate::cli::io::warn_if_large_multi_period_report;
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
@@ -87,7 +85,12 @@ pub static MODE: Mode = Mode {
         )
         .short(&['S']),
         Flag::new(&["no-total"], NONE, "", "omit the final total row").short(&['N']),
-        ROUND_FLAG,
+        Flag::new(
+            &["round"],
+            REQ,
+            "TYPE",
+            "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round amounts to precision (default)\nall  - also round cost amounts to precision",
+        ),
         CHART_FLAG,
         CHART_WIDTH_FLAG,
         output_format_flag(
@@ -96,6 +99,8 @@ pub static MODE: Mode = Mode {
         OUTPUT_FILE_FLAG,
         OUTPUT_VIEW_FLAG,
     ],
+    doc: crate::command_doc!("Holdings"),
+    ..Mode::DEFAULT
 };
 
 /// One commodity held in one displayed account or lot subaccount, with

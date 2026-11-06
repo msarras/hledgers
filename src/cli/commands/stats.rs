@@ -25,6 +25,8 @@ pub static MODE: Mode = Mode {
         Flag::new(&["verbose"], NONE, "", "show more detailed output").short(&['v']),
         Flag::new(&["output-file"], REQ, "FILE", "write output to FILE.").short(&['o']),
     ],
+    doc: crate::command_doc!("Stats"),
+    ..Mode::DEFAULT
 };
 
 /// The width the labels are padded to (labelwidth).

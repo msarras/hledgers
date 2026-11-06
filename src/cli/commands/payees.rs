@@ -36,6 +36,9 @@ pub static MODE: Mode = Mode {
             "show as payee directives, for use in journals",
         ),
     ],
+    args: Some("[QUERY..]"),
+    doc: crate::command_doc!("Payees"),
+    ..Mode::DEFAULT
 };
 
 /// Run the payees command (payees): the payees of the transactions the
