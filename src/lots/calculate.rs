@@ -220,14 +220,16 @@ pub fn journal_calculate_lots(
         verbose,
         needs_labels: find_dates_needing_labels(&txns),
     };
+    // the transactions in date order, each taken from its place
     let mut order: Vec<usize> = (0..txns.len()).collect();
     order.sort_by_key(|&i| txns[i].date);
+    let mut txns: Vec<Option<Transaction>> = txns.into_iter().map(Some).collect();
     let mut ls = LotState::new();
     let mut out = Vec::with_capacity(txns.len());
     for i in order {
-        let t = &txns[i];
-        if !transaction_has_lotful_amounts(&lotful, t) {
-            out.push(t.clone());
+        let t = txns[i].take().expect("each transaction once");
+        if !transaction_has_lotful_amounts(&lotful, &t) {
+            out.push(t);
             continue;
         }
         let tied = Transaction {
@@ -239,8 +241,8 @@ pub fn journal_calculate_lots(
             ..t.clone()
         };
         let t2 = calc
-            .process_transaction(&mut ls, t, &tied)
-            .map_err(|e| append_postings_read_as(t, e))?;
+            .process_transaction(&mut ls, &t, &tied)
+            .map_err(|e| append_postings_read_as(&t, e))?;
         out.push(t2);
     }
     for (i, t) in out.iter_mut().enumerate() {
