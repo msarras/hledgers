@@ -36,6 +36,9 @@ pub struct BalancingOpts {
     pub infer_balancing_costs: bool,
     /// Commodity display styles given on the command line (`-c`).
     pub commodity_styles: Option<CommodityStyles>,
+    /// While a journal's transactions are balanced, its commodity styles
+    /// without rounding, for the inferred amounts.
+    pub inferred_amount_styles: CommodityStyles,
     /// The precision transactions must balance to: each entry's own
     /// (`entry`), or the display precision (`display`) (`--txn-tolerance`).
     pub txn_balancing_display: bool,
@@ -57,6 +60,7 @@ impl Default for BalancingOpts {
             ignore_assertions: false,
             infer_balancing_costs: true,
             commodity_styles: None,
+            inferred_amount_styles: CommodityStyles::new(),
             txn_balancing_display: false,
             infer_imbalance: false,
             imbalance_account: crate::account::DEFAULT_IMBALANCE_ACCOUNT.to_string(),
