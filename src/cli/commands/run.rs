@@ -501,7 +501,7 @@ impl<'a> Session<'a> {
             }
             _ => {}
         }
-        let (j, jpaths) = self.journal_cached(&opts)?;
+        let (mut j, jpaths) = self.journal_cached(&opts)?;
         if cmdname == "run" {
             return run_with(ctx, Some(&jpaths), &opts);
         }
@@ -514,7 +514,7 @@ impl<'a> Session<'a> {
         };
         match self.sections {
             None => {
-                let out = action(&opts, j)?;
+                let out = action(&opts, &mut j)?;
                 crate::cli::write_command_output(&opts, paged, &out)?;
             }
             Some(sections) => {
@@ -524,7 +524,7 @@ impl<'a> Session<'a> {
                 let mut o = opts.clone();
                 o.output_file = Some("part".to_string());
                 o.output_format = html.then(|| "html".to_string());
-                let out = action(&o, j)?;
+                let out = action(&o, &mut j)?;
                 let label: Vec<String> =
                     cmdline.iter().map(|a| quote_for_command_line(a)).collect();
                 sections.borrow_mut().push((label.join(" "), Some(out)));
