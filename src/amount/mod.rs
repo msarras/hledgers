@@ -1129,7 +1129,10 @@ impl Add<&MixedAmount> for MixedAmount {
     type Output = MixedAmount;
 
     fn add(self, rhs: &MixedAmount) -> MixedAmount {
-        merged(self.0.into_iter(), rhs.0.iter().cloned())
+        match rhs.0.as_slice() {
+            [b] if self.0.len() >= LONG => self.with_amount_on_right(b.clone()),
+            _ => merged(self.0.into_iter(), rhs.0.iter().cloned()),
+        }
     }
 }
 
@@ -1138,7 +1141,10 @@ impl Add<MixedAmount> for &MixedAmount {
     type Output = MixedAmount;
 
     fn add(self, rhs: MixedAmount) -> MixedAmount {
-        merged(self.0.iter().cloned(), rhs.0.into_iter())
+        match self.0.as_slice() {
+            [a] if rhs.0.len() >= LONG => rhs.with_amount_on_left(a.clone()),
+            _ => merged(self.0.iter().cloned(), rhs.0.into_iter()),
+        }
     }
 }
 
@@ -1146,8 +1152,43 @@ impl Add<MixedAmount> for &MixedAmount {
 impl Add for MixedAmount {
     type Output = MixedAmount;
 
-    fn add(self, rhs: MixedAmount) -> MixedAmount {
-        merged(self.0.into_iter(), rhs.0.into_iter())
+    fn add(mut self, mut rhs: MixedAmount) -> MixedAmount {
+        if rhs.0.len() == 1 && self.0.len() >= LONG {
+            let b = rhs.0.pop().expect("one amount");
+            self.with_amount_on_right(b)
+        } else if self.0.len() == 1 && rhs.0.len() >= LONG {
+            let a = self.0.pop().expect("one amount");
+            rhs.with_amount_on_left(a)
+        } else {
+            merged(self.0.into_iter(), rhs.0.into_iter())
+        }
+    }
+}
+
+/// The length from which one amount is added to a sum in place, rather
+/// than by merging the two into a new one; shorter sums are merged, which
+/// allocates no more than they need.
+const LONG: usize = 8;
+
+impl MixedAmount {
+    /// This sum plus one amount on its right, as `merged` would add them,
+    /// in place: a long sum plus a posting's amount costs no more than
+    /// finding its place.
+    fn with_amount_on_right(mut self, b: Amount) -> MixedAmount {
+        match self.0.binary_search_by(|x| key_cmp(x, &b)) {
+            Ok(i) => self.0[i] = sum_similar(&self.0[i], &b),
+            Err(i) => self.0.insert(i, b),
+        }
+        self
+    }
+
+    /// One amount plus this sum on its right, likewise.
+    fn with_amount_on_left(mut self, a: Amount) -> MixedAmount {
+        match self.0.binary_search_by(|x| key_cmp(x, &a)) {
+            Ok(i) => self.0[i] = sum_similar(&a, &self.0[i]),
+            Err(i) => self.0.insert(i, a),
+        }
+        self
     }
 }
 
