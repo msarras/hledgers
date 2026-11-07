@@ -329,14 +329,16 @@ pub fn balance_report_as_text(
     };
     let mut out = String::new();
     let mut sizes: Vec<Vec<usize>> = Vec::new();
-    for (name, amount) in &report.items {
-        let (text, widths) = if ropts.account_list_mode == AccountListMode::Tree && ropts.full_names
-        {
+    // the items rendered on all cores, joined in order
+    let rendered = crate::par::map(&report.items, |(name, amount)| {
+        if ropts.account_list_mode == AccountListMode::Tree && ropts.full_names {
             let full = account_name_drop(ropts.drop, &name.full);
             render_balance_report_item(ropts, &format, layout, &full, 0, amount)
         } else {
             render_balance_report_item(ropts, &format, layout, &name.name, name.indent, amount)
-        };
+        }
+    });
+    for (text, widths) in rendered {
         out.push_str(&text);
         out.push('\n');
         sizes.push(widths);
@@ -393,9 +395,9 @@ fn default_balance_amount_column_width(
         ..AmountFormat::NO_COST
     };
     let total = (!ropts.no_total).then_some(&report.total);
-    (report.items.iter().map(|(_, m)| m))
-        .chain(total)
-        .map(|m| show_mixed_amount_b(&fmt, m).width)
+    let amounts: Vec<&MixedAmount> = (report.items.iter().map(|(_, m)| m)).chain(total).collect();
+    crate::par::map(&amounts, |m| show_mixed_amount_b(&fmt, m).width)
+        .into_iter()
         .fold(20, usize::max)
 }
 
@@ -749,8 +751,7 @@ pub fn multi_balance_report_as_part_table(
 ) -> Table<String, String, Wide> {
     let mut span_names: Vec<String> = Vec::new();
     if !ropts.summary_only {
-        span_names
-            .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
+        span_names.extend((report.dates.iter()).map(report_period_name(ropts, &report.dates)));
     }
     if ropts.has_totals_column() {
         span_names.push(format!(
@@ -1070,19 +1071,23 @@ pub fn multi_balance_report_table_as_text(
 /// the month abbreviated unless the report spans several years) or with
 /// --period-titles=dates its dates; for accumulated balances, its last
 /// date (reportPeriodName).
-pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan], span: &DateSpan) -> String {
-    match ropts.balance_accum {
-        BalanceAccumulation::PerPeriod => match ropts.period_titles {
+pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan]) -> impl Fn(&DateSpan) -> String {
+    // whether the spans start in more than one year, found once for them all
+    let multiyear = spans
+        .iter()
+        .map(DateSpan::start_year)
+        .collect::<BTreeSet<_>>()
+        .len()
+        > 1;
+    let months = ropts.translations.month_names();
+    let (accum, titles) = (ropts.balance_accum, ropts.period_titles);
+    move |span: &DateSpan| match accum {
+        BalanceAccumulation::PerPeriod => match titles {
             PeriodTitles::Dates => span.show_full(),
+            PeriodTitles::Compact if multiyear => span.to_string(),
             PeriodTitles::Compact => {
-                let years: BTreeSet<Option<i64>> = spans.iter().map(DateSpan::start_year).collect();
-                if years.len() > 1 {
-                    span.to_string()
-                } else {
-                    let months = ropts.translations.month_names();
-                    let abbrevs: Vec<&str> = months.iter().map(|(_, a)| a.as_str()).collect();
-                    span.show_abbrev_with(&abbrevs)
-                }
+                let abbrevs: Vec<&str> = months.iter().map(|(_, a)| a.as_str()).collect();
+                span.show_abbrev_with(&abbrevs)
             }
         },
         _ => span
@@ -1928,8 +1933,7 @@ fn budget_report_as_table(
         );
     }
     if !ropts.summary_only {
-        col_headings
-            .extend((report.dates.iter()).map(|s| report_period_name(ropts, &report.dates, s)));
+        col_headings.extend((report.dates.iter()).map(report_period_name(ropts, &report.dates)));
     }
     if ropts.row_total {
         col_headings.push(format!(

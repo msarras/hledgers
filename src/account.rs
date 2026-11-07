@@ -523,6 +523,9 @@ impl DepthSpec {
 /// equally specific), otherwise the overall limit
 /// (getAccountNameClippedDepth).
 pub fn account_name_clipped_depth(ds: &DepthSpec, a: &str) -> Option<usize> {
+    if ds.regexps.is_empty() {
+        return ds.flat;
+    }
     let parents: Vec<&str> = {
         let mut v: Vec<&str> = expand_account_name(a).collect();
         v.pop();

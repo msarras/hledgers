@@ -10,9 +10,15 @@ license = "GPL-3.0-or-later"
 description = "A Rust port of the hledger plain text accounting command-line tool"
 publish = false
 
+[features]
+default = ["parallel"]
+# Independent work (rendering transactions, ...) on all cores, with rayon.
+parallel = ["dep:rayon"]
+
 [dependencies]
 dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
 encoding_rs = "0.8.35"
+rayon = { version = "1.12", optional = true }
 regex = "1.13"
 rustls-pure = "0.15.4"
 rustyline = { version = "19.0.0", default-features = false }

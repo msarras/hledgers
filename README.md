@@ -12,7 +12,7 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 9 of 10: the journal reader and writer, valuation, cost
+Milestone 10 of 10: the journal reader and writer, valuation, cost
 conversion, lot tracking, the listing commands, the balance reports, the
 register reports and holdings, with all their output formats, the CSV,
 timeclock and timedot readers, the import command, and the command-line
@@ -120,6 +120,8 @@ Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
 with this repo's 27. The other four (`journal/fastpath.test` 6, 9, 11 and
 13) check the statistics line of hledger's fast-path journal parser, which
 hledgers does not have by design; they are listed as such and not run.
+On large journals hledgers is several times faster than hledger (see
+Benchmark).
 
 ## Build
 
@@ -174,6 +176,36 @@ with a `cabal.project` that lists only `hledger-lib` and `hledger`:
     cabal install exe:hledger --installdir=$HOME/.local/bin --install-method=copy
 
 Linking needs `libgmp-dev`. The bench crate has no dependencies.
+
+### Results
+
+On the 100k-transaction journal (`generatejournal 100000 1000 10`: a
+thousand accounts nested up to ten deep, 26 commodities, costs on two
+entries in three, and 100,000 price directives), the median wall time of
+five runs of each program, from `bench/results.md`:
+
+| command | hledger 1.99 | hledgers | speedup | peak RSS hledger | peak RSS hledgers |
+|---|---:|---:|---:|---:|---:|
+| `stats` | 7.273 s | 1.161 s | 6.3x | 563 MB | 294 MB |
+| `balance` | 6.546 s | 1.404 s | 4.7x | 567 MB | 293 MB |
+| `print` | 10.386 s | 1.574 s | 6.6x | 566 MB | 293 MB |
+| `register` | 39.057 s | 7.509 s | 5.2x | 642 MB | 1236 MB |
+| `bal -M` | 117.588 s | 26.778 s | 4.4x | 3688 MB | 3560 MB |
+| `reg -w 120` | 45.833 s | 9.004 s | 5.1x | 641 MB | 1454 MB |
+| `print -O json` | 37.626 s | 11.287 s | 3.3x | 1424 MB | 1698 MB |
+
+The machine is a Xen virtual machine with 16 cores of an Intel Xeon
+E5-2690 v2 (3.0 GHz) and 16 GB of memory, running Debian with Linux 6.12;
+hledger 1.99 is built with GHC from the submodule's commit. Its timings
+vary from run to run, at times by a factor of two, with the host's load.
+
+hledgers does work over independent items on all cores: a large file's
+transactions after its directives are parsed in parts, transactions are
+balanced and styled, market prices inferred, and `print`, `register`,
+`aregister` and the balance report render their lines, each in parallel,
+the results in order. This is the `parallel` feature, on by default;
+`cargo build --release --no-default-features` builds hledgers to use one
+core, with the same output.
 
 ## `let` and `split` in CSV rules
 

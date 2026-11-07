@@ -203,12 +203,10 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     };
     let layout = layout_from_raw_opts(opts)?;
     let style_all = |ts: Vec<Transaction>, styles: &CommodityStyles| -> Vec<Transaction> {
-        ts.into_iter()
-            .map(|mut t| {
-                t.style_amounts(styles);
-                t
-            })
-            .collect()
+        crate::par::map_owned(ts, |mut t| {
+            t.style_amounts(styles);
+            t
+        })
     };
     let forecasting = opts.input.forecast.is_some();
     let auto = opts.input.auto;
@@ -297,15 +295,15 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
                 .map(|t| maybe_original_amounts(opts, true, t))
                 .collect();
             let txns = style_all(txns, &styles);
-            let mut out = String::new();
-            for t in &txns {
-                out.push_str(&if fmt == "ledger" {
+            let ledger = fmt == "ledger";
+            let shown = crate::par::map(&txns, |t| {
+                if ledger {
                     show_transaction_ledger(t)
                 } else {
                     show_transaction(t, layout, false)
-                });
-            }
-            Ok(with_title(opts, out))
+                }
+            });
+            Ok(with_title(opts, shown.concat()))
         }
         "beancount" => {
             let mut j = entries_report_unsorted(&opts.spec, j)?;

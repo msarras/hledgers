@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::account::{Realness, account_name_drop, elide_account_name};
-use crate::amount::render::{AmountFormat, show_mixed_amount_lines_b};
+use crate::amount::render::{
+    AmountFormat, show_mixed_amount_lines_b, show_mixed_amount_lines_reusing,
+};
 use crate::amount::{MixedAmount, Rounding, styles_with_rounding};
 use crate::cli::anchor::{date_cell, set_account_anchor};
 use crate::cli::args::{Arity, Flag, Mode};
@@ -31,7 +33,7 @@ use crate::write::spreadsheet::{
     self as spr, CellType, add_header_borders, cell_from_mixed_amount, horizontal_span,
     integer_cell, raw_table_content,
 };
-use crate::write::table::{Align, Cell, Header, Line, TableOpts, render_row};
+use crate::write::table::{Align, Cell};
 
 const NONE: Arity = Arity::None;
 const REQ: Arity = Arity::Req;
@@ -348,7 +350,10 @@ pub fn register_columns(w: ItemWidths, date: isize, has_description: bool) -> Re
 
 /// A register line: the date, description and account fitted to their
 /// columns, the amount's lines right-aligned at the top of theirs, the
-/// balance's at the bottom, ending with a newline.
+/// balance's at the bottom, ending with a newline. This is the row the
+/// table renderer makes of these cells (single spaces and pairs of spaces
+/// between them, no borders), written directly: as many lines as the
+/// tallest cell has, each cell padded to its column's width.
 pub fn register_line(
     cols: &RegisterColumns,
     date: &str,
@@ -359,38 +364,81 @@ pub fn register_line(
 ) -> String {
     let fitted =
         |w: isize, s: &str| Cell::text(Align::TopLeft, &fit_text(Some(w), Some(w), true, true, s));
-    let spacer = |n: usize| Cell {
-        align: Align::BottomLeft,
-        lines: vec![Wide::new(&" ".repeat(n))],
+    let (date, description, account) = (
+        fitted(cols.date, date).lines,
+        fitted(cols.description, description).lines,
+        fitted(cols.account, account).lines,
+    );
+    let width = |lines: &[Wide]| lines.iter().map(|l| l.width).max().unwrap_or(0);
+    // an amount line is padded to its column's width, which a wider amount
+    // overflows; the column is that wide if it has lines
+    let amounts_width = |w: isize, lines: &[Wide]| {
+        if lines.is_empty() {
+            0
+        } else {
+            w.max(0) as usize
+        }
     };
-    // padded to the column's width, which a wider amount overflows
-    let padded = |align: Align, w: isize, lines: &[Wide]| Cell {
-        align,
-        lines: (lines.iter())
-            .map(|a| Wide {
-                s: " ".repeat((w - a.width as isize).max(0) as usize) + &a.s,
-                width: w.max(0) as usize,
-            })
-            .collect(),
+    let widths = (
+        width(&date),
+        width(&description),
+        width(&account),
+        amounts_width(cols.amount, amt),
+        amounts_width(cols.balance, bal),
+    );
+    let n = [
+        date.len(),
+        description.len(),
+        account.len(),
+        amt.len(),
+        bal.len(),
+    ]
+    .into_iter()
+    .fold(1, usize::max);
+    const SPACES: &str = "                                                                ";
+    let spaces = |out: &mut String, mut k: usize| {
+        while k > 0 {
+            let n = k.min(SPACES.len());
+            out.push_str(&SPACES[..n]);
+            k -= n;
+        }
     };
-    let cells = [
-        fitted(cols.date, date),
-        spacer(1),
-        fitted(cols.description, description),
-        spacer(2),
-        fitted(cols.account, account),
-        spacer(2),
-        padded(Align::TopRight, cols.amount, amt),
-        spacer(2),
-        padded(Align::BottomRight, cols.balance, bal),
-    ];
-    let opts = TableOpts {
-        pretty: false,
-        borders: false,
-        border_spaces: false,
+    let left = |out: &mut String, lines: &[Wide], w: usize, i: usize| match lines.get(i) {
+        Some(t) => {
+            out.push_str(&t.s);
+            spaces(out, w.saturating_sub(t.width));
+        }
+        None => spaces(out, w),
     };
-    let row = Header::Group(Line::NoLine, cells.into_iter().map(Header::Leaf).collect());
-    render_row(&opts, &row) + "\n"
+    let right = |out: &mut String, line: Option<&Wide>, column: isize, w: usize| match line {
+        Some(a) => {
+            spaces(out, (column - a.width as isize).max(0) as usize);
+            out.push_str(&a.s);
+        }
+        None => spaces(out, w),
+    };
+    let mut out = String::new();
+    for i in 0..n {
+        if i > 0 {
+            out.push('\n');
+        }
+        left(&mut out, &date, widths.0, i);
+        spaces(&mut out, 1);
+        left(&mut out, &description, widths.1, i);
+        spaces(&mut out, 2);
+        left(&mut out, &account, widths.2, i);
+        spaces(&mut out, 2);
+        right(&mut out, amt.get(i), cols.amount, widths.3);
+        spaces(&mut out, 2);
+        right(
+            &mut out,
+            (i + bal.len()).checked_sub(n).and_then(|k| bal.get(k)),
+            cols.balance,
+            widths.4,
+        );
+    }
+    out.push('\n');
+    out
 }
 
 /// A postings or account transactions report as text, each item rendered
@@ -399,15 +447,18 @@ pub fn register_line(
 /// --align-all, all items'), at least 12, widening as wider ones come
 /// (postingsOrTransactionsReportAsText). The total width comes from
 /// --width, which is an error if malformed and there are items.
-pub fn postings_or_transactions_report_as_text<T>(
+pub fn postings_or_transactions_report_as_text<T: Sync>(
     opts: &CliOpts,
     items: &[T],
-    amount: impl Fn(&T) -> &MixedAmount,
-    balance: impl Fn(&T) -> &MixedAmount,
-    item_as_text: impl Fn(ItemWidths, &T, &[Wide], &[Wide]) -> String,
+    amount: impl Fn(&T) -> &MixedAmount + Sync,
+    balance: impl Fn(&T) -> &MixedAmount + Sync,
+    item_as_text: impl Fn(ItemWidths, &T, &[Wide], &[Wide]) -> String + Sync,
 ) -> Result<String, String> {
     const MIN_WIDTH: usize = 12;
     const CHUNK_SIZE: usize = 1000;
+    // the items are shown and rendered a block at a time, in runs on all cores
+    const BLOCK: usize = 8192;
+    const RUN: usize = 256;
     if items.is_empty() {
         return Ok(String::new());
     }
@@ -417,35 +468,79 @@ pub fn postings_or_transactions_report_as_text<T>(
         colour: opts.spec.opts.color,
         ..AmountFormat::ONE_LINE_NO_COST
     };
-    let shown: Vec<(Vec<Wide>, Vec<Wide>)> = (items.iter())
-        .map(|i| {
-            (
-                show_mixed_amount_lines_b(&fmt, amount(i)),
-                show_mixed_amount_lines_b(&fmt, balance(i)),
-            )
+    // the items' amounts and balances shown, a run of them at a time on
+    // each core; successive balances are mostly the same amounts, whose
+    // texts are reused
+    type Shown = (Vec<Wide>, Vec<Wide>);
+    let show = |items: &[T]| -> Vec<Vec<Shown>> {
+        let runs: Vec<&[T]> = items.chunks(RUN).collect();
+        crate::par::map(&runs, |run| {
+            let mut last_balance = Vec::new();
+            (run.iter())
+                .map(|i| {
+                    (
+                        show_mixed_amount_lines_b(&fmt, amount(i)),
+                        show_mixed_amount_lines_reusing(&fmt, balance(i), &mut last_balance),
+                    )
+                })
+                .collect()
         })
-        .collect();
-    let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
-    let start = if align_all {
-        &shown[..]
-    } else {
-        &shown[..shown.len().min(CHUNK_SIZE)]
     };
-    let mut amt_width = start.iter().fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
-    let mut bal_width = start.iter().fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
+    // the items the starting widths come from are shown first, the others
+    // as they come
+    let n_start = if align_all {
+        items.len()
+    } else {
+        items.len().min(CHUNK_SIZE)
+    };
+    let start = show(&items[..n_start]);
+    let widest = |lines: &[Wide], w: usize| lines.iter().map(|l| l.width).fold(w, usize::max);
+    let mut amt_width = start
+        .iter()
+        .flatten()
+        .fold(MIN_WIDTH, |w, (a, _)| widest(a, w));
+    let mut bal_width = start
+        .iter()
+        .flatten()
+        .fold(MIN_WIDTH, |w, (_, b)| widest(b, w));
     let mut out = String::new();
-    for (item, (amt, bal)) in items.iter().zip(&shown) {
-        if !align_all {
-            amt_width = widest(amt, amt_width);
-            bal_width = widest(bal, bal_width);
+    // each item's widths found in order, widening as wider amounts come;
+    // then each run's items rendered on a core, and the runs' texts joined
+    let mut render = |items: &[T], shown: Vec<Vec<Shown>>| {
+        let mut items = items.iter();
+        let mut runs = Vec::with_capacity(shown.len());
+        for run in shown {
+            let run: Vec<(ItemWidths, &T, Shown)> = (run.into_iter())
+                .map(|s| {
+                    if !align_all {
+                        amt_width = widest(&s.0, amt_width);
+                        bal_width = widest(&s.1, bal_width);
+                    }
+                    let widths = ItemWidths {
+                        total,
+                        description,
+                        amount: amt_width as isize,
+                        balance: bal_width as isize,
+                    };
+                    (widths, items.next().expect("an item for each shown"), s)
+                })
+                .collect();
+            runs.push(run);
         }
-        let widths = ItemWidths {
-            total,
-            description,
-            amount: amt_width as isize,
-            balance: bal_width as isize,
-        };
-        out.push_str(&item_as_text(widths, item, amt, bal));
+        let texts = crate::par::map_owned(runs, |run| {
+            let mut text = String::new();
+            for (widths, item, (amt, bal)) in run {
+                text.push_str(&item_as_text(widths, item, &amt, &bal));
+            }
+            text
+        });
+        for text in texts {
+            out.push_str(&text);
+        }
+    };
+    render(&items[..n_start], start);
+    for block in items[n_start..].chunks(BLOCK) {
+        render(block, show(block));
     }
     Ok(out)
 }

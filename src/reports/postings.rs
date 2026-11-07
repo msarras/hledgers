@@ -136,11 +136,12 @@ pub fn postings_report_start_balances(
 /// average, and the posting's amount (registerRunningCalculationFn).
 pub fn register_running_calculation(
     ropts: &ReportOpts,
-) -> impl Fn(usize, &MixedAmount, &MixedAmount) -> MixedAmount {
+) -> impl Fn(usize, MixedAmount, &MixedAmount) -> MixedAmount {
     let average = ropts.average;
     move |i, prev, amt| {
         if average {
-            prev + &(amt - prev).divide(&Decimal::from_i64(i as i64))
+            let change = (amt - &prev).divide(&Decimal::from_i64(i as i64));
+            prev + &change
         } else {
             prev + amt
         }
@@ -151,7 +152,7 @@ pub fn register_running_calculation(
 /// (sumPostings).
 pub fn sum_postings<'a>(ps: impl IntoIterator<Item = &'a Posting>) -> MixedAmount {
     ps.into_iter()
-        .fold(MixedAmount::null(), |total, p| &total + &p.amount)
+        .fold(MixedAmount::null(), |total, p| total + &p.amount)
 }
 
 /// The postings ordered by the sort keys, the earlier ones deciding,
@@ -330,9 +331,12 @@ fn postings_report_items<'j>(
         };
         prev = (txn, d, period);
         if period.is_none() {
-            p.account = AccountName::from(clip_or_ellipsify_account_name(depth, &p.account));
+            let clipped = clip_or_ellipsify_account_name(depth, &p.account);
+            if clipped != &*p.account {
+                p.account = AccountName::from(clipped);
+            }
         }
-        bal = running(start_num + i, &bal, &p.amount);
+        bal = running(start_num + i, bal, &p.amount);
         items.push(PostingsReportItem {
             date: show_date.then_some(d),
             period,

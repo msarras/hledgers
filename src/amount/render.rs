@@ -383,8 +383,41 @@ pub fn show_mixed_amount_lines_b(fmt: &AmountFormat, m: &MixedAmount) -> Vec<Wid
 /// amount in the same position, as upstream pairs them; that is not the
 /// line's own amount after an elided one (showMixedAmountLinesPartsB).
 pub fn show_mixed_amount_lines_parts_b(fmt: &AmountFormat, m: &MixedAmount) -> Vec<(Wide, Amount)> {
+    lines_parts_with(fmt, m, |_, a| show_amount_b(fmt, a))
+}
+
+/// Like [`show_mixed_amount_lines_b`], reusing the text of each amount
+/// that the last mixed amount shown this way had in the same position (as
+/// the previous running total of a register usually does), and keeping
+/// this one's amounts and texts in `last` for the next.
+pub fn show_mixed_amount_lines_reusing(
+    fmt: &AmountFormat,
+    m: &MixedAmount,
+    last: &mut Vec<(Amount, Wide)>,
+) -> Vec<Wide> {
+    let mut texts = Vec::with_capacity(last.len());
+    let lines = lines_parts_with(fmt, m, |i, a| {
+        let text = match last.get(i) {
+            // equal amounts with the same decimal places show alike
+            Some((b, text)) if b == a && b.quantity.places() == a.quantity.places() => text.clone(),
+            _ => show_amount_b(fmt, a),
+        };
+        texts.push((a.clone(), text.clone()));
+        text
+    });
+    *last = texts;
+    lines.into_iter().map(|(w, _)| w).collect()
+}
+
+/// The lines of showMixedAmountLinesPartsB, each amount shown by `show`
+/// with its position.
+fn lines_parts_with(
+    fmt: &AmountFormat,
+    m: &MixedAmount,
+    show: impl FnMut(usize, &Amount) -> Wide,
+) -> Vec<(Wide, Amount)> {
     let amounts = ordered_amounts(fmt, m);
-    let mut shown = displays(0, fmt, &amounts);
+    let mut shown = displays_with(0, &amounts, show);
     if let Some(max) = fmt.max_width {
         let (short, long): (Vec<Display>, Vec<Display>) = shown
             .into_iter()
@@ -514,11 +547,21 @@ struct Display {
 
 /// The amounts' texts with their running totals (amtDisplayList).
 fn displays(sep: usize, fmt: &AmountFormat, amounts: &[Amount]) -> Vec<Display> {
+    displays_with(sep, amounts, |_, a| show_amount_b(fmt, a))
+}
+
+/// Like [`displays`], each amount shown by `show` with its position.
+fn displays_with(
+    sep: usize,
+    amounts: &[Amount],
+    mut show: impl FnMut(usize, &Amount) -> Wide,
+) -> Vec<Display> {
     let mut total = -(sep as isize);
     amounts
         .iter()
-        .map(|a| {
-            let text = show_amount_b(fmt, a);
+        .enumerate()
+        .map(|(i, a)| {
+            let text = show(i, a);
             total += (text.width + sep) as isize;
             Display { text, total }
         })

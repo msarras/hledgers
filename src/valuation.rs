@@ -3,7 +3,7 @@
 //! market prices declared by P directives, inferred from costs, or given
 //! by commodity aliases.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::amount::{Amount, AmountCost, CommodityStyles, MixedAmount, Sym};
@@ -155,14 +155,13 @@ fn build_default_valuation_index(prices: &[MarketPrice]) -> DefaultValuationInde
 /// commodity, and amounts left in an alias can be valued.
 #[derive(Clone, Debug)]
 pub struct PriceOracle {
-    /// The declared and inferred prices (piForward).
-    forward: PriceIndex,
-    /// The same with the usable alias rates added, if there are any.
-    forward_with_aliases: Option<PriceIndex>,
-    /// Destinations of declared prices (piDeclaredDefault).
-    declared_default: DefaultValuationIndex,
-    /// Destinations of inferred prices (piInferredDefault).
-    inferred_default: DefaultValuationIndex,
+    /// The declared prices, the inferred prices used, and the usable alias
+    /// rates.
+    declared: Vec<MarketPrice>,
+    inferred: Vec<MarketPrice>,
+    alias_prices: Vec<MarketPrice>,
+    /// Their indexes, built when first needed, as upstream's lazy ones are.
+    indexes: OnceCell<PriceIndexes>,
     /// The aliases which different file trees declared differently, with
     /// their declarations.
     ambiguous_aliases: BTreeMap<Sym, Vec<PriceDirective>>,
@@ -172,6 +171,19 @@ pub struct PriceOracle {
     /// The lookups which have tried the alias rates, so that each is shown
     /// once (upstream's oracle is memoised).
     alias_tries: RefCell<BTreeSet<(Day, Sym, Sym)>>,
+}
+
+/// A price oracle's indexes (PriceIndexes).
+#[derive(Clone, Debug)]
+struct PriceIndexes {
+    /// The declared and inferred prices (piForward).
+    forward: PriceIndex,
+    /// The same with the usable alias rates added, if there are any.
+    forward_with_aliases: Option<PriceIndex>,
+    /// Destinations of declared prices (piDeclaredDefault).
+    declared_default: DefaultValuationIndex,
+    /// Destinations of inferred prices (piInferredDefault).
+    inferred_default: DefaultValuationIndex,
 }
 
 impl PriceOracle {
@@ -184,12 +196,11 @@ impl PriceOracle {
             .iter()
             .map(price_directive_to_market_price)
             .collect();
-        let inferred: &[MarketPrice] = if infer {
-            &j.inferred_market_prices
+        let inferred = if infer {
+            j.inferred_market_prices.clone()
         } else {
-            &[]
+            Vec::new()
         };
-        let forward = build_price_index(&declared, inferred);
         // the aliases declared differently, as an alias of a different
         // commodity or with a different quantity, can not be used
         // (journalAliasPriceDirectivesChecked)
@@ -208,8 +219,6 @@ impl PriceOracle {
             .flatten()
             .map(price_directive_to_market_price)
             .collect();
-        let forward_with_aliases =
-            (!alias_prices.is_empty()).then(|| with_alias_prices(&forward, &alias_prices));
         let debug_alias_rates =
             (debug >= 2 && !(alias_prices.is_empty() && ambiguous_aliases.is_empty())).then(|| {
                 (alias_pds.into_iter())
@@ -217,14 +226,29 @@ impl PriceOracle {
                     .collect()
             });
         PriceOracle {
-            forward,
-            forward_with_aliases,
-            declared_default: build_default_valuation_index(&declared),
-            inferred_default: build_default_valuation_index(inferred),
+            declared,
+            inferred,
+            alias_prices,
+            indexes: OnceCell::new(),
             ambiguous_aliases,
             debug_alias_rates,
             alias_tries: RefCell::default(),
         }
+    }
+
+    /// The indexes of the prices, built the first time.
+    fn indexes(&self) -> &PriceIndexes {
+        self.indexes.get_or_init(|| {
+            let forward = build_price_index(&self.declared, &self.inferred);
+            let forward_with_aliases = (!self.alias_prices.is_empty())
+                .then(|| with_alias_prices(&forward, &self.alias_prices));
+            PriceIndexes {
+                forward,
+                forward_with_aliases,
+                declared_default: build_default_valuation_index(&self.declared),
+                inferred_default: build_default_valuation_index(&self.inferred),
+            }
+        })
     }
 
     /// On this date, the commodity to value `from` in (`to` if given,
@@ -239,12 +263,13 @@ impl PriceOracle {
         from: &Sym,
         to: Option<&Sym>,
     ) -> Result<Option<(Sym, Decimal)>, String> {
+        let indexes = self.indexes();
         let Some(to) = to else {
             return Ok(self
                 .default_valuation_commodity(d, from)
-                .and_then(|to| price_lookup(&self.forward, d, from, &to)));
+                .and_then(|to| price_lookup(&indexes.forward, d, from, &to)));
         };
-        if let Some(found) = price_lookup(&self.forward, d, from, to) {
+        if let Some(found) = price_lookup(&indexes.forward, d, from, to) {
             return Ok(Some(found));
         }
         if let Some(pds) = [from, to]
@@ -280,7 +305,7 @@ impl PriceOracle {
                 rates.join("\n")
             );
         }
-        Ok(self
+        Ok(indexes
             .forward_with_aliases
             .as_ref()
             .and_then(|index| price_lookup(index, d, from, to)))
@@ -298,19 +323,23 @@ impl PriceOracle {
                 .and_then(|m| m.range(..=d).next_back())
                 .map(|(_, to)| to.clone())
         };
-        let declared_by_then = self
-            .declared_default
+        let PriceIndexes {
+            declared_default,
+            inferred_default,
+            ..
+        } = self.indexes();
+        let declared_by_then = declared_default
             .values()
             .any(|m| m.first_key_value().is_some_and(|(day, _)| *day <= d));
         if declared_by_then {
-            on_or_before(&self.declared_default)
-        } else if !self.declared_default.is_empty() {
-            self.declared_default
+            on_or_before(declared_default)
+        } else if !declared_default.is_empty() {
+            declared_default
                 .get(from)
                 .and_then(|m| m.last_key_value())
                 .map(|(_, to)| to.clone())
         } else {
-            on_or_before(&self.inferred_default)
+            on_or_before(inferred_default)
         }
     }
 }
@@ -591,11 +620,10 @@ pub(crate) mod tests {
                 .collect(),
             ..Journal::default()
         };
-        let mut o = PriceOracle::new(false, 0, &j);
-        if !aliases.is_empty() {
-            o.forward_with_aliases = Some(with_alias_prices(&o.forward, aliases));
+        PriceOracle {
+            alias_prices: aliases.to_vec(),
+            ..PriceOracle::new(false, 0, &j)
         }
-        o
     }
 
     fn lookup(o: &PriceOracle, d: Day, from: &str, to: Option<&str>) -> Option<(String, Decimal)> {

@@ -113,12 +113,23 @@ fn ledger_stats(verbose: bool, j: &Journal, today: Day, span: &DateSpan) -> (Str
     let path = j.files.first().map_or("(unknown)", |(f, _)| f.as_str());
     let included: Vec<&str> = j.files.iter().skip(1).map(|(f, _)| f.as_str()).collect();
     let txns: Vec<_> = j.txns.iter().filter(|t| span.contains(t.date)).collect();
-    let postings = || txns.iter().flat_map(|t| &t.postings);
-    let accounts: HashSet<&str> = postings().map(|p| &*p.account).collect();
-    let commodities: BTreeSet<&str> = postings()
-        .flat_map(|p| p.amount.amounts_raw())
-        .map(|a| &*a.commodity)
-        .collect();
+    // the accounts and commodities posted to, gathered from runs of
+    // transactions on all cores
+    let runs: Vec<&[&Transaction]> = txns.chunks(1024).collect();
+    let found = crate::par::map(&runs, |ts| {
+        let postings = || ts.iter().flat_map(|t| &t.postings);
+        let accounts: HashSet<&str> = postings().map(|p| &*p.account).collect();
+        let commodities: BTreeSet<&str> = postings()
+            .flat_map(|p| p.amount.amounts_raw())
+            .map(|a| &*a.commodity)
+            .collect();
+        (accounts, commodities)
+    });
+    let (mut accounts, mut commodities) = (HashSet::new(), BTreeSet::new());
+    for (a, c) in found {
+        accounts.extend(a);
+        commodities.extend(c);
+    }
     let last = txns.iter().map(|t| t.date).max();
     let n = txns.len();
     let days = span.days().unwrap_or(0);

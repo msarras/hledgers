@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::account::{AccountName, AccountType, Realness};
 use crate::amount::currency::to_currency_code;
@@ -35,8 +35,9 @@ impl SourcePos {
 
     /// The start of an unnamed source (initialPos "").
     pub fn null() -> SourcePos {
+        static NO_FILE: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from(""));
         SourcePos {
-            file: Arc::from(""),
+            file: NO_FILE.clone(),
             line: 1,
             col: 1,
         }
@@ -718,6 +719,59 @@ pub struct Journal {
 }
 
 impl Journal {
+    /// A copy of the journal with these transactions instead of its own,
+    /// which are not copied.
+    pub fn with_txns(&self, txns: Vec<Transaction>) -> Journal {
+        let Journal {
+            declared_payees,
+            declared_tags,
+            declared_accounts,
+            declared_account_tags,
+            declared_account_types,
+            account_types,
+            declared_commodities,
+            declared_commodity_tags,
+            inferred_commodity_styles,
+            global_commodity_styles,
+            price_directives,
+            inferred_market_prices,
+            txn_modifiers,
+            periodic_txns,
+            txns: _,
+            items,
+            files,
+            default_commodity,
+            parse_decimal_mark,
+            parse_year,
+            last_read_time,
+            aux_files,
+        } = self;
+        Journal {
+            declared_payees: declared_payees.clone(),
+            declared_tags: declared_tags.clone(),
+            declared_accounts: declared_accounts.clone(),
+            declared_account_tags: declared_account_tags.clone(),
+            declared_account_types: declared_account_types.clone(),
+            account_types: account_types.clone(),
+            declared_commodities: declared_commodities.clone(),
+            declared_commodity_tags: declared_commodity_tags.clone(),
+            inferred_commodity_styles: inferred_commodity_styles.clone(),
+            global_commodity_styles: global_commodity_styles.clone(),
+            price_directives: price_directives.clone(),
+            inferred_market_prices: inferred_market_prices.clone(),
+            txn_modifiers: txn_modifiers.clone(),
+            periodic_txns: periodic_txns.clone(),
+            txns,
+            items: items.clone(),
+            files: files.clone(),
+            default_commodity: default_commodity.clone(),
+            parse_decimal_mark: *parse_decimal_mark,
+            parse_year: *parse_year,
+            last_read_time: *last_read_time,
+            aux_files: aux_files.clone(),
+        }
+    }
+
     /// The postings of all transactions, with their transactions.
     pub fn postings(&self) -> impl Iterator<Item = PostingRef<'_>> {
         self.txns
@@ -851,13 +905,17 @@ impl Journal {
     /// first with the most frequent ISO 4217 code (the first seen winning
     /// ties), and that code (journalBaseCurrency).
     pub fn base_currency(&self) -> Option<(&str, &str)> {
-        fn pick(syms: Vec<&str>) -> Option<(&str, &str)> {
+        fn pick<'a>(syms: Vec<&'a str>) -> Option<(&'a str, &'a str)> {
+            // each symbol's code, looked up once
+            let mut codes: std::collections::HashMap<&str, &str> = Default::default();
+            let mut code_of =
+                |s: &'a str| -> &'a str { codes.entry(s).or_insert_with(|| to_currency_code(s)) };
             let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
             for (i, s) in syms.iter().enumerate() {
-                stats.entry(to_currency_code(s)).or_insert((0, i)).0 -= 1;
+                stats.entry(code_of(s)).or_insert((0, i)).0 -= 1;
             }
             let code = stats.into_iter().min_by_key(|(_, s)| *s)?.0;
-            let sym = syms.into_iter().find(|s| to_currency_code(s) == code)?;
+            let sym = syms.into_iter().find(|s| code_of(s) == code)?;
             Some((sym, code))
         }
         let price_targets = self.price_directives.iter().map(|pd| &*pd.amount.commodity);

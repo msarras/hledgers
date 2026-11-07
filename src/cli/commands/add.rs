@@ -611,6 +611,7 @@ fn parse_amount_and_comment(j: &Journal, year: i64, s: &str) -> Result<AmountAns
         default_commodity: None,
         commodities: Some(&j.declared_commodities),
         year: j.parse_year,
+        interned: None,
     };
     let mut c = Cursor::new(s);
     let pretty = |e: ParseError| e.pretty("", s);

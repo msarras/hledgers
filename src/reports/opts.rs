@@ -504,20 +504,23 @@ impl ReportSpec {
         j: &Journal,
         oracle: &PriceOracle,
     ) -> Result<Journal, String> {
-        let q = &self.query;
-        let mut filtered = j.clone();
+        let (q, related) = (&self.query, self.opts.related);
         let types = |a: &str| j.account_type(a);
-        for t in &mut filtered.txns {
-            if self.opts.related {
-                filter_transaction_related_postings(q, t);
+        // each transaction copied with the postings the query matches
+        let txns = crate::par::map(&j.txns, |t| {
+            let mut t = t.clone();
+            if related {
+                filter_transaction_related_postings(q, &mut t);
             } else {
                 let keep: Vec<bool> = (t.postings.iter())
-                    .map(|p| q.matches_posting_extra(&types, PostingRef::new(t, p)))
+                    .map(|p| q.matches_posting_extra(&types, PostingRef::new(&t, p)))
                     .collect();
                 let mut keep = keep.into_iter();
                 t.postings.retain(|_| keep.next().unwrap_or(false));
             }
-        }
+            t
+        });
+        let mut filtered = j.with_txns(txns);
         let amtq = q.clone().filter(Query::is_amt_or_cur);
         if !amtq.is_null() {
             for t in &mut filtered.txns {

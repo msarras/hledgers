@@ -6,6 +6,7 @@
 //! megaparsec's where hledger's tests or a direct comparison show them; an
 //! error in an included file is shown after the files that include it.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,13 +15,13 @@ use super::amount::{
     AmountCtx, AmountKind, amountp, balance_assertionp, commodity_symbolp, posting_amountp,
 };
 use super::common::{
-    account_aliasp, accountnamep, codep, datep, double_quoted_textp, empty_or_comment_linep,
-    following_commentp, is_line_comment_start, multiline_commentp, noncomment_textp,
-    peek_after_spaces, posting_commentp, rest_of_line, secondary_datep, statusp, timeofdayp,
-    transaction_commentp,
+    Interned, account_aliasp, accountnamep, codep, datep, double_quoted_textp,
+    empty_or_comment_linep, following_commentp, is_line_comment_start, multiline_commentp,
+    noncomment_textp, peek_after_spaces, posting_commentp, rest_of_line, secondary_datep, statusp,
+    timeofdayp, transaction_commentp,
 };
 use crate::account::{
-    AccountAlias, AccountType, account_name_apply_aliases, account_name_posting_type,
+    AccountAlias, AccountType, Realness, account_name_apply_aliases, account_name_posting_type,
     account_name_without_posting_type, join_account_names,
 };
 use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
@@ -84,11 +85,106 @@ pub fn parse_journal(
     };
     let mut j = Journal::default();
     let mut stack = vec![(file.to_string(), canonical_path(&absolute_path(file)))];
+    if let Some(parsed) = parse_in_parts(iopts, &st, &stack, file, text) {
+        return Ok(parsed);
+    }
     match parse_file(iopts, &mut st, &mut stack, &mut j, file, text) {
         Ok(()) => Ok((j, st)),
         Err(Failure::Here(e)) => Err(e.pretty(file, text)),
         Err(Failure::Included(msg) | Failure::Unlocated(msg)) => Err(msg),
     }
+}
+
+/// The smallest text worth parsing in parts.
+const PARTS_MIN_SIZE: usize = 1 << 18;
+
+/// A large file parsed in parts, if it can be: its directives and the
+/// items among them first, then the rest, transactions, price directives
+/// and comment lines only, which no directive comes between to change how
+/// they read, in parts starting at a transaction after an empty line, the
+/// parts read with `par` (on all cores with the parallel feature) and
+/// joined in order. None if the file is small, has a multi-line comment,
+/// or a part has an error, which the whole file is then parsed again to
+/// report as usual.
+fn parse_in_parts(
+    iopts: &InputOpts,
+    st: &ParseState,
+    stack: &[(String, PathBuf)],
+    file: &str,
+    text: &str,
+) -> Option<(Journal, ParseState)> {
+    const PARTS: usize = 64;
+    if text.len() < PARTS_MIN_SIZE {
+        return None;
+    }
+    // where a transaction follows an empty line, after the last directive,
+    // with its line number
+    let mut starts: Vec<(usize, usize)> = Vec::new();
+    let (mut off, mut line, mut empty_before) = (0, 1, false);
+    while off < text.len() {
+        let end = text[off..].find('\n').map_or(text.len(), |i| off + i);
+        match text.as_bytes()[off] {
+            b'0'..=b'9' if empty_before => starts.push((off, line)),
+            b'0'..=b'9' | b'P' | b' ' | b'\t' | b'\n' | b';' | b'#' | b'*' => {}
+            _ if text[off..].starts_with("comment") => return None,
+            _ => starts.clear(),
+        }
+        empty_before = end == off;
+        (off, line) = (end + 1, line + 1);
+    }
+    let &(header_end, _) = starts.first()?;
+    let step = (text.len() - header_end).div_ceil(PARTS);
+    let mut parts: Vec<(usize, usize, usize)> = Vec::new();
+    for &(start, line) in &starts {
+        if parts.last().is_none_or(|&(s, _, _)| start >= s + step) {
+            if let Some(last) = parts.last_mut() {
+                last.1 = start;
+            }
+            parts.push((start, text.len(), line));
+        }
+    }
+    let (mut st, mut stack) = (st.clone(), stack.to_vec());
+    let mut j = Journal::default();
+    parse_file(
+        iopts,
+        &mut st,
+        &mut stack,
+        &mut j,
+        file,
+        &text[..header_end],
+    )
+    .ok()?;
+    let file: Arc<str> = Arc::from(file);
+    let declared = &j.declared_commodities;
+    let parsed = crate::par::map_owned(parts, |(start, end, line)| {
+        let (mut st, mut stack) = (st.clone(), stack.clone());
+        let mut part = Journal {
+            declared_commodities: declared.clone(),
+            ..Journal::default()
+        };
+        let mut p = JournalParser {
+            c: Cursor {
+                src: &text[..end],
+                pos: start,
+            },
+            file: file.clone(),
+            st: &mut st,
+            stack: &mut stack,
+            j: &mut part,
+            iopts,
+            anchor: (start, line, start),
+            interned: RefCell::default(),
+        };
+        p.journalp().ok()?;
+        Some((part.items, part.txns, part.price_directives))
+    });
+    for part in parsed {
+        let (items, txns, prices) = part?;
+        j.items.extend(items);
+        j.txns.extend(txns);
+        j.price_directives.extend(prices);
+    }
+    Some((j, st))
 }
 
 /// An auto posting rule's posting written alone, `ACCOUNT  AMOUNT` or
@@ -106,6 +202,7 @@ pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule
         j: &mut j,
         iopts,
         anchor: (0, 1, 0),
+        interned: RefCell::default(),
     };
     let rule = match p.postingp(true, None) {
         Ok(Some((posting, is_multiplier))) if p.c.at_end() => Ok(TmPostingRule {
@@ -181,6 +278,7 @@ fn parse_file(
         j,
         iopts,
         anchor: (0, 1, 0),
+        interned: RefCell::default(),
     };
     match p.journalp() {
         Err(Failure::Here(e)) => Err(Failure::Included(e.pretty(file, text))),
@@ -201,15 +299,22 @@ struct JournalParser<'a, 's> {
     iopts: &'s InputOpts,
     /// A known position: offset, line, and the offset of that line's start.
     anchor: (usize, usize, usize),
+    /// The account names, commodity symbols and amount styles read so far.
+    interned: RefCell<Interned>,
 }
 
 /// The amount parsers' view of the parse state.
-fn amount_ctx<'s>(st: &'s ParseState, j: &'s Journal) -> AmountCtx<'s> {
+fn amount_ctx<'s>(
+    st: &'s ParseState,
+    j: &'s Journal,
+    interned: &'s RefCell<Interned>,
+) -> AmountCtx<'s> {
     AmountCtx {
         decimal_mark: st.decimal_mark,
         default_commodity: st.default_commodity.as_ref(),
         commodities: Some(&j.declared_commodities),
         year: st.year,
+        interned: Some(interned),
     }
 }
 
@@ -799,7 +904,7 @@ impl<'a> JournalParser<'a, '_> {
         let pos = self.pos();
         if self.c.skip_spaces() {
             let off = self.c.pos;
-            let ctx = amount_ctx(self.st, self.j);
+            let ctx = amount_ctx(self.st, self.j, &self.interned);
             if let Ok(a) = amountp(&mut self.c, &ctx, AmountKind::Style) {
                 self.c.skip_spaces();
                 let comment_off = self.c.pos;
@@ -856,7 +961,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.eat_str("format");
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style).map_err(|e| {
             if self.c.pos == off {
                 self.c.unexpected(&[Item::label("amount")])
@@ -1031,7 +1136,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.bump();
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style)?;
         rest_of_line(&mut self.c);
         if a.style.decimal_mark.is_none() {
@@ -1164,7 +1269,7 @@ impl<'a> JournalParser<'a, '_> {
     fn commodity_conversion_directivep(&mut self) -> R<()> {
         self.c.bump();
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         self.c.skip_spaces();
         if !self.c.eat('=') {
@@ -1219,9 +1324,9 @@ impl<'a> JournalParser<'a, '_> {
                 self.c = save;
             }
         }
-        let symbol = Sym::from(commodity_symbolp(&mut self.c)?);
+        let symbol = (self.interned.borrow_mut()).name(commodity_symbolp(&mut self.c)?);
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let amount = amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         rest_of_line(&mut self.c);
         Ok(PriceDirective {
@@ -1371,17 +1476,29 @@ impl<'a> JournalParser<'a, '_> {
         }
         let status = statusp(&mut self.c);
         self.c.skip_spaces();
-        let Ok(aliased) = self.aliased_account_namep(true) else {
+        let Ok(written) = accountnamep(&mut self.c, true) else {
             self.c = start;
             return Ok(None);
         };
-        let account = self.apply_parent_and_option_aliases(&aliased)?;
+        // with no aliases or parent account, a real posting's account is
+        // the name as written
+        let unchanged = self.st.aliases.is_empty()
+            && self.st.parent_accounts.is_empty()
+            && self.st.opt_aliases.as_ref().is_ok_and(Vec::is_empty)
+            && account_name_posting_type(&written) == Realness::Real;
+        let account = if unchanged {
+            written
+        } else {
+            let aliased = alias_or_die(&self.st.aliases, &written);
+            self.apply_parent_and_option_aliases(&aliased)?
+        };
         let realness = account_name_posting_type(&account);
-        let account: Arc<str> = account_name_without_posting_type(&account).into();
+        let account =
+            (self.interned.borrow_mut()).name(account_name_without_posting_type(&account));
         self.c.skip_spaces();
         let multiplier = is_rule && self.c.eat('*');
         let amount_start = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j);
+        let ctx = amount_ctx(self.st, self.j, &self.interned);
         let amount = if multiplier {
             amountp(&mut self.c, &ctx, AmountKind::Multiplier)
         } else {
@@ -1397,7 +1514,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.skip_spaces();
         let assertion = if self.c.peek() == Some('=') {
             let pos = self.pos();
-            let ctx = amount_ctx(self.st, self.j);
+            let ctx = amount_ctx(self.st, self.j, &self.interned);
             Some(Box::new(balance_assertionp(&mut self.c, &ctx, pos)?))
         } else {
             None

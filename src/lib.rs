@@ -9,6 +9,7 @@ pub mod decimal;
 pub mod i18n;
 pub mod lots;
 pub mod model;
+pub mod par;
 pub mod parse;
 pub mod query;
 pub mod read;

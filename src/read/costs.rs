@@ -474,19 +474,19 @@ pub fn journal_infer_equity_from_costs(verbose_tags: bool, mut j: Journal) -> Jo
 /// The market prices implied by the costs in the journal's postings
 /// (journalInferMarketPricesFromTransactions).
 pub fn journal_infer_market_prices_from_transactions(mut j: Journal) -> Journal {
-    j.inferred_market_prices = j
-        .txns
-        .iter()
-        .flat_map(|t| {
-            t.postings.iter().flat_map(move |p| {
+    // each transaction's prices, found on all cores, in order
+    let prices = crate::par::map(&j.txns, |t| {
+        (t.postings.iter())
+            .flat_map(|p| {
                 let date = p.date_in(Some(t));
                 p.amount.amounts_raw().iter().filter_map(move |a| {
                     crate::valuation::amount_price_directive_from_cost(date, a)
                         .map(|pd| crate::valuation::price_directive_to_market_price(&pd))
                 })
             })
-        })
-        .collect::<Vec<MarketPrice>>();
+            .collect::<Vec<MarketPrice>>()
+    });
+    j.inferred_market_prices = prices.concat();
     j
 }
 

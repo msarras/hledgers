@@ -36,6 +36,13 @@ pub const ROUNDED_POSTING_TAG: &str = "_rounded-posting";
 /// changed by this are tagged, so that an unbalanced entry's error can
 /// mention the rounding (transactionRoundCalculatedAmounts).
 pub fn transaction_round_calculated_amounts(mut t: Transaction) -> Transaction {
+    // nothing to round, as is usual: the styles need not be found
+    if !(t.postings.iter())
+        .flat_map(|p| p.amount.amounts_raw())
+        .any(is_calculated)
+    {
+        return t;
+    }
     let assigned: Vec<Posting> = t
         .postings
         .iter()
@@ -65,10 +72,6 @@ pub fn transaction_round_calculated_amounts(mut t: Transaction) -> Transaction {
 /// their commodity's precision in these styles or their own if that is more.
 /// Returns whether any quantity changed (postingRoundCalculatedAmounts).
 pub fn posting_round_calculated_amounts(styles: &CommodityStyles, p: &mut Posting) -> bool {
-    let is_calculated = |a: &Amount| match a.style.precision {
-        Precision::Fixed(n) => a.internal_precision() > n,
-        Precision::Natural => false,
-    };
     if !p.amount.amounts_raw().iter().any(is_calculated) {
         return false;
     }
@@ -100,6 +103,15 @@ pub fn posting_round_calculated_amounts(styles: &CommodityStyles, p: &mut Postin
         }
     });
     changed
+}
+
+/// Whether an amount was calculated with `*` or `/`: it has more decimal
+/// places than its precision.
+fn is_calculated(a: &Amount) -> bool {
+    match a.style.precision {
+        Precision::Fixed(n) => a.internal_precision() > n,
+        Precision::Natural => false,
+    }
 }
 
 /// Whether a posting is a disposal's realised gain posting, which balancing
@@ -600,11 +612,10 @@ fn cost_inferrer_for(
         .iter()
         .filter(|p| p.realness == realness && !set_aside(p))
         .collect();
-    let commodities: Vec<Sym> = ps
-        .iter()
-        .flat_map(|p| p.amount.amounts())
-        .map(|a| a.commodity)
-        .collect();
+    // no postings sum to nothing, which needs no cost
+    if ps.is_empty() {
+        return None;
+    }
     let sum = sum_postings(&ps).amounts();
     let [a, b] = sum.as_slice() else { return None };
     if a.cost.is_some()
@@ -614,6 +625,11 @@ fn cost_inferrer_for(
     {
         return None;
     }
+    let commodities: Vec<Sym> = ps
+        .iter()
+        .flat_map(|p| p.amount.amounts())
+        .map(|a| a.commodity)
+        .collect();
     let prefer = |has: &dyn Fn(&Sym) -> bool| match (has(&a.commodity), has(&b.commodity)) {
         (true, false) => Some((a, b)),
         (false, true) => Some((b, a)),
@@ -695,21 +711,25 @@ pub fn journal_balance_transactions(
         commodity_styles: Some(styles_with_rounding(Rounding::Hard, &j.commodity_styles())),
         ..bopts.clone()
     };
-    let mut items = Vec::new();
-    for i in 0..j.txns.len() {
-        if j.txns[i]
-            .postings
-            .iter()
-            .any(Posting::has_balance_assignment)
-        {
-            items.push(Item::Txn(i));
-            continue;
+    // the transactions without balance assignments are balanced on their
+    // own, independently; the first error, in journal order, is reported
+    let balanced = crate::par::map_owned(std::mem::take(&mut j.txns), |t| {
+        if t.postings.iter().any(Posting::has_balance_assignment) {
+            return (true, Ok(t));
         }
-        let t = std::mem::take(&mut j.txns[i]);
-        let (t, _) = balance_transaction_maybe_splitting_lot_fees(&bopts, t)?;
-        let (t, _) = transaction_maybe_add_imbalance_postings(&bopts, t);
-        items.extend((0..t.postings.len()).map(|k| Item::Posting(i, k)));
-        j.txns[i] = t;
+        let balanced = balance_transaction_maybe_splitting_lot_fees(&bopts, t)
+            .map(|(t, _)| transaction_maybe_add_imbalance_postings(&bopts, t).0);
+        (false, balanced)
+    });
+    let mut items = Vec::new();
+    for (i, (assigned, t)) in balanced.into_iter().enumerate() {
+        let t = t?;
+        if assigned {
+            items.push(Item::Txn(i));
+        } else {
+            items.extend((0..t.postings.len()).map(|k| Item::Posting(i, k)));
+        }
+        j.txns.push(t);
     }
     let mode = if bopts.ignore_assertions {
         Assertions::DontCheck
