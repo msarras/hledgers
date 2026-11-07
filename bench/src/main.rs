@@ -230,8 +230,8 @@ fn run(runs: usize) -> Result<(), String> {
     let mut table = format!(
         "# hledgers vs {version}\n\n\
          Baseline: `{}`. Median wall time of {runs} runs ({} for household journals of up \
-         to 1000 transactions), peak RSS (VmHWM, polled every 2 ms), and whether stdout is \
-         identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
+         to 1000 transactions), the two binaries' runs alternating; peak RSS (VmHWM, polled \
+         every 2 ms); and whether stdout is identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
          | journal | command | baseline | hledgers | speedup | RSS baseline | RSS hledgers | same stdout |\n\
          |---|---|---:|---:|---:|---:|---:|---|\n",
         baseline.display(),
@@ -240,8 +240,7 @@ fn run(runs: usize) -> Result<(), String> {
     for (name, journal, commands, runs) in &journals {
         for &(command, compare) in *commands {
             let args: Vec<&str> = command.split_whitespace().collect();
-            let a = measure(&baseline, &args, journal, &scratch, "a", *runs);
-            let b = measure(&hledgers, &args, journal, &scratch, "b", *runs);
+            let [a, b] = measure([&baseline, &hledgers], &args, journal, &scratch, *runs);
             let secs = |m: &Option<Measurement>| {
                 m.as_ref()
                     .map_or("n/a".into(), |m| match m.median.as_secs_f64() {
@@ -285,60 +284,86 @@ fn run(runs: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Run `bin -f journal args` `runs` times, stdout to `scratch/label.out`.
-/// None if the binary is missing or any run fails.
+/// Run each binary's `-f journal args` `runs` times, alternating which goes
+/// first, as this machine's speed drifts; stdout to `scratch/a.out` and
+/// `scratch/b.out`. None for a binary that is missing or fails.
 fn measure(
+    bins: [&Path; 2],
+    args: &[&str],
+    journal: &Path,
+    scratch: &Path,
+    runs: usize,
+) -> [Option<Measurement>; 2] {
+    let mut times: [Option<Vec<Duration>>; 2] = [Some(Vec::new()), Some(Vec::new())];
+    let mut peak_kb = [0; 2];
+    for run in 0..runs {
+        let order = if run % 2 == 0 { [0, 1] } else { [1, 0] };
+        for i in order {
+            let label = ["a", "b"][i];
+            let timed = times[i]
+                .as_ref()
+                .and_then(|_| run_once(bins[i], args, journal, scratch, label));
+            match (timed, times[i].as_mut()) {
+                (Some((t, kb)), Some(ts)) => {
+                    ts.push(t);
+                    peak_kb[i] = peak_kb[i].max(kb);
+                }
+                _ => times[i] = None,
+            }
+        }
+    }
+    [0, 1].map(|i| {
+        let mut ts = times[i].take()?;
+        ts.sort();
+        Some(Measurement {
+            median: ts[ts.len() / 2],
+            peak_kb: peak_kb[i],
+        })
+    })
+}
+
+/// One run of `bin -f journal args`, stdout to `scratch/label.out`: its
+/// wall time and peak resident size, or None if it fails.
+fn run_once(
     bin: &Path,
     args: &[&str],
     journal: &Path,
     scratch: &Path,
     label: &str,
-    runs: usize,
-) -> Option<Measurement> {
-    let mut times = Vec::new();
+) -> Option<(Duration, u64)> {
+    let stdout = File::create(scratch.join(format!("{label}.out"))).ok()?;
+    let start = Instant::now();
+    let mut child = Command::new(bin)
+        .args(args)
+        .arg("-f")
+        .arg(journal)
+        .current_dir(scratch)
+        .env("HOME", scratch)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("LEDGER_FILE")
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let status = child.wait();
+        let _ = tx.send((Instant::now(), status));
+    });
+    // The peak resident size is only readable while the process is alive,
+    // so poll it until the waiter reports the exit.
     let mut peak_kb = 0;
-    for _ in 0..runs {
-        let stdout = File::create(scratch.join(format!("{label}.out"))).ok()?;
-        let start = Instant::now();
-        let mut child = Command::new(bin)
-            .args(args)
-            .arg("-f")
-            .arg(journal)
-            .current_dir(scratch)
-            .env("HOME", scratch)
-            .env_remove("XDG_CONFIG_HOME")
-            .env_remove("LEDGER_FILE")
-            .stdin(Stdio::null())
-            .stdout(stdout)
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let pid = child.id();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let status = child.wait();
-            let _ = tx.send((Instant::now(), status));
-        });
-        // The peak resident size is only readable while the process is alive,
-        // so poll it until the waiter reports the exit.
-        let (end, status) = loop {
-            peak_kb = peak_kb.max(vm_hwm_kb(pid).unwrap_or(0));
-            match rx.recv_timeout(Duration::from_millis(2)) {
-                Ok(done) => break done,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return None,
-            }
-        };
-        if !status.ok()?.success() {
-            return None;
+    let (end, status) = loop {
+        peak_kb = peak_kb.max(vm_hwm_kb(pid).unwrap_or(0));
+        match rx.recv_timeout(Duration::from_millis(2)) {
+            Ok(done) => break done,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return None,
         }
-        times.push(end - start);
-    }
-    times.sort();
-    Some(Measurement {
-        median: times[times.len() / 2],
-        peak_kb,
-    })
+    };
+    status.ok()?.success().then_some((end - start, peak_kb))
 }
 
 fn vm_hwm_kb(pid: u32) -> Option<u64> {
