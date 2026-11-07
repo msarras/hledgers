@@ -713,7 +713,7 @@ pub fn journal_balance_transactions(
     };
     // the transactions without balance assignments are balanced on their
     // own, independently; the first error, in journal order, is reported
-    let balanced = crate::par::map_owned(std::mem::take(&mut j.txns), |t| {
+    let balanced = crate::par::map_owned(j.txns.len(), std::mem::take(&mut j.txns), |t| {
         if t.postings.iter().any(Posting::has_balance_assignment) {
             return (true, Ok(t));
         }

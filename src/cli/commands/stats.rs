@@ -116,7 +116,7 @@ fn ledger_stats(verbose: bool, j: &Journal, today: Day, span: &DateSpan) -> (Str
     // the accounts and commodities posted to, gathered from runs of
     // transactions on all cores
     let runs: Vec<&[&Transaction]> = txns.chunks(1024).collect();
-    let found = crate::par::map(&runs, |ts| {
+    let found = crate::par::map(txns.len(), &runs, |ts| {
         let postings = || ts.iter().flat_map(|t| &t.postings);
         let accounts: HashSet<&str> = postings().map(|p| &*p.account).collect();
         let commodities: BTreeSet<&str> = postings()

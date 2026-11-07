@@ -444,7 +444,7 @@ pub fn get_postings<'j>(
         && {
             let types = |a: &str| j.account_type(a);
             let q = &spec.query;
-            crate::par::map(&j.txns, |t| {
+            crate::par::map(j.txns.len(), &j.txns, |t| {
                 (t.postings.iter()).all(|p| {
                     p.has_amount() && q.matches_posting_extra(&types, PostingRef::new(t, p))
                 })

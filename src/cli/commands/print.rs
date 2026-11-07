@@ -203,7 +203,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
     };
     let layout = layout_from_raw_opts(opts)?;
     let style_all = |ts: Vec<Transaction>, styles: &CommodityStyles| -> Vec<Transaction> {
-        crate::par::map_owned(ts, |mut t| {
+        crate::par::map_owned(ts.len(), ts, |mut t| {
             t.style_amounts(styles);
             t
         })
@@ -296,7 +296,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
                 .collect();
             let txns = style_all(txns, &styles);
             let ledger = fmt == "ledger";
-            let shown = crate::par::map(&txns, |t| {
+            let shown = crate::par::map(txns.len(), &txns, |t| {
                 if ledger {
                     show_transaction_ledger(t)
                 } else {

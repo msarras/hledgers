@@ -156,7 +156,7 @@ pub fn journal_add_account_types(j: &mut Journal) {
 pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
     // the names posted to, gathered from runs of transactions on all cores
     let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
-    let used: BTreeSet<&str> = crate::par::map(&runs, |ts| {
+    let used: BTreeSet<&str> = crate::par::map(j.txns.len(), &runs, |ts| {
         (ts.iter())
             .flat_map(|t| t.postings.iter().map(|p| &*p.account))
             .collect::<BTreeSet<&str>>()
@@ -174,7 +174,7 @@ pub fn journal_account_names(j: &Journal) -> Vec<AccountName> {
 pub fn journal_style_amounts(j: &mut Journal) -> Result<(), String> {
     journal_infer_commodity_styles(j);
     let styles = styles_with_rounding(Rounding::No, &j.commodity_styles());
-    crate::par::for_each_mut(&mut j.txns, |t| t.style_amounts(&styles));
+    crate::par::for_each_mut(j.txns.len(), &mut j.txns, |t| t.style_amounts(&styles));
     Ok(())
 }
 
@@ -186,7 +186,7 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
     // posting amounts, with their symbols and styles, are gathered from
     // runs of transactions on all cores, then added in that order
     let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
-    let amounts = crate::par::map(&runs, |ts| {
+    let amounts = crate::par::map(j.txns.len(), &runs, |ts| {
         (ts.iter().rev())
             .flat_map(|t| t.postings.iter().rev())
             .flat_map(|p| {
