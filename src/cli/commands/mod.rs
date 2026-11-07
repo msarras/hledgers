@@ -46,7 +46,6 @@ pub static MAIN_MODE: Mode = Mode {
 };
 
 /// The builtin commands in upstream's order, with their official short names.
-/// Command-specific flags and actions arrive with the milestones that implement them.
 pub static BUILTIN_COMMANDS: &[&Mode] = &[
     &accounts::MODE,
     &activity::MODE,

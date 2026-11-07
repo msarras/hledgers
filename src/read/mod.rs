@@ -395,11 +395,8 @@ fn read_journal_file_only(iopts: &InputOpts, prefixed: &str) -> Result<Journal, 
         "ssv" => Some(csv::read_csv_file(iopts, f, ';')),
         "tsv" => Some(csv::read_csv_file(iopts, f, '\t')),
         "rules" => Some(csv::read_rules_file(iopts, f)),
-        _ => {
-            return Err(format!(
-                "reading {format} files is not supported yet (hledgers milestone 7): {f}"
-            ));
-        }
+        // any other format is read as a journal, as upstream's findReader falls back
+        _ => None,
     };
     if let Some(j) = read {
         return j.map_err(with_decoding_hint);

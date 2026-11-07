@@ -287,7 +287,8 @@ fn find_recent_assertion_error(ps: &[(&Transaction, &Posting)]) -> Option<String
     .into_iter()
     .next()
     .unwrap_or_default();
-    // M8: the account name is bold when stdout gets colour (bold').
+    // Upstream shows the account name bold when stdout gets colour (bold');
+    // not reproduced.
     let msg = format!(
         "{f}:{l}:\n{}\n\n\
          The recentassertions check is enabled, so accounts with balance assertions\n\

@@ -1,7 +1,7 @@
 //! Turning reports into charts, and the --chart option (Hledger.Cli.Chart).
 //! Each adapter chooses a useful default chart for its report, so that
-//! charts work without configuration. Register and aregister charts come
-//! with those commands (hledgers milestone 6).
+//! charts work without configuration. The register and aregister adapters
+//! live with those commands.
 
 use std::collections::{BTreeMap, BTreeSet};
 

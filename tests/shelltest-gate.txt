@@ -1,8 +1,7 @@
 # Test files whose cases must all pass. Globs are relative to hledger/hledger/test/
 # (or rules/*.test for this repo's tests/rules/); FILE:N-M,K selects case numbers.
-# Every case that passes is gated: a milestone adds the cases it makes pass, so
-# nothing that once passed can silently fail again. Cases left out need a later
-# milestone; each milestone's report names them.
+# Every case that passes is gated, so nothing that once passed can silently fail
+# again; a case that starts passing is added here.
 
 0unittests.test
 account-aliases.test

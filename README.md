@@ -12,7 +12,7 @@ embedded documents and the benchmark journals; it is never built.
 
 ## Status
 
-Milestone 10 of 10: the journal reader and writer, valuation, cost
+The port is complete: the journal reader and writer, valuation, cost
 conversion, lot tracking, the listing commands, the balance reports, the
 register reports and holdings, with all their output formats, the CSV,
 timeclock and timedot readers, the import command, and the command-line
@@ -123,6 +123,17 @@ hledgers does not have by design; they are listed as such and not run.
 hledgers is several times faster than hledger on journals of every size
 (see Benchmark).
 
+Known differences, on inputs hledger's tests do not cover: the `encoding`
+rule refuses the DOS code pages (cp437, cp737, cp775, cp850, cp852, cp855,
+cp857, cp860 to cp865 and cp869) and JIS X 0201 and 0208, which no pure-Rust
+decoder provides, with an error saying so; `--debug` accepts its levels but
+prints few of hledger's debug messages and none of its value dumps; a
+regular expression whose alternatives overlap (`a|ab`) takes the
+leftmost-first match where hledger takes the longest; and colour-only
+details (the heading gradient of `help`, charts coloured for the terminal's
+background) are not reproduced. `--version` prints hledger's version and
+then hledgers' own.
+
 ## Build
 
 Requires Rust 1.97 or later.
@@ -145,15 +156,17 @@ small subset of sh that the test command lines use, and runs only `hledger` as
 a separate process.
 
 - `tests/shelltest-gate.txt` lists the test files (or `FILE:N-M` case ranges)
-  that must pass; it grows with each milestone. Other cases are run and counted
-  but do not fail the build.
-- `tests/shelltest-unsupported.txt` lists the cases whose command lines use
-  shell features the harness does not support, with the reason, and the cases
-  that can not pass by design (reason `by-design: ...`), which are not run and
-  are counted apart.
+  that must pass: every case that passes, so that none can silently fail
+  again. Other cases are run and counted but do not fail the build.
+- `tests/shelltest-unsupported.txt` lists the cases the harness does not run,
+  with the reason: a command line outside its sh subset, or (reason
+  `by-design: ...`) a case that can not pass by design, counted apart. At
+  present it holds only the four by-design cases.
 - `HLEDGERS_TEST_FILTER=GLOB` runs only matching test files, eg `'cli/*.test'`.
-- `HLEDGERS_TEST_VERBOSE=1` shows the details of every failing case, not just
-  gated ones.
+- `HLEDGERS_TEST_VERBOSE=1` lists every passing case and shows the details of
+  every failing case, not just gated ones.
+- `HLEDGERS_TEST_BIN=PATH` runs the corpus against another binary, such as a
+  hledger built from the submodule's commit, to check the harness itself.
 
 ## Benchmark
 
@@ -168,7 +181,8 @@ benchmark journals into `target/bench-cache/`: household journals of 0, 10,
 typed accounts, a salary, card spending, bills, savings, a brokerage account
 trading lotful stocks at cost, dividends, spending in euros, weekly market
 prices; one year per 10,000 transactions), and generatejournal's 10k- and
-100k-transaction journals. `--run` times both programs, their runs
+100k-transaction journals (`--generate NUMTXNS NUMACCTS ACCTDEPTH` prints
+one). `--run` times both programs, their runs
 alternating, with `balance`, `register`, `is`, `bs` and `roi -V` on the
 household journals, and with `stats`, `balance`, `print`, `register`,
 `bal -M`, `reg -w 120` and `print -O json` on the others and on
