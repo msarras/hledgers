@@ -490,7 +490,7 @@ fn infer_balancing_amount(
         } else {
             a
         };
-        let a = a.styled(&styles);
+        let a = a.styled(styles);
         p.original = Some(Box::new(p.original().clone()));
         p.amount = a.clone();
         inferred.push((p.account.clone(), a));

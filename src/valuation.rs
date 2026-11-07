@@ -172,8 +172,11 @@ pub struct PriceOracle {
     /// once (upstream's oracle is memoised).
     alias_tries: RefCell<BTreeSet<(Day, Sym, Sym)>>,
     /// The results of the lookups made so far, as upstream memoises them.
-    lookups: RefCell<HashMap<(Day, Sym, Option<Sym>), Lookup>>,
+    lookups: RefCell<HashMap<LookupKey, Lookup>>,
 }
+
+/// A price lookup: the date, and the commodities from and, if given, to.
+type LookupKey = (Day, Sym, Option<Sym>);
 
 /// A price lookup's result: the commodity and rate, if found.
 type Lookup = Result<Option<(Sym, Decimal)>, String>;
