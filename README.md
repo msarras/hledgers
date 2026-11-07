@@ -120,8 +120,8 @@ Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
 with this repo's 27. The other four (`journal/fastpath.test` 6, 9, 11 and
 13) check the statistics line of hledger's fast-path journal parser, which
 hledgers does not have by design; they are listed as such and not run.
-On large journals hledgers is several times faster than hledger (see
-Benchmark).
+hledgers is several times faster than hledger on journals of every size
+(see Benchmark).
 
 ## Build
 
@@ -163,8 +163,15 @@ a separate process.
 
 `--setup` finds the Haskell hledger to compare against (`HLEDGERS_BENCH_BASELINE`,
 else `target/bench-cache/hledger`, else `hledger` on `PATH`) and generates the
-10k- and 100k-transaction benchmark journals into `target/bench-cache/`.
-`--run` times both programs on those journals and on
+benchmark journals into `target/bench-cache/`: household journals of 0, 10,
+100, 1000 and 100,000 transactions (`--household N` prints one: declared and
+typed accounts, a salary, card spending, bills, savings, a brokerage account
+trading lotful stocks at cost, dividends, spending in euros, weekly market
+prices; one year per 10,000 transactions), and generatejournal's 10k- and
+100k-transaction journals. `--run` times both programs, their runs
+alternating, with `balance`, `register`, `is`, `bs` and `roi -V` on the
+household journals, and with `stats`, `balance`, `print`, `register`,
+`bal -M`, `reg -w 120` and `print -O json` on the others and on
 `hledger/hledger/bench/10000x1000x10.journal`, reporting the median wall time,
 peak memory and whether their output is identical, in `bench/results.md`.
 
@@ -179,20 +186,38 @@ Linking needs `libgmp-dev`. The bench crate has no dependencies.
 
 ### Results
 
+The daily commands on the household journals, hledger 1.99 / hledgers
+(speedup), median wall time of 100 alternating runs of each program (5 at
+100,000 transactions), from `bench/results.md`; `roi` is `roi --inv
+assets:investments --pnl income:investments -V`, which both programs refuse
+on the empty journal:
+
+| transactions | `balance` | `register` | `is` | `bs` | `roi` |
+|---|---:|---:|---:|---:|---:|
+| 0 | 31.0 ms / 6.6 ms (4.7x) | 30.2 ms / 6.5 ms (4.7x) | 31.5 ms / 6.8 ms (4.6x) | 31.3 ms / 6.8 ms (4.6x) | n/a |
+| 100 | 56.2 ms / 11.4 ms (4.9x) | 78.8 ms / 14.9 ms (5.3x) | 56.1 ms / 11.5 ms (4.9x) | 57.4 ms / 11.8 ms (4.9x) | 55.8 ms / 11.7 ms (4.8x) |
+| 1,000 | 170.2 ms / 39.9 ms (4.3x) | 527.0 ms / 86.2 ms (6.1x) | 168.5 ms / 39.3 ms (4.3x) | 168.5 ms / 41.2 ms (4.1x) | 205.6 ms / 40.5 ms (5.1x) |
+| 100,000 | 7.599 s / 1.855 s (4.1x) | 21.559 s / 3.859 s (5.6x) | 7.842 s / 2.099 s (3.7x) | 7.281 s / 2.201 s (3.3x) | 71.338 s / 2.082 s (34.3x) |
+
+A run on an empty journal takes hledgers about 6 ms and hledger 29 ms; of
+those 6 ms, about 2 ms is what starting any program takes on this machine
+(`/bin/true` takes 2.0 ms), and much of the rest is the kernel loading the
+17 MB binary and mapping its pages in.
+
 On the 100k-transaction journal (`generatejournal 100000 1000 10`: a
 thousand accounts nested up to ten deep, 26 commodities, costs on two
-entries in three, and 100,000 price directives), the median wall time of
-five runs of each program, from `bench/results.md`:
+entries in three, and 100,000 price directives), median of five
+alternating runs:
 
 | command | hledger 1.99 | hledgers | speedup | peak RSS hledger | peak RSS hledgers |
 |---|---:|---:|---:|---:|---:|
-| `stats` | 7.273 s | 1.161 s | 6.3x | 563 MB | 294 MB |
-| `balance` | 6.546 s | 1.404 s | 4.7x | 567 MB | 293 MB |
-| `print` | 10.386 s | 1.574 s | 6.6x | 566 MB | 293 MB |
-| `register` | 39.057 s | 7.509 s | 5.2x | 642 MB | 1236 MB |
-| `bal -M` | 117.588 s | 26.778 s | 4.4x | 3688 MB | 3560 MB |
-| `reg -w 120` | 45.833 s | 9.004 s | 5.1x | 641 MB | 1454 MB |
-| `print -O json` | 37.626 s | 11.287 s | 3.3x | 1424 MB | 1698 MB |
+| `stats` | 7.094 s | 1.069 s | 6.6x | 563 MB | 291 MB |
+| `balance` | 6.834 s | 1.161 s | 5.9x | 567 MB | 291 MB |
+| `print` | 10.429 s | 1.453 s | 7.2x | 566 MB | 291 MB |
+| `register` | 37.673 s | 6.980 s | 5.4x | 642 MB | 1231 MB |
+| `bal -M` | 116.935 s | 24.401 s | 4.8x | 3687 MB | 3557 MB |
+| `reg -w 120` | 44.826 s | 8.193 s | 5.5x | 642 MB | 1452 MB |
+| `print -O json` | 36.863 s | 10.280 s | 3.6x | 1424 MB | 1696 MB |
 
 The machine is a Xen virtual machine with 16 cores of an Intel Xeon
 E5-2690 v2 (3.0 GHz) and 16 GB of memory, running Debian with Linux 6.12;
@@ -203,9 +228,12 @@ hledgers does work over independent items on all cores: a large file's
 transactions after its directives are parsed in parts, transactions are
 balanced and styled, market prices inferred, and `print`, `register`,
 `aregister` and the balance report render their lines, each in parallel,
-the results in order. This is the `parallel` feature, on by default;
-`cargo build --release --no-default-features` builds hledgers to use one
-core, with the same output.
+the results in order. Work on fewer than 5000 transactions, postings or
+lines stays on one thread, unless the threads were started already, as
+starting them costs more than a small journal's whole run. This is the
+`parallel` feature, on by default; `cargo build --release
+--no-default-features` builds hledgers to use one core, with the same
+output.
 
 ## `let` and `split` in CSV rules
 

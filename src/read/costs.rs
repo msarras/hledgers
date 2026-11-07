@@ -475,7 +475,7 @@ pub fn journal_infer_equity_from_costs(verbose_tags: bool, mut j: Journal) -> Jo
 /// (journalInferMarketPricesFromTransactions).
 pub fn journal_infer_market_prices_from_transactions(mut j: Journal) -> Journal {
     // each transaction's prices, found on all cores, in order
-    let prices = crate::par::map(&j.txns, |t| {
+    let prices = crate::par::map(j.txns.len(), &j.txns, |t| {
         (t.postings.iter())
             .flat_map(|p| {
                 let date = p.date_in(Some(t));

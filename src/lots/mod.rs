@@ -874,19 +874,23 @@ pub fn journal_collapse_lot_detail(j: &mut Journal) {
             || p.has_tag(LOT_PARENT_ASSERTION_TAG)
             || lot_subaccount_name(&p.account).is_some()
     };
-    if !j.txns.iter().flat_map(|t| &t.postings).any(needs_collapse) {
-        return;
-    }
+    // the transactions with none of those are left as they are
     for t in &mut j.txns {
+        if !t.postings.iter().any(needs_collapse) {
+            continue;
+        }
         let ps: Vec<Posting> = std::mem::take(&mut t.postings)
             .into_iter()
             .filter(|p| !p.has_tag(LOT_PARENT_ASSERTION_TAG))
             .map(|mut p| {
-                let new = AccountName::from(lot_base_account(&p.account));
-                if !(new == p.account || p.original().account == new) {
-                    p.assertion = None;
+                let base = lot_base_account(&p.account);
+                if base.len() != p.account.len() {
+                    let new = AccountName::from(base);
+                    if p.original().account != new {
+                        p.assertion = None;
+                    }
+                    p.account = new;
                 }
-                p.account = new;
                 p
             })
             .collect();

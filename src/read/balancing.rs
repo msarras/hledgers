@@ -383,9 +383,7 @@ pub fn balance_transaction(
     } else {
         t
     };
-    let none = CommodityStyles::new();
-    let styles = bopts.commodity_styles.as_ref().unwrap_or(&none);
-    let (mut t, inferred) = infer_balancing_amount(styles, t)?;
+    let (mut t, inferred) = infer_balancing_amount(&bopts.inferred_amount_styles, t)?;
     let errs = transaction_check_balanced(bopts, &t);
     if !errs.is_empty() {
         let mut all = Vec::new();
@@ -434,8 +432,9 @@ pub fn transaction_balance_error(t: &Transaction, errs: &[String]) -> String {
 /// Infer the amount of the one real posting with no amount, and likewise of
 /// the one balanced virtual posting, from the others' amounts at cost; a
 /// virtual posting with no amount gets zero. Inferred amounts get these
-/// styles, keeping their precision. Returns the transaction and the
-/// accounts and amounts inferred, in order (transactionInferBalancingAmount).
+/// styles, which have no rounding, so they keep their precision. Returns
+/// the transaction and the accounts and amounts inferred, in order
+/// (transactionInferBalancingAmount).
 fn infer_balancing_amount(
     styles: &CommodityStyles,
     mut t: Transaction,
@@ -474,7 +473,6 @@ fn infer_balancing_amount(
             ));
         }
     }
-    let styles = styles_with_rounding(Rounding::No, styles);
     let flags: Vec<bool> = t.postings.iter().map(&set_aside).collect();
     let mut inferred = Vec::new();
     for (p, set_aside) in t.postings.iter_mut().zip(flags) {
@@ -492,7 +490,7 @@ fn infer_balancing_amount(
         } else {
             a
         };
-        let a = a.styled(&styles);
+        let a = a.styled(styles);
         p.original = Some(Box::new(p.original().clone()));
         p.amount = a.clone();
         inferred.push((p.account.clone(), a));
@@ -707,13 +705,15 @@ pub fn journal_balance_transactions(
     for (i, t) in j.txns.iter_mut().enumerate() {
         t.index = i as u32 + 1;
     }
+    let styles = j.commodity_styles();
     let bopts = BalancingOpts {
-        commodity_styles: Some(styles_with_rounding(Rounding::Hard, &j.commodity_styles())),
+        commodity_styles: Some(styles_with_rounding(Rounding::Hard, &styles)),
+        inferred_amount_styles: styles_with_rounding(Rounding::No, &styles),
         ..bopts.clone()
     };
     // the transactions without balance assignments are balanced on their
     // own, independently; the first error, in journal order, is reported
-    let balanced = crate::par::map_owned(std::mem::take(&mut j.txns), |t| {
+    let balanced = crate::par::map_owned(j.txns.len(), std::mem::take(&mut j.txns), |t| {
         if t.postings.iter().any(Posting::has_balance_assignment) {
             return (true, Ok(t));
         }

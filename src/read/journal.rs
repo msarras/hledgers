@@ -156,7 +156,7 @@ fn parse_in_parts(
     .ok()?;
     let file: Arc<str> = Arc::from(file);
     let declared = &j.declared_commodities;
-    let parsed = crate::par::map_owned(parts, |(start, end, line)| {
+    let parsed = crate::par::map_owned(line, parts, |(start, end, line)| {
         let (mut st, mut stack) = (st.clone(), stack.clone());
         let mut part = Journal {
             declared_commodities: declared.clone(),

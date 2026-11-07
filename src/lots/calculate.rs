@@ -220,14 +220,16 @@ pub fn journal_calculate_lots(
         verbose,
         needs_labels: find_dates_needing_labels(&txns),
     };
+    // the transactions in date order, each taken from its place
     let mut order: Vec<usize> = (0..txns.len()).collect();
     order.sort_by_key(|&i| txns[i].date);
+    let mut txns: Vec<Option<Transaction>> = txns.into_iter().map(Some).collect();
     let mut ls = LotState::new();
     let mut out = Vec::with_capacity(txns.len());
     for i in order {
-        let t = &txns[i];
-        if !transaction_has_lotful_amounts(&lotful, t) {
-            out.push(t.clone());
+        let t = txns[i].take().expect("each transaction once");
+        if !transaction_has_lotful_amounts(&lotful, &t) {
+            out.push(t);
             continue;
         }
         let tied = Transaction {
@@ -239,8 +241,8 @@ pub fn journal_calculate_lots(
             ..t.clone()
         };
         let t2 = calc
-            .process_transaction(&mut ls, t, &tied)
-            .map_err(|e| append_postings_read_as(t, e))?;
+            .process_transaction(&mut ls, &t, &tied)
+            .map_err(|e| append_postings_read_as(&t, e))?;
         out.push(t2);
     }
     for (i, t) in out.iter_mut().enumerate() {
@@ -474,7 +476,8 @@ fn show_other_account_lots(all: &CommodityLots, acct: &str, c: &Sym) -> String {
 
 /// Select the lots of a commodity in an account to take a quantity from,
 /// by the reduction method, among those the selector matches; the lots
-/// are those of the account's lot direction (selectLots).
+/// are those of the lot direction (selectLots): the account's own, `flat`,
+/// and all of them, made only for an error or a global method.
 #[allow(clippy::too_many_arguments)]
 fn select_lots(
     (method, source): (ReductionMethod, &str),
@@ -486,7 +489,8 @@ fn select_lots(
     c: &Sym,
     qty: &Decimal,
     selector: &CostBasis,
-    lots: &CommodityLots,
+    flat: BTreeMap<&LotId, &Amount>,
+    lots: &dyn Fn() -> CommodityLots,
 ) -> Result<Vec<Selected>, String> {
     let method_line = format!("\nUsing {method} ({source}).");
     if method == ReductionMethod::Specid && is_wildcard_selector(selector) {
@@ -495,10 +499,6 @@ fn select_lots(
             pos()
         ));
     }
-    let flat: BTreeMap<&LotId, &Amount> = lots
-        .iter()
-        .filter_map(|(id, accts)| accts.get(acct).map(|a| (id, a)))
-        .collect();
     let matching: BTreeMap<&LotId, &Amount> = flat
         .iter()
         .filter(|(_, a)| lot_matches_selector(selector, a))
@@ -513,7 +513,7 @@ fn select_lots(
             };
             format!(
                 "no {c} lots available for {operation} from account {acct} on {date}{}{short_hint}",
-                show_other_account_lots(lots, acct, c)
+                show_other_account_lots(&lots(), acct, c)
             )
         } else {
             format!(
@@ -549,12 +549,12 @@ fn select_lots(
         return Err(format!(
             "{}Insufficient lots for commodity {c} in account {acct}: need {qty} but only {available} available{matched}{}",
             pos(),
-            show_other_account_lots(lots, acct, c)
+            show_other_account_lots(&lots(), acct, c)
         ));
     }
     let selected = consume(qty, order_lots(method, matching.into_iter().collect()));
     if method.is_global() {
-        validate_global_compliance(method, pos, acct, qty, selector, lots, &selected)
+        validate_global_compliance(method, pos, acct, qty, selector, &lots(), &selected)
             .map_err(|e| e + &method_line)?;
     }
     Ok(selected)
@@ -761,6 +761,23 @@ impl Calc<'_> {
             .unwrap_or_default()
     }
 
+    /// A commodity's lots in an account, if it is of this lot direction,
+    /// with their amounts there (the account's part of lots_for_direction).
+    fn account_lots<'l>(
+        &self,
+        dir: LotDirection,
+        c: &Sym,
+        acct: &str,
+        ls: &'l LotState,
+    ) -> BTreeMap<&'l LotId, &'l Amount> {
+        if lot_direction_or_long(self.j, acct) != dir {
+            return BTreeMap::new();
+        }
+        (ls.get(c).into_iter().flatten())
+            .filter_map(|(id, accts)| accts.get(acct).map(|a| (id, a)))
+            .collect()
+    }
+
     /// A lot subaccount of a posting's base account.
     fn lot_account(&self, method: ReductionMethod, acct: &str, cb: &CostBasis) -> AccountName {
         let name = show_lot_name_for_method(method, &style_lot_cb_cost(&self.styles, cb));
@@ -883,7 +900,8 @@ impl Calc<'_> {
             c,
             &a.quantity.abs(),
             cb,
-            &self.lots_for_direction(dir, c, ls),
+            self.account_lots(dir, c, acct, ls),
+            &|| self.lots_for_direction(dir, c, ls),
         )?;
         let sign = -dir.sign();
         let ps: Vec<Posting> = selected
@@ -1178,7 +1196,8 @@ impl Calc<'_> {
             c,
             &lot_amt.quantity.abs(),
             &cb,
-            &self.lots_for_direction(dir, c, ls),
+            self.account_lots(dir, c, scope, ls),
+            &|| self.lots_for_direction(dir, c, ls),
         )?;
         let close_sign = -dir.sign();
         let explicit = scope != &*p.account;
@@ -1303,7 +1322,8 @@ impl Calc<'_> {
                 &c,
                 &-&from_amt.quantity,
                 &from_cb,
-                &self.lots_for_direction(LotDirection::Long, &c, ls),
+                self.account_lots(LotDirection::Long, &c, base, ls),
+                &|| self.lots_for_direction(LotDirection::Long, &c, ls),
             )?;
             reduce_lot_state(base, &c, &selected, ls);
             from_done.push((i, from_amt, selected));

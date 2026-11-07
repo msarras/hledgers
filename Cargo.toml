@@ -38,3 +38,8 @@ tempfile = "3.27"
 [[test]]
 name = "shelltest"
 harness = false
+
+[profile.release]
+# Whole-program optimisation: runs ~10% faster, release builds take twice as long.
+lto = "fat"
+codegen-units = 1

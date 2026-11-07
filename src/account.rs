@@ -9,7 +9,7 @@
 pub mod tree;
 
 use std::fmt;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use crate::regex::{Regexp, to_regex_ci};
 use crate::text::{display_width, fit_text, take_width};
@@ -174,36 +174,123 @@ fn re(src: &str) -> Regexp {
     to_regex_ci(src).expect("a valid regular expression")
 }
 
-static CASH: LazyLock<Regexp> =
-    LazyLock::new(|| re("^assets?(:.+)?:(cash|bank|che(ck|que?)(ing)?|savings?|current)(:|$)"));
-static CONVERSION: LazyLock<Regexp> =
-    LazyLock::new(|| re("^equity:(trade|trades|trading|conversion)(:|$)"));
-static GAIN: LazyLock<Regexp> =
-    LazyLock::new(|| re("^(income|revenue)s?:(capital[- ]?)?(gains?|loss(es)?)(:|$)"));
-static UNREALISED_GAIN: LazyLock<Regexp> =
-    LazyLock::new(|| re("^equity:unreali[sz]ed([- ](capital[- ])?gains?)?(:|$)"));
-static IMBALANCE: LazyLock<Regexp> = LazyLock::new(|| re("^equity:imbalances?(:|$)"));
-
 /// The type suggested by an account's name, from its top-level component
 /// (and, for some subtypes, the rest), ignoring case
-/// (accountNameInferType).
+/// (accountNameInferType). The subtypes are those of upstream's
+/// case-insensitive, multi-line regular expressions, matched here by hand,
+/// as compiling those costs milliseconds:
+///
+/// - Cash: `^assets?(:.+)?:(cash|bank|che(ck|que?)(ing)?|savings?|current)(:|$)`
+/// - Conversion: `^equity:(trade|trades|trading|conversion)(:|$)`
+/// - Gain: `^(income|revenue)s?:(capital[- ]?)?(gains?|loss(es)?)(:|$)`
+/// - UnrealisedGain: `^equity:unreali[sz]ed([- ](capital[- ])?gains?)?(:|$)`
+/// - Imbalance: `^equity:imbalances?(:|$)`
 pub fn account_name_infer_type(a: &str) -> Option<AccountType> {
     let top = a.split(ACCT_SEP).next().unwrap_or("").to_lowercase();
+    // a pattern matches some line of the name, from its start
+    let any_line = |f: fn(&[&str]) -> bool| {
+        a.split('\n')
+            .any(|l| f(&l.split(ACCT_SEP).collect::<Vec<_>>()))
+    };
     match top.as_str() {
-        "asset" | "assets" if CASH.is_match(a) => Some(AccountType::Cash),
+        "asset" | "assets" if any_line(is_cash) => Some(AccountType::Cash),
         "asset" | "assets" => Some(AccountType::Asset),
         "debt" | "debts" | "liability" | "liabilities" => Some(AccountType::Liability),
-        "equity" if CONVERSION.is_match(a) => Some(AccountType::Conversion),
-        "equity" if UNREALISED_GAIN.is_match(a) => Some(AccountType::UnrealisedGain),
-        "equity" if IMBALANCE.is_match(a) => Some(AccountType::Imbalance),
+        "equity" if any_line(is_conversion) => Some(AccountType::Conversion),
+        "equity" if any_line(is_unrealised_gain) => Some(AccountType::UnrealisedGain),
+        "equity" if any_line(is_imbalance) => Some(AccountType::Imbalance),
         "equity" => Some(AccountType::Equity),
-        "income" | "incomes" | "revenue" | "revenues" if GAIN.is_match(a) => {
+        "income" | "incomes" | "revenue" | "revenues" if any_line(is_gain) => {
             Some(AccountType::Gain)
         }
         "income" | "incomes" | "revenue" | "revenues" => Some(AccountType::Revenue),
         "expense" | "expenses" => Some(AccountType::Expense),
         _ => None,
     }
+}
+
+/// Whether these components name a cash account: the first is asset(s)
+/// and a later one a cash word, though not the third after an empty
+/// second (`(:.+)?:` needs something between its colons).
+fn is_cash(cs: &[&str]) -> bool {
+    const WORDS: &[&str] = &[
+        "cash",
+        "bank",
+        "check",
+        "chequ",
+        "cheque",
+        "checking",
+        "chequing",
+        "chequeing",
+        "saving",
+        "savings",
+        "current",
+    ];
+    is_one_of(cs[0], &["asset", "assets"])
+        && (cs.iter().enumerate().skip(1))
+            .any(|(i, c)| (i != 2 || !cs[1].is_empty()) && is_one_of(c, WORDS))
+}
+
+fn is_conversion(cs: &[&str]) -> bool {
+    let words = ["trade", "trades", "trading", "conversion"];
+    is_one_of(cs[0], &["equity"]) && cs.get(1).is_some_and(|c| is_one_of(c, &words))
+}
+
+fn is_gain(cs: &[&str]) -> bool {
+    let tops = ["income", "incomes", "revenue", "revenues"];
+    let gain = |c: &str| {
+        let c = strip_ci(c, "capital").map_or(c, |r| r.strip_prefix(['-', ' ']).unwrap_or(r));
+        is_one_of(c, &["gain", "gains", "loss", "losses"])
+    };
+    is_one_of(cs[0], &tops) && cs.get(1).is_some_and(|c| gain(c))
+}
+
+fn is_unrealised_gain(cs: &[&str]) -> bool {
+    let unrealised = |c: &str| {
+        let Some(rest) = ["unrealised", "unrealized"]
+            .iter()
+            .find_map(|u| strip_ci(c, u))
+        else {
+            return false;
+        };
+        let Some(rest) = rest.strip_prefix(['-', ' ']) else {
+            return rest.is_empty();
+        };
+        let rest = strip_ci(rest, "capital")
+            .and_then(|r| r.strip_prefix(['-', ' ']))
+            .unwrap_or(rest);
+        is_one_of(rest, &["gain", "gains"])
+    };
+    is_one_of(cs[0], &["equity"]) && cs.get(1).is_some_and(|c| unrealised(c))
+}
+
+fn is_imbalance(cs: &[&str]) -> bool {
+    let words = ["imbalance", "imbalances"];
+    is_one_of(cs[0], &["equity"]) && cs.get(1).is_some_and(|c| is_one_of(c, &words))
+}
+
+/// Whether the text is one of these lower-case ASCII words, ignoring case.
+fn is_one_of(s: &str, words: &[&str]) -> bool {
+    words.iter().any(|w| strip_ci(s, w) == Some(""))
+}
+
+/// The text after this lower-case ASCII prefix, ignoring case as a
+/// case-insensitive regular expression does: ASCII letters, and the long s
+/// and the Kelvin sign, whose case folds are s and k.
+fn strip_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut chars = s.char_indices();
+    for b in prefix.bytes() {
+        let (_, c) = chars.next()?;
+        let folded = match c {
+            '\u{17F}' => 's',
+            '\u{212A}' => 'k',
+            c => c.to_ascii_lowercase(),
+        };
+        if folded != b as char {
+            return None;
+        }
+    }
+    Some(chars.next().map_or("", |(i, _)| &s[i..]))
 }
 
 /// The type of an account: its own or its nearest parent's in this lookup,
@@ -726,6 +813,109 @@ pub(crate) mod tests {
             ("other", None),
         ] {
             assert_eq!(account_name_infer_type(name), t, "{name}");
+        }
+    }
+
+    /// The hand matching agrees with upstream's regular expressions on
+    /// names made of every word they look for, misspelt, re-cased, with
+    /// long s and Kelvin signs, empty components and line breaks.
+    #[test]
+    fn infer_type_as_the_regexes_do() {
+        use AccountType::*;
+        let re = |src: &str| to_regex_ci(src).unwrap();
+        let cash = re("^assets?(:.+)?:(cash|bank|che(ck|que?)(ing)?|savings?|current)(:|$)");
+        let conversion = re("^equity:(trade|trades|trading|conversion)(:|$)");
+        let gain = re("^(income|revenue)s?:(capital[- ]?)?(gains?|loss(es)?)(:|$)");
+        let unrealised = re("^equity:unreali[sz]ed([- ](capital[- ])?gains?)?(:|$)");
+        let imbalance = re("^equity:imbalances?(:|$)");
+        let by_regex = |a: &str| {
+            let top = a.split(ACCT_SEP).next().unwrap_or("").to_lowercase();
+            match top.as_str() {
+                "asset" | "assets" if cash.is_match(a) => Some(Cash),
+                "asset" | "assets" => Some(Asset),
+                "debt" | "debts" | "liability" | "liabilities" => Some(Liability),
+                "equity" if conversion.is_match(a) => Some(Conversion),
+                "equity" if unrealised.is_match(a) => Some(UnrealisedGain),
+                "equity" if imbalance.is_match(a) => Some(Imbalance),
+                "equity" => Some(Equity),
+                "income" | "incomes" | "revenue" | "revenues" if gain.is_match(a) => Some(Gain),
+                "income" | "incomes" | "revenue" | "revenues" => Some(Revenue),
+                "expense" | "expenses" => Some(Expense),
+                _ => None,
+            }
+        };
+        let tops = [
+            "asset", "Assets", "ASSETſ", "assetſ", "equity", "EQUITY", "income", "Incomes",
+            "revenue", "revenues", "expenses", "x",
+        ];
+        let words = [
+            "",
+            "cash",
+            "CASH",
+            "bank",
+            "check",
+            "cheq",
+            "cheque",
+            "checking",
+            "cheqing",
+            "chequeing",
+            "chequing",
+            "saving",
+            "ſavingſ",
+            "current",
+            "cashx",
+            "xcash",
+            "trade",
+            "trades",
+            "trading",
+            "conversion",
+            "converſion",
+            "gain",
+            "gains",
+            "loss",
+            "losses",
+            "capital",
+            "capitalgain",
+            "capital-gains",
+            "capital loss",
+            "capital_gain",
+            "capital--gain",
+            "unrealised",
+            "unrealized",
+            "UNREALIZED",
+            "unrealised-gain",
+            "unrealized gains",
+            "unrealised capital gains",
+            "unrealised-capital-gain",
+            "unrealised capitalgain",
+            "unrealised-",
+            "unrealisedgain",
+            "imbalance",
+            "imbalances",
+            "imbalanced",
+            "\u{212A}",
+            "ban\u{212A}",
+            "gaın",
+            "GAİN",
+            "Ｇain",
+            "a\nassets",
+            "x\nequity",
+        ];
+        let mut names = Vec::new();
+        for t in tops {
+            for w in words {
+                names.push(format!("{t}:{w}"));
+                for v in ["", "x", "cash", "gain"] {
+                    names.push(format!("{t}:{w}:{v}"));
+                    names.push(format!("{t}:{v}:{w}"));
+                    names.push(format!("{t}:{w}\n{t}:{v}"));
+                }
+                names.push(format!("{t}::{w}"));
+                names.push(format!("{t}:x:y:{w}"));
+            }
+        }
+        for name in names {
+            assert_eq!(account_name_infer_type(&name), by_regex(&name), "{name:?}");
         }
     }
 

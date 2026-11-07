@@ -4,7 +4,7 @@
 //! by commodity aliases.
 
 use std::cell::{OnceCell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::amount::{Amount, AmountCost, CommodityStyles, MixedAmount, Sym};
 use crate::dates::{Day, null_date};
@@ -171,7 +171,15 @@ pub struct PriceOracle {
     /// The lookups which have tried the alias rates, so that each is shown
     /// once (upstream's oracle is memoised).
     alias_tries: RefCell<BTreeSet<(Day, Sym, Sym)>>,
+    /// The results of the lookups made so far, as upstream memoises them.
+    lookups: RefCell<HashMap<LookupKey, Lookup>>,
 }
+
+/// A price lookup: the date, and the commodities from and, if given, to.
+type LookupKey = (Day, Sym, Option<Sym>);
+
+/// A price lookup's result: the commodity and rate, if found.
+type Lookup = Result<Option<(Sym, Decimal)>, String>;
 
 /// A price oracle's indexes (PriceIndexes).
 #[derive(Clone, Debug)]
@@ -233,6 +241,7 @@ impl PriceOracle {
             ambiguous_aliases,
             debug_alias_rates,
             alias_tries: RefCell::default(),
+            lookups: RefCell::default(),
         }
     }
 
@@ -257,12 +266,18 @@ impl PriceOracle {
     /// calculated, or if the two commodities are the same. Converting to
     /// or from an alias which file trees declared differently, when market
     /// prices can not do it, is an error.
-    pub fn lookup(
-        &self,
-        d: Day,
-        from: &Sym,
-        to: Option<&Sym>,
-    ) -> Result<Option<(Sym, Decimal)>, String> {
+    pub fn lookup(&self, d: Day, from: &Sym, to: Option<&Sym>) -> Lookup {
+        let key = (d, from.clone(), to.cloned());
+        if let Some(found) = self.lookups.borrow().get(&key) {
+            return found.clone();
+        }
+        let found = self.lookup_once(d, from, to);
+        self.lookups.borrow_mut().insert(key, found.clone());
+        found
+    }
+
+    /// `lookup`, worked out.
+    fn lookup_once(&self, d: Day, from: &Sym, to: Option<&Sym>) -> Lookup {
         let indexes = self.indexes();
         let Some(to) = to else {
             return Ok(self

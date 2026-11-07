@@ -3,6 +3,7 @@
 //! report period, from its value at the start and end of the period and
 //! the money that went in and out of it.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::amount::render::{AmountFormat, show_amount, show_mixed_amount_b};
@@ -97,8 +98,15 @@ struct Roi<'a> {
     investment: Query,
     pnl: Query,
     trans: Vec<&'a Transaction>,
-    /// The investment's holdings at the end of each day that changes them.
+    /// Each day's changes to the investment's holdings.
+    changes: BTreeMap<Day, MixedAmount>,
+    /// The investment's holdings at the end of each day that changes them,
+    /// each commodity's added up without costs or cost bases.
     holdings: BTreeMap<Day, MixedAmount>,
+    /// The same with their costs and cost bases, made if needed.
+    holdings_with_costs: OnceCell<BTreeMap<Day, MixedAmount>>,
+    /// The commodities that have costs or cost bases in the holdings.
+    costed: BTreeSet<Sym>,
     /// The unit prices of the investment's purchases and sales, by
     /// commodity and date.
     trade_prices: BTreeMap<Sym, BTreeMap<Day, Amount>>,
@@ -147,7 +155,10 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         investment,
         pnl,
         trans,
+        changes: BTreeMap::new(),
         holdings: BTreeMap::new(),
+        holdings_with_costs: OnceCell::new(),
+        costed: BTreeSet::new(),
         trade_prices: BTreeMap::new(),
     };
     // each day's changes (M.fromListWith maPlus: the later posting on the
@@ -174,18 +185,20 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         }
     }
     let mut acc = MixedAmount::null();
-    for (d, change) in changes {
-        acc = &acc + &change;
-        r.holdings.insert(d, acc.clone());
+    for (d, change) in &changes {
+        acc = &acc + &change.clone().strip_costs();
+        r.holdings.insert(*d, acc.clone());
     }
+    r.costed = (changes.values().flat_map(|m| m.amounts_raw()))
+        .filter(|a| a.cost.is_some() || a.cost_basis.is_some())
+        .map(|a| a.commodity.clone())
+        .collect();
+    r.changes = changes;
     r.trade_prices = trade_prices;
     if r.trans.is_empty() {
         return Err("No relevant transactions found. Check your investments query".to_string());
     }
-    let filtered = Journal {
-        txns: r.trans.iter().map(|t| (*t).clone()).collect(),
-        ..j.clone()
-    };
+    let filtered = j.with_txns(r.trans.iter().map(|t| (*t).clone()).collect());
     let (full_span, periods) = spec.report_span(&filtered);
     let undefined = || cant_compute("Undefined start or end of the period");
     let spans: Vec<(Day, Day)> = periods
@@ -374,9 +387,49 @@ impl Roi<'_> {
         !self.is_investment(t, p) && self.pnl.matches_posting(PostingRef::new(t, p))
     }
 
-    /// The investment's holdings at the end of this day.
-    fn holdings_at(&self, d: Day) -> MixedAmount {
-        (self.holdings.range(..=d).next_back()).map_or_else(MixedAmount::null, |(_, m)| m.clone())
+    /// The investment's holdings at the end of this day, with their costs
+    /// or each commodity's added up.
+    fn holdings_at(&self, with_costs: bool, d: Day) -> MixedAmount {
+        let holdings = if with_costs {
+            self.holdings_with_costs.get_or_init(|| {
+                let mut acc = MixedAmount::null();
+                (self.changes.iter())
+                    .map(|(d, change)| {
+                        acc = &acc + change;
+                        (*d, acc.clone())
+                    })
+                    .collect()
+            })
+        } else {
+            &self.holdings
+        };
+        (holdings.range(..=d).next_back()).map_or_else(MixedAmount::null, |(_, m)| m.clone())
+    }
+
+    /// Whether valuing the holdings needs their costs: when amounts are
+    /// converted to cost first. Otherwise each commodity's holdings value
+    /// at the same rate, or, unpriced, at its latest trade price, so their
+    /// sum values the same, though an unpriced commodity's amounts with
+    /// different costs show differently.
+    fn valuing_needs_costs(&self) -> bool {
+        matches!(
+            self.ropts.conversion_op,
+            Some(ConversionOp::ToCost | ConversionOp::ToTransactedCost)
+        )
+    }
+
+    /// The holdings at the end of a day, valued on that day (see
+    /// valuing_needs_costs): from each commodity's sum, unless the costs
+    /// could show, in a value still in a commodity with costs, or in an
+    /// error.
+    fn holdings_value(&self, sv: &SpanValuation, d: Day) -> Result<MixedAmount, String> {
+        if !self.valuing_needs_costs()
+            && let Ok(v) = self.value_on(sv, d, &self.holdings_at(false, d))
+            && v.commodities().iter().all(|c| !self.costed.contains(c))
+        {
+            return Ok(v);
+        }
+        self.value_on(sv, d, &self.holdings_at(true, d))
     }
 
     /// The price of the investment's latest purchase or sale of this
@@ -573,8 +626,8 @@ impl Roi<'_> {
         let sv = SpanValuation { last_day, expected };
         // the value at the start is the value at the end of the previous day
         let before = b.add_days(-1);
-        let value_before = self.value_on(&sv, before, &self.holdings_at(before))?;
-        let value_after = self.value_on(&sv, last_day, &self.holdings_at(last_day))?;
+        let value_before = self.holdings_value(&sv, before)?;
+        let value_after = self.holdings_value(&sv, last_day)?;
         let flow_details = self.investment_cash_flows(&sv, b)?;
         let cash_flow: Vec<(Day, MixedAmount)> = (flow_details.iter())
             .map(|f| (f.date, f.flow.clone()))
@@ -616,8 +669,16 @@ impl Roi<'_> {
         // upstream's TWR is lazy: its errors (eg amounts in several
         // commodities) surface only when its details are shown, or when the
         // IRR was found and the row needs it
+        // from each commodity's holdings, which value the same, unless that
+        // fails, when the error may show amounts with their costs
+        let twr_with = |with_costs| {
+            self.time_weighted_return(show_cash_flow, &show_quantity, &sv, &span, with_costs)
+        };
         let (twr_details, twr) = if show_cash_flow || irr.is_ok() {
-            self.time_weighted_return(show_cash_flow, &show_quantity, &sv, &span)?
+            match twr_with(self.valuing_needs_costs()) {
+                Ok(twr) => twr,
+                Err(_) => twr_with(true)?,
+            }
         } else {
             (String::new(), Err(String::new()))
         };
@@ -657,10 +718,12 @@ impl Roi<'_> {
         show_quantity: &dyn Fn(&Decimal) -> String,
         sv: &SpanValuation,
         span: &OneSpan,
+        with_costs: bool,
     ) -> Result<Calculated<(f64, f64)>, String> {
         let (begin, end) = (span.begin, span.end);
         let last_day = end.add_days(-1);
-        let value_at = |d: Day| un_mix(&self.value_on(sv, d, &self.holdings_at(d))?);
+        let holdings_at = |d: Day| self.holdings_at(with_costs, d);
+        let value_at = |d: Day| un_mix(&self.value_on(sv, d, &holdings_at(d))?);
         // each day's deposits and withdrawals, deposits positive
         // (M.fromListWith: the later on the left)
         let mut flows_by_day: BTreeMap<Day, (Decimal, Decimal)> = BTreeMap::new();
@@ -682,7 +745,7 @@ impl Roi<'_> {
         for (d, (deposits, withdrawals)) in flows_by_day {
             let before = d.add_days(-1);
             let start_value = value_at(before)?;
-            let moved_value = un_mix(&self.value_on(sv, d, &self.holdings_at(before))?)?;
+            let moved_value = un_mix(&self.value_on(sv, d, &holdings_at(before))?)?;
             let end_value = value_at(d)?;
             let zero = || Decimal::ZERO;
             if prev_day.add_days(1) <= before {

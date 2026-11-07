@@ -1,6 +1,8 @@
 //! Flag tables and the command-line parser that reads them (the cmdargs part of
 //! Hledger.Cli.CliOptions).
 
+use std::collections::HashSet;
+
 /// Whether a flag takes a value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Arity {
@@ -644,16 +646,19 @@ pub struct FlagArgs {
 pub fn flag_args() -> &'static FlagArgs {
     static FA: std::sync::OnceLock<FlagArgs> = std::sync::OnceLock::new();
     FA.get_or_init(|| {
-        let names = |fs: &mut dyn Iterator<Item = &'static Flag>, arity: Arity| -> Vec<String> {
-            let mut out: Vec<String> = Vec::new();
-            for f in fs.filter(|f| f.arity == arity) {
-                for n in flag_names(f) {
-                    if !out.contains(&n) {
-                        out.push(n);
-                    }
+        // each name once, in order, compared before it is written out
+        let keys = |fs: &mut dyn Iterator<Item = &'static Flag>, arity: Arity| {
+            let mut seen = HashSet::new();
+            let mut out: Vec<FlagName> = Vec::new();
+            for k in fs.filter(|f| f.arity == arity).flat_map(flag_keys) {
+                if seen.insert(k) {
+                    out.push(k);
                 }
             }
             out
+        };
+        let names = |fs: &mut dyn Iterator<Item = &'static Flag>, arity: Arity| -> Vec<String> {
+            keys(fs, arity).into_iter().map(FlagName::written).collect()
         };
         let general = || general_flags();
         let command = || {
@@ -661,66 +666,91 @@ pub fn flag_args() -> &'static FlagArgs {
                 .iter()
                 .flat_map(|m| m.flags.iter().filter(|f| !f.hidden))
         };
-        let general_names: Vec<String> = general().flat_map(flag_names).collect();
+        let general_names: HashSet<FlagName> = general().flat_map(flag_keys).collect();
         let merged = |arity: Arity| {
-            let mut out = names(&mut general(), arity);
-            for n in names(&mut command(), arity) {
-                if !general_names.contains(&n) && !out.contains(&n) {
-                    out.push(n);
+            let mut out = keys(&mut general(), arity);
+            let mut seen: HashSet<FlagName> = out.iter().copied().collect();
+            for k in keys(&mut command(), arity) {
+                if !general_names.contains(&k) && seen.insert(k) {
+                    out.push(k);
                 }
             }
-            out
+            out.into_iter().map(FlagName::written).collect()
         };
-        let union = |a: Vec<String>, b: Vec<String>| {
-            let mut out = a;
-            out.extend(b);
-            out
-        };
-        let req_any = union(
-            names(&mut general(), Arity::Req),
-            names(&mut command(), Arity::Req),
-        );
-        let no_any = union(
-            names(&mut general(), Arity::None),
-            names(&mut command(), Arity::None),
-        );
+        let req_any =
+            (keys(&mut general(), Arity::Req).into_iter()).chain(keys(&mut command(), Arity::Req));
+        let no_any: HashSet<FlagName> = (keys(&mut general(), Arity::None).into_iter())
+            .chain(keys(&mut command(), Arity::None))
+            .collect();
         FlagArgs {
             no_val: merged(Arity::None),
             req_val: merged(Arity::Req),
             opt_val: merged(Arity::Opt),
             ambiguous: req_any
-                .iter()
-                .filter(|n| no_any.contains(n))
-                .cloned()
+                .filter(|k| no_any.contains(k))
+                .map(FlagName::written)
                 .collect(),
             general_req_val: names(&mut general(), Arity::Req),
         }
     })
 }
 
-/// A flag's names written in full (toFlagArg).
-fn flag_names(f: &Flag) -> impl Iterator<Item = String> + '_ {
-    (f.longs.iter().map(|l| format!("--{l}"))).chain(f.shorts.iter().map(|c| format!("-{c}")))
+/// A flag's name, long or short, before it is written out.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum FlagName {
+    Long(&'static str),
+    Short(char),
+}
+
+impl FlagName {
+    /// The name written in full: `--NAME` or `-C` (toFlagArg).
+    fn written(self) -> String {
+        match self {
+            FlagName::Long(l) => {
+                let mut s = String::with_capacity(l.len() + 2);
+                s.push_str("--");
+                s.push_str(l);
+                s
+            }
+            FlagName::Short(c) => {
+                let mut s = String::with_capacity(1 + c.len_utf8());
+                s.push('-');
+                s.push(c);
+                s
+            }
+        }
+    }
+}
+
+/// A flag's names: the long ones, then the short ones.
+fn flag_keys(f: &'static Flag) -> impl Iterator<Item = FlagName> {
+    (f.longs.iter().map(|l| FlagName::Long(l))).chain(f.shorts.iter().map(|c| FlagName::Short(*c)))
+}
+
+/// Whether an argument is one of a flag's names written in full.
+fn is_flag_name(f: &Flag, a: &str) -> bool {
+    match a.strip_prefix("--") {
+        Some(l) => f.longs.contains(&l),
+        None => {
+            let mut cs = a.chars();
+            cs.next() == Some('-')
+                && cs.next().is_some_and(|c| f.shorts.contains(&c))
+                && cs.next().is_none()
+        }
+    }
 }
 
 /// The required-value flag arguments a mode accepts, itself or through its
 /// commands (modeReqValFlagArgs): for the main mode, every command's.
 pub fn mode_req_val_flag_args(mode: &'static Mode) -> Vec<String> {
     let main = std::ptr::eq(mode, &super::commands::MAIN_MODE);
-    let mode_flags: Vec<String> = if main {
-        mode.all_flags()
-            .chain(
-                super::commands::BUILTIN_COMMANDS
-                    .iter()
-                    .flat_map(|m| m.all_flags()),
-            )
-            .flat_map(flag_names)
-            .collect()
-    } else {
-        mode.all_flags().flat_map(flag_names).collect()
-    };
+    let commands = super::commands::BUILTIN_COMMANDS.iter().filter(|_| main);
+    let mode_flags: Vec<&Flag> = mode
+        .all_flags()
+        .chain(commands.flat_map(|m| m.all_flags()))
+        .collect();
     (flag_args().req_val.iter())
-        .filter(|a| mode_flags.contains(a))
+        .filter(|a| mode_flags.iter().any(|f| is_flag_name(f, a)))
         .cloned()
         .collect()
 }
@@ -836,7 +866,7 @@ pub fn drop_conf_flags(args: &[String]) -> Vec<String> {
 /// accept, written in full (dropUnsupportedOpts).
 pub fn drop_unsupported_opts(mode: &'static Mode, args: &[String]) -> Vec<String> {
     let fa = flag_args();
-    let supports = |f: &str| mode.all_flags().flat_map(flag_names).any(|n| n == f);
+    let supports = |f: &str| mode.all_flags().any(|fl| is_flag_name(fl, f));
     let req = |f: &str| fa.req_val.iter().any(|x| x == f);
     let mut out = Vec::new();
     let mut i = 0;

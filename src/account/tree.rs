@@ -486,8 +486,9 @@ impl AccountTree<BalanceData> {
             by_account.entry(account).or_default().push((day, amount));
         }
         let by_account: Vec<_> = by_account.into_iter().collect();
+        let work = by_account.iter().map(|(_, ps)| ps.len()).sum();
         let mut balances: HashMap<&str, PeriodData<BalanceData>> =
-            crate::par::map_owned(by_account, |(account, postings)| {
+            crate::par::map_owned(work, by_account, |(account, postings)| {
                 let mut data = PeriodData::default();
                 for (day, amount) in postings {
                     let b = BalanceData {

@@ -507,7 +507,7 @@ impl ReportSpec {
         let (q, related) = (&self.query, self.opts.related);
         let types = |a: &str| j.account_type(a);
         // each transaction copied with the postings the query matches
-        let txns = crate::par::map(&j.txns, |t| {
+        let txns = crate::par::map(j.txns.len(), &j.txns, |t| {
             let mut t = t.clone();
             if related {
                 filter_transaction_related_postings(q, &mut t);

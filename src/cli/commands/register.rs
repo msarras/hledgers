@@ -462,6 +462,7 @@ pub fn postings_or_transactions_report_as_text<T: Sync>(
     if items.is_empty() {
         return Ok(String::new());
     }
+    let work = items.len();
     let (total, description) = opts.register_widths()?;
     let align_all = opts.raw.bool("align-all");
     let fmt = AmountFormat {
@@ -474,7 +475,7 @@ pub fn postings_or_transactions_report_as_text<T: Sync>(
     type Shown = (Vec<Wide>, Vec<Wide>);
     let show = |items: &[T]| -> Vec<Vec<Shown>> {
         let runs: Vec<&[T]> = items.chunks(RUN).collect();
-        crate::par::map(&runs, |run| {
+        crate::par::map(work, &runs, |run| {
             let mut last_balance = Vec::new();
             (run.iter())
                 .map(|i| {
@@ -527,7 +528,7 @@ pub fn postings_or_transactions_report_as_text<T: Sync>(
                 .collect();
             runs.push(run);
         }
-        let texts = crate::par::map_owned(runs, |run| {
+        let texts = crate::par::map_owned(work, runs, |run| {
             let mut text = String::new();
             for (widths, item, (amt, bal)) in run {
                 text.push_str(&item_as_text(widths, item, &amt, &bal));
