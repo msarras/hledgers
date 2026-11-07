@@ -43,7 +43,13 @@ use ::regex::{Captures, Regex, RegexBuilder};
 pub struct Regexp {
     src: Arc<str>,
     ci: bool,
-    re: Regex,
+    /// When the pattern is plain ASCII text, with no character special to
+    /// a regular expression, the text to look for (lower-cased if case is
+    /// ignored): finding it needs no compiled expression, which costs a
+    /// millisecond or more to make.
+    plain: Option<Box<str>>,
+    /// The compiled expression; for plain text, made when first needed.
+    re: OnceLock<Regex>,
 }
 
 /// A case-sensitive regular expression from this text, or an error message.
@@ -69,22 +75,69 @@ fn cached(src: &str, ci: bool) -> Result<Regexp, String> {
     let src: Arc<str> = src.into();
     let r = translate(&src)
         .and_then(|pattern| {
-            RegexBuilder::new(&pattern)
-                .case_insensitive(ci)
-                .multi_line(true)
-                .build()
-                .ok()
-        })
-        .map(|re| Regexp {
-            src: src.clone(),
-            ci,
-            re,
+            let plain = is_plain_text(&src).then(|| {
+                if ci {
+                    src.to_ascii_lowercase().into()
+                } else {
+                    src.as_ref().into()
+                }
+            });
+            let re = OnceLock::new();
+            if plain.is_none() {
+                re.set(compile(&pattern, ci)?).ok();
+            }
+            Some(Regexp {
+                src: src.clone(),
+                ci,
+                plain,
+                re,
+            })
         })
         .ok_or_else(|| {
             format!("This regular expression is invalid or unsupported, please correct it: {src}")
         });
     cache.insert(src, r.clone());
     r
+}
+
+/// A translated pattern compiled.
+fn compile(pattern: &str, ci: bool) -> Option<Regex> {
+    RegexBuilder::new(pattern)
+        .case_insensitive(ci)
+        .multi_line(true)
+        .build()
+        .ok()
+}
+
+/// Whether a pattern is plain text: one to 256 ASCII letters, digits and
+/// characters that stand for themselves, which translate unchanged.
+fn is_plain_text(src: &str) -> bool {
+    (1..=256).contains(&src.len())
+        && src
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b" :-_/@,;#%&=!'\"<>~".contains(&b))
+}
+
+/// Whether the text contains this lower-case ASCII text ignoring case, as
+/// the regex crate compares without case sensitivity: ASCII letters, and the
+/// long s and Kelvin sign, whose simple case folds are s and k.
+fn contains_ignoring_case(text: &str, lower: &str) -> bool {
+    let lower = lower.as_bytes();
+    if text.is_ascii() {
+        return (text.as_bytes().windows(lower.len())).any(|w| {
+            w.iter()
+                .zip(lower)
+                .all(|(t, l)| t.to_ascii_lowercase() == *l)
+        });
+    }
+    let folded: Vec<char> = (text.chars())
+        .map(|c| match c {
+            '\u{17F}' => 's',
+            '\u{212A}' => 'k',
+            c => c.to_ascii_lowercase(),
+        })
+        .collect();
+    (folded.windows(lower.len())).any(|w| w.iter().zip(lower).all(|(c, l)| *c == *l as char))
 }
 
 impl Regexp {
@@ -95,13 +148,26 @@ impl Regexp {
 
     /// Whether this matches somewhere in the text.
     pub fn is_match(&self, s: &str) -> bool {
-        self.re.is_match(s)
+        match &self.plain {
+            Some(p) if self.ci => contains_ignoring_case(s, p),
+            Some(p) => s.contains(&**p),
+            None => self.regex().is_match(s),
+        }
+    }
+
+    /// The compiled expression.
+    fn regex(&self) -> &Regex {
+        self.re.get_or_init(|| {
+            translate(&self.src)
+                .and_then(|pattern| compile(&pattern, self.ci))
+                .expect("a plain text compiles")
+        })
     }
 
     /// The texts matched by the capture groups in the first match, an empty
     /// text for a group that took no part in it; none if nothing matches.
     pub fn match_groups(&self, s: &str) -> Vec<String> {
-        match self.re.captures(s) {
+        match self.regex().captures(s) {
             None => Vec::new(),
             Some(caps) => caps
                 .iter()
@@ -118,7 +184,7 @@ impl Regexp {
     pub fn replace(&self, replacement: &str, s: &str) -> Result<String, String> {
         let mut out = String::with_capacity(s.len());
         let mut done = 0;
-        for caps in self.re.captures_iter(s) {
+        for caps in self.regex().captures_iter(s) {
             let m = caps.get(0).expect("group 0 is the match");
             out.push_str(&s[done..m.start()]);
             expand(replacement, &caps, &mut out)?;
@@ -434,6 +500,55 @@ fn literal(c: char, out: &mut String) {
 
 pub(crate) mod tests {
     use super::*;
+
+    /// Plain text is found as the compiled expression finds it, with and
+    /// without case sensitivity, in ASCII and other text.
+    #[test]
+    fn plain_text_matches_as_compiled() {
+        let texts = [
+            "assets:investments",
+            "Assets:Investments:Brokerage",
+            "ASSETS:INVESTMENTS",
+            "aſſets:inveſtments",
+            "ban\u{212A}",
+            "BANK",
+            "assets:\u{130}nvestments",
+            "x assets:investmentsy",
+            "assets:investment",
+            "",
+            "a\nassets:investments",
+            "ассеты:assets:investments",
+            "kelvin \u{212A}elvin",
+            "income:investments",
+            "a-b_c/d@e,f;g#h%i&j=k!l'm\"n<o>p~q r:s",
+            "A-B_C/D@E,F;G#H%I&J=\u{212A}!L'M\"N<O>P~Q R:\u{17F}",
+            "a-b_c/d@e,f;g#h%i&j=k!l'm\"n<o>p~q r:t",
+        ];
+        for pat in [
+            "a-b_c/d@e,f;g#h%i&j=k!l'm\"n<o>p~q r:s",
+            "assets:investments",
+            "INVESTMENTS",
+            "bank",
+            "k",
+            "s",
+            "a b",
+            "kelvin",
+        ] {
+            assert!(is_plain_text(pat));
+            for ci in [false, true] {
+                let r = cached(pat, ci).unwrap();
+                let compiled = compile(&translate(pat).unwrap(), ci).unwrap();
+                for t in texts {
+                    assert_eq!(r.is_match(t), compiled.is_match(t), "{pat:?} {ci} {t:?}");
+                }
+            }
+        }
+        for special in [
+            "a.b", "a|b", "^a", "a$", "(a)", "a*", "", "a\\b", "[a]", "a{2}", "a+",
+        ] {
+            assert!(!is_plain_text(special), "{special:?}");
+        }
+    }
 
     fn re(s: &str) -> Regexp {
         to_regex(s).unwrap()
