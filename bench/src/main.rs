@@ -4,6 +4,7 @@
 //! cargo run -p hledgers-bench -- --run [--runs N]  time both binaries, write bench/results.md
 //! cargo run -p hledgers-bench -- --generate NUMTXNS NUMACCTS ACCTDEPTH [OPTIONS]
 //!                                               print a journal, as tools/generatejournal.hs does
+//! cargo run -p hledgers-bench -- --household NUMTXNS  print a household journal (realistic.rs)
 //!
 //! The baseline is HLEDGERS_BENCH_BASELINE if set, else target/bench-cache/hledger,
 //! else `hledger` on PATH (the README explains building the submodule's commit).
@@ -11,6 +12,7 @@
 //! so build that first with `cargo build --release`.
 
 mod generate;
+mod realistic;
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -25,11 +27,29 @@ const JOURNALS: &[(&str, &str)] = &[
     ("100ktxns-1kaccts", "100000 1000 10"),
 ];
 
+/// Household journals (realistic.rs) of these sizes, for the daily commands.
+const HOUSEHOLD: &[usize] = &[0, 10, 100, 1000, 100_000];
+
+/// The daily commands, timed on the household journals.
+const DAILY: Commands = &[
+    ("balance", true),
+    ("register", true),
+    ("is", true),
+    ("bs", true),
+    (
+        "roi --inv assets:investments --pnl income:investments -V",
+        true,
+    ),
+];
+
 /// Upstream's own benchmark journal, used as it is.
 const UPSTREAM_JOURNAL: &str = "hledger/hledger/bench/10000x1000x10.journal";
 
+/// Commands to time, and whether to compare their output.
+type Commands = &'static [(&'static str, bool)];
+
 /// Timed commands. `stats` reports its own run time, so its output is not compared.
-const COMMANDS: &[(&str, bool)] = &[
+const COMMANDS: Commands = &[
     ("stats", false),
     ("balance", true),
     ("print", true),
@@ -56,7 +76,18 @@ fn main() -> ExitCode {
                 .write_all(generate::journal(&o).as_bytes())
                 .map_err(|e| e.to_string())
         }),
-        _ => Err("usage: hledgers-bench --setup | --run [--runs N] | --generate NUMTXNS NUMACCTS ACCTDEPTH [--chinese|--mixed] [--start=YYYY-MM-DD] [--days=N]".into()),
+        Some("--household") => match &args[1..] {
+            [n] => n
+                .parse()
+                .map_err(|_| format!("not a number: {n}"))
+                .and_then(|n| {
+                    std::io::stdout()
+                        .write_all(realistic::journal(n).as_bytes())
+                        .map_err(|e| e.to_string())
+                }),
+            _ => Err("usage: --household NUMTXNS".into()),
+        },
+        _ => Err("usage: hledgers-bench --setup | --run [--runs N] | --generate NUMTXNS NUMACCTS ACCTDEPTH [--chinese|--mixed] [--start=YYYY-MM-DD] [--days=N] | --household NUMTXNS".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -136,11 +167,25 @@ fn setup() -> Result<(), String> {
             args.join(" ")
         );
     }
+    for &n in HOUSEHOLD {
+        let path = cache.join(format!("{}.journal", household_stem(n)));
+        fs::write(&path, realistic::journal(n)).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("journal: {} (household, {n} transactions)", path.display());
+    }
     println!(
         "journal: {} (upstream's)",
         workspace().join(UPSTREAM_JOURNAL).display()
     );
     Ok(())
+}
+
+/// `0txns-household`, `100txns-household`, `1ktxns-household`, ...
+fn household_stem(n: usize) -> String {
+    if n >= 1000 && n.is_multiple_of(1000) {
+        format!("{}ktxns-household", n / 1000)
+    } else {
+        format!("{n}txns-household")
+    }
 }
 
 struct Measurement {
@@ -158,13 +203,25 @@ fn run(runs: usize) -> Result<(), String> {
             hledgers.display()
         );
     }
-    let mut journals: Vec<(String, PathBuf)> = JOURNALS
+    // (name, path, commands, runs): the small household journals take
+    // milliseconds, so they get more runs.
+    let mut journals: Vec<(String, PathBuf, Commands, usize)> = HOUSEHOLD
         .iter()
-        .map(|(stem, _)| (stem.to_string(), cache().join(format!("{stem}.journal"))))
+        .map(|&n| {
+            let stem = household_stem(n);
+            let path = cache().join(format!("{stem}.journal"));
+            (stem, path, DAILY, if n <= 1000 { runs * 20 } else { runs })
+        })
         .collect();
+    journals.extend(JOURNALS.iter().map(|(stem, _)| {
+        let path = cache().join(format!("{stem}.journal"));
+        (stem.to_string(), path, COMMANDS, runs)
+    }));
     journals.push((
         "10000x1000x10 (upstream)".into(),
         workspace().join(UPSTREAM_JOURNAL),
+        COMMANDS,
+        runs,
     ));
     // An empty HOME and working directory, so no config file is read.
     let scratch = cache().join("run");
@@ -172,20 +229,25 @@ fn run(runs: usize) -> Result<(), String> {
 
     let mut table = format!(
         "# hledgers vs {version}\n\n\
-         Baseline: `{}`. Median wall time of {runs} runs, peak RSS (VmHWM, polled every \
-         2 ms), and whether stdout is identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
+         Baseline: `{}`. Median wall time of {runs} runs ({} for household journals of up \
+         to 1000 transactions), peak RSS (VmHWM, polled every 2 ms), and whether stdout is \
+         identical. Written by `cargo run -p hledgers-bench -- --run`.\n\n\
          | journal | command | baseline | hledgers | speedup | RSS baseline | RSS hledgers | same stdout |\n\
          |---|---|---:|---:|---:|---:|---:|---|\n",
-        baseline.display()
+        baseline.display(),
+        runs * 20
     );
-    for (name, journal) in &journals {
-        for &(command, compare) in COMMANDS {
+    for (name, journal, commands, runs) in &journals {
+        for &(command, compare) in *commands {
             let args: Vec<&str> = command.split_whitespace().collect();
-            let a = measure(&baseline, &args, journal, &scratch, "a", runs);
-            let b = measure(&hledgers, &args, journal, &scratch, "b", runs);
+            let a = measure(&baseline, &args, journal, &scratch, "a", *runs);
+            let b = measure(&hledgers, &args, journal, &scratch, "b", *runs);
             let secs = |m: &Option<Measurement>| {
                 m.as_ref()
-                    .map_or("n/a".into(), |m| format!("{:.3} s", m.median.as_secs_f64()))
+                    .map_or("n/a".into(), |m| match m.median.as_secs_f64() {
+                        s if s < 1.0 => format!("{:.1} ms", s * 1000.0),
+                        s => format!("{s:.3} s"),
+                    })
             };
             let mb = |m: &Option<Measurement>| {
                 m.as_ref().map_or("n/a".into(), |m| {
