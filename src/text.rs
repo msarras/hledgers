@@ -270,7 +270,14 @@ pub fn strip_quotes(s: &str) -> &str {
 /// even (showFFloat, roundTo). Rust's `{:.N}` rounds the exact binary
 /// value instead, so 0.35 gives 0.3 there but 0.4 here.
 pub fn show_ffloat<F: Into<f64> + std::fmt::LowerExp + Copy>(decimals: usize, x: F) -> String {
-    let sign = if x.into() < 0.0 { "-" } else { "" };
+    let value: f64 = x.into();
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value < 0.0 { "-Infinity" } else { "Infinity" }.to_string();
+    }
+    let sign = if value < 0.0 { "-" } else { "" };
     // the shortest digits (of an f32 or f64), and e such that
     // |x| = 0.DIGITS * 10^e (floatToDigits)
     let sci = format!("{x:e}");
@@ -456,6 +463,11 @@ pub(crate) mod tests {
             (1, 0.95, "1.0"),
             (1, 5.0 / 30.0, "0.2"),
             (2, 1.0 / 7.0, "0.14"),
+            // formatRealFloat's special cases (hledger's roi shows an undefined
+            // annualised TWR as NaN%)
+            (2, f64::NAN, "NaN"),
+            (2, f64::INFINITY, "Infinity"),
+            (2, f64::NEG_INFINITY, "-Infinity"),
         ] {
             assert_eq!(show_ffloat(d, x), s, "{d} {x}");
         }
