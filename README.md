@@ -399,8 +399,8 @@ is empty, and `!%NAME REGEX` negates the test). So a table can name each
 account number once, and later blocks branch on the name:
 
     if,let:account
-    %account_number 4324,joint
-    %account_number 4631,personal
+    %account_number 1234,joint
+    %account_number 5678,personal
 
     if %account joint
     & %type Internal Transfer
@@ -437,20 +437,20 @@ records never pair, and pairing follows merging, so a merged group
 can be a partner, its rows becoming rows 2 and 3. An error in a paired
 transaction cites the first record's line and shows both rows.
 
-Here two of the bank's accounts, 4631 and 4324, are in one export. The
+Here two of the bank's accounts, 1234 and 5678, are in one export. The
 transfer at 09:24:50 becomes one transaction; the Destination at 08:14:21
 has no Source in the file, so it came from an account outside the export:
 
     date,time,account_number,type,side,amount
-    2026-09-30,09:24:50,4631,Internal Transfer,Source,-1000.00
-    2026-09-30,08:14:21,4324,Internal Transfer,Destination,1000.00
-    2026-09-30,09:24:50,4324,Internal Transfer,Destination,1000.00
+    2026-09-30,09:24:50,5678,Internal Transfer,Source,-1000.00
+    2026-09-30,08:14:21,1234,Internal Transfer,Destination,1000.00
+    2026-09-30,09:24:50,1234,Internal Transfer,Destination,1000.00
 
     skip 1
     fields date, time, account_number, type, side, amount
     if,let:account
-    %account_number 4324,joint
-    %account_number 4631,personal
+    %account_number 1234,joint
+    %account_number 5678,personal
 
     account1 assets:bank:%{account}
     amount1 %amount
@@ -466,8 +466,8 @@ has no Source in the file, so it came from an account outside the export:
       account2 assets:bank:%{to}
       amount2 %amount_2
     if,let:to
-    %account_number_2 4324,joint
-    %account_number_2 4631,personal
+    %account_number_2 1234,joint
+    %account_number_2 5678,personal
 
     # A Destination without a Source in the file came from an account that
     # is not in the export.

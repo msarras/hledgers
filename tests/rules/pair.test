@@ -5,15 +5,15 @@
 # transaction; a Destination without a Source converts on its own; other records
 # are untouched.
 <
-2026-09-30,09:24:50,4631,Internal Transfer,Source,-1000.00
-2026-09-30,08:14:21,4324,Internal Transfer,Destination,1000.00
-2026-09-30,09:24:50,4324,Internal Transfer,Destination,1000.00
-2026-10-01,12:00:00,4324,Purchase,,-40.00
+2026-09-30,09:24:50,5678,Internal Transfer,Source,-1000.00
+2026-09-30,08:14:21,1234,Internal Transfer,Destination,1000.00
+2026-09-30,09:24:50,1234,Internal Transfer,Destination,1000.00
+2026-10-01,12:00:00,1234,Purchase,,-40.00
 RULES
 fields date, time, acct, type, side, amount
 if,let:account
-%acct 4324,joint
-%acct 4631,personal
+%acct 1234,joint
+%acct 5678,personal
 
 account1 assets:bank:%{account}
 amount1 %amount
@@ -23,8 +23,8 @@ if %side Source
   account2 assets:bank:%{to}
   amount2 %amount_2
 if,let:to
-%acct_2 4324,joint
-%acct_2 4631,personal
+%acct_2 1234,joint
+%acct_2 5678,personal
 
 if %side Destination
   description from outside
@@ -48,9 +48,9 @@ $ ./csvtest.sh
 # ** 2. The partner may come before its initiator in the file. An initiator with no
 # partner converts alone, its row 2 fields empty, which a block can test.
 <
-2026-09-30,09:24:50,4324,Destination,1000.00
-2026-09-30,09:24:50,4631,Source,-1000.00
-2026-10-02,10:00:00,4631,Source,-250.00
+2026-09-30,09:24:50,1234,Destination,1000.00
+2026-09-30,09:24:50,5678,Source,-1000.00
+2026-10-02,10:00:00,5678,Source,-250.00
 RULES
 fields date, time, acct, side, amount
 account1 assets:%acct
@@ -66,12 +66,12 @@ if %side Source
   account2 expenses:transfers
 
 $ ./csvtest.sh
-2026-09-30 to 4324
-    assets:4631                                -1000.00
-    assets:4324                                 1000.00
+2026-09-30 to 1234
+    assets:5678                                -1000.00
+    assets:1234                                 1000.00
 
 2026-10-02 to outside
-    assets:4631                                 -250.00
+    assets:5678                                 -250.00
     expenses:transfers                           250.00
 
 >=0
