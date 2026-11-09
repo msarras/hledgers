@@ -77,7 +77,7 @@ impl FieldAssignment {
 }
 
 /// An if block or ifs table row: matchers, and the assignments that apply
-/// when they match (ConditionalBlock). Its skip, end and merge rules are
+/// when they match (ConditionalBlock). Its skip, end, merge and pair rules are
 /// assignments to the pseudo fields of those names.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConditionalBlock {
@@ -189,6 +189,7 @@ pub fn journal_field_names() -> &'static [String] {
             "skip",
             "end",
             "merge",
+            "pair",
         ] {
             names.push(f.to_string());
         }
@@ -1481,10 +1482,11 @@ pub fn allocate(units: &IBig, weights: &[IBig]) -> Vec<IBig> {
 }
 
 /// Whether a bare name in a `%{...}` expression is a hledger field that can
-/// be referred to (checkHledgerFieldReference). skip, end and merge are
+/// be referred to (checkHledgerFieldReference). skip, end, merge and pair are
 /// actions, not values.
 fn is_referable_hledger_field(name: &str) -> bool {
-    journal_field_names().iter().any(|f| f == name) && !matches!(name, "skip" | "end" | "merge")
+    journal_field_names().iter().any(|f| f == name)
+        && !matches!(name, "skip" | "end" | "merge" | "pair")
 }
 
 /// The error for a bare name that refers to nothing; it mentions lets if
@@ -1743,6 +1745,22 @@ impl CsvRules {
     pub fn field_template(&self, record: &[CsvRecord], f: &str) -> Option<&str> {
         self.field_assignment(record, f)
             .map(|a| a.template.text.as_str())
+    }
+
+    /// One assignment's template rendered for a record, which need not be
+    /// one the assignment applies to: a pair rule's key, rendered for the
+    /// initiator and for each record that might be its partner. Interpolated
+    /// values have their outer white space removed; the field's own name
+    /// gives nothing, and a match group gives nothing unless the block is
+    /// active for the record.
+    pub fn render_assignment(
+        &self,
+        record: &[CsvRecord],
+        a: &FieldAssignment,
+        scope: Scope,
+    ) -> Result<String, String> {
+        self.value_from(record, &a.name, &[(a, scope)], &mut Vec::new())
+            .map(Option::unwrap_or_default)
     }
 
     /// The final value of a hledger field (or a let, `let:NAME`) for a

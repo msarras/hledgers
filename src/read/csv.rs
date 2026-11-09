@@ -3,16 +3,16 @@
 //! lexer (the cassava-megaparsec parser that hledger uses), the conversion
 //! of records to transactions, and the CSV, SSV and TSV file reader.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::InputOpts;
 use super::amount::{AmountCtx, AmountKind, amountp, posting_amountp};
 use super::common::{posting_commentp, statusp, transaction_commentp};
 use super::rules::{
-    CsvRules, MAX_POSTINGS, is_amount_expression, parse_balance_assertion_type, path_join,
-    read_int, record_as_approximate_text, simplify_sign, split_row_suffix, take_directory,
-    with_rules_pos,
+    CsvRules, FieldAssignment, MAX_POSTINGS, Scope, is_amount_expression,
+    parse_balance_assertion_type, path_join, read_int, record_as_approximate_text, simplify_sign,
+    split_row_suffix, take_directory, with_rules_pos,
 };
 use crate::account::{
     AccountAlias, Realness, account_name_apply_aliases, account_name_posting_type,
@@ -773,8 +773,8 @@ fn text_lines(s: &str) -> impl Iterator<Item = &str> {
 
 /// CSV data converted by rules to transactions, as an unfinalised journal,
 /// with what errors about them need (readJournalFromCsv). Blank lines are
-/// ignored and a top-level skip rule skips lines; skip, end and merge rules
-/// apply to records; the transactions are put in date order, guessing the
+/// ignored and a top-level skip rule skips lines; skip, end, merge and pair
+/// rules apply to records; the transactions are put in date order, guessing the
 /// data's order. `sep` is the separator a reader prefix implies, if any.
 pub fn read_journal_from_csv(
     iopts: &InputOpts,
@@ -820,6 +820,7 @@ pub fn read_journal_from_csv(
     let located = locate_csv_records(&line_numbers, records);
     let groups = apply_conditional_skips(rules, located)
         .and_then(|rs| apply_merge_rules(rules, rs))
+        .and_then(|gs| apply_pair_rules(rules, gs))
         .map_err(|e| format!("{rules_file}: {e}"))?;
     validate_csv(name, &groups)?;
     // characters journal format can't represent are replaced, with a warning
@@ -839,19 +840,22 @@ pub fn read_journal_from_csv(
             ));
         }
     }
-    // a merge rule's if block matching on a later row's field can never merge
-    let refs: Vec<&str> = rules
-        .blocks
-        .iter()
-        .filter(|b| b.assignments.iter().any(|a| a.name == "merge"))
-        .flat_map(|b| b.matchers.iter().filter_map(|m| m.field.as_deref()))
-        .filter(|r| split_row_suffix(r.trim_matches(|c| "%()".contains(c))).is_some())
-        .collect();
-    if !refs.is_empty() {
-        warn(&format!(
-            "{rules_file}: an if block containing a merge rule matches on a later row's field ({}); this can not trigger a merge, since these fields are empty until after merging",
-            refs.join(", ")
-        ));
+    // a merge or pair rule's if block matching on a later row's field can
+    // never merge or pair
+    for (rule, action) in [("merge", "merging"), ("pair", "pairing")] {
+        let refs: Vec<&str> = rules
+            .blocks
+            .iter()
+            .filter(|b| b.assignments.iter().any(|a| a.name == rule))
+            .flat_map(|b| b.matchers.iter().filter_map(|m| m.field.as_deref()))
+            .filter(|r| split_row_suffix(r.trim_matches(|c| "%()".contains(c))).is_some())
+            .collect();
+        if !refs.is_empty() {
+            warn(&format!(
+                "{rules_file}: an if block containing a {rule} rule matches on a later row's field ({}); this can not trigger a {rule}, since these fields are empty until after {action}",
+                refs.join(", ")
+            ));
+        }
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -983,6 +987,78 @@ fn apply_merge_rules(
         out.push(((l1, l2), group));
     }
     Ok(out)
+}
+
+/// The groups after the pair rules apply (this repo's extension). A group
+/// whose pair rule applies, the initiator, takes as its later rows the first
+/// other group in the file, before or after it, that has no pair rule of its
+/// own, is not paired already, and for which the initiator's key template
+/// renders the same text; that group then makes no transaction of its own.
+/// An initiator without a partner stays as it is, its later rows' references
+/// empty. The group keeps the initiator's lines.
+fn apply_pair_rules(
+    rules: &CsvRules,
+    groups: Vec<LocatedGroup>,
+) -> Result<Vec<LocatedGroup>, String> {
+    let rule: Vec<Option<(&FieldAssignment, Scope)>> = groups
+        .iter()
+        .map(|(_, g)| rules.field_assignments(g, "pair").pop())
+        .collect();
+    if rule.iter().all(Option::is_none) {
+        return Ok(groups);
+    }
+    // the possible partners' keys, per distinct key template
+    let mut keys: BTreeMap<&str, Vec<Option<String>>> = BTreeMap::new();
+    for (a, scope) in rule.iter().flatten() {
+        if a.template.text.trim().is_empty() {
+            return Err(
+                "pair rule needs a value: the fields that identify the other record of the pair, eg \"pair %date %time\""
+                    .to_string(),
+            );
+        }
+        if !keys.contains_key(a.template.text.as_str()) {
+            let rendered = groups
+                .iter()
+                .zip(&rule)
+                .map(|((_, g), r)| match r {
+                    Some(_) => Ok(None),
+                    None => rules.render_assignment(g, a, *scope).map(Some),
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            keys.insert(&a.template.text, rendered);
+        }
+    }
+    let mut partner: Vec<Option<usize>> = vec![None; groups.len()];
+    let mut used = vec![false; groups.len()];
+    for (i, (a, scope)) in rule
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| r.map(|r| (i, r)))
+    {
+        let key = rules.render_assignment(&groups[i].1, a, scope)?;
+        let candidates = &keys[a.template.text.as_str()];
+        if let Some(j) =
+            (0..groups.len()).find(|&j| !used[j] && candidates[j].as_deref() == Some(key.as_str()))
+        {
+            used[j] = true;
+            partner[i] = Some(j);
+        }
+    }
+    let mut rows: Vec<Option<Vec<CsvRecord>>> =
+        groups.iter().map(|(_, g)| Some(g.clone())).collect();
+    for (i, j) in partner.iter().enumerate() {
+        if let Some(j) = j {
+            let p = rows[*j].take().unwrap_or_default();
+            rows[i].get_or_insert_with(Vec::new).extend(p);
+        }
+    }
+    Ok(groups
+        .iter()
+        .zip(rows)
+        .enumerate()
+        .filter(|(k, _)| !used[*k])
+        .filter_map(|(_, ((lines, _), r))| r.map(|r| (*lines, r)))
+        .collect())
 }
 
 /// The record count of a skip or merge rule applying to a record: one if it
