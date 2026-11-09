@@ -350,6 +350,21 @@ posting. The inner conditions could as well be `if` blocks, each setting the
 let. When one case needs both conditions, hledger's `&` matcher lines AND
 them within one block.
 
+The choice can also go the other way. A matcher names a let as it names a
+CSV field: `%NAME REGEX` tests the CSV field `NAME` if there is one,
+otherwise the let `NAME` as assigned above the block, by the top-level `let`
+lines and the blocks and tables before it (above its first assignment a let
+is empty, and `!%NAME REGEX` negates the test). So a table can name each
+account number once, and later blocks branch on the name:
+
+    if,let:account
+    %account_number 4324,joint
+    %account_number 4631,personal
+
+    if %account joint
+    & %type Internal Transfer
+      skip
+
 `tests/rules/let-split.test` has more examples. Limits: a split part has no
 cost (an `@` cost of `VALUE` is dropped); weights use `.` as their decimal
 mark; and since `split` is a template function, hledger's error for an

@@ -99,8 +99,9 @@ pub enum MatcherPrefix {
 }
 
 /// A test of a CSV record: a case-insensitive regular expression matched
-/// against one field (`%NAME REGEX`), or against the whole record, its
-/// fields joined by commas (Matcher).
+/// against one field (`%NAME REGEX`; a let's value if there is no CSV field
+/// of that name), or against the whole record, its fields joined by commas
+/// (Matcher).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Matcher {
     pub prefix: MatcherPrefix,
@@ -1718,10 +1719,10 @@ impl CsvRules {
         let mut found: Vec<(&FieldAssignment, Scope)> =
             top.iter().map(|&i| (&self.assignments[i], None)).collect();
         for &i in blocks {
-            let b = &self.blocks[i];
-            if self.block_active(record, b) {
+            if self.block_active(record, i) {
                 found.extend(
-                    b.assignments
+                    self.blocks[i]
+                        .assignments
                         .iter()
                         .filter(|a| a.name == f)
                         .map(|a| (a, Some(i))),
@@ -1963,23 +1964,25 @@ impl CsvRules {
     /// in scope that match the record, counting the groups of all their
     /// matchers in order (regexMatchValue).
     fn match_group(&self, scope: Scope, record: &[CsvRecord], n: &str) -> Option<String> {
-        let blocks: Vec<&ConditionalBlock> = match scope {
-            Some(i) => vec![&self.blocks[i]],
-            None => self.blocks.iter().collect(),
+        let blocks: Vec<usize> = match scope {
+            Some(i) => vec![i],
+            None => (0..self.blocks.len()).collect(),
         };
         let n: usize = n.parse().ok()?;
         let mut groups = blocks
             .into_iter()
-            .filter(|b| self.block_active(record, b))
-            .flat_map(|b| &b.matchers)
-            .flat_map(|m| m.regex.match_groups(&self.matched_text(record, m)));
+            .filter(|&i| self.block_active(record, i))
+            .flat_map(|i| self.blocks[i].matchers.iter().map(move |m| (i, m)))
+            .flat_map(|(i, m)| m.regex.match_groups(&self.matched_text(record, m, i)));
         groups.nth(n.checked_sub(1)?)
     }
 
-    /// Whether a conditional block's matchers match a record: a matcher and
+    /// Whether conditional block `i`'s matchers match a record: a matcher and
     /// the `&` matchers after it all match, for some matcher without `&`
-    /// (isBlockActive).
-    pub fn block_active(&self, record: &[CsvRecord], b: &ConditionalBlock) -> bool {
+    /// (isBlockActive). A field matcher on a let tests the let's value as
+    /// assigned above the block.
+    pub fn block_active(&self, record: &[CsvRecord], i: usize) -> bool {
+        let b = &self.blocks[i];
         let mut groups: Vec<Vec<(MatcherPrefix, &Matcher)>> = Vec::new();
         for m in &b.matchers {
             match (m.prefix, groups.last_mut()) {
@@ -1992,7 +1995,7 @@ impl CsvRules {
         }
         groups.iter().any(|g| {
             g.iter().all(|(prefix, m)| {
-                let found = m.regex.is_match(&self.matched_text(record, m));
+                let found = m.regex.is_match(&self.matched_text(record, m, i));
                 if *prefix == MatcherPrefix::Not {
                     !found
                 } else {
@@ -2002,13 +2005,49 @@ impl CsvRules {
         })
     }
 
-    /// The text a matcher is matched against: its field's value, or the
-    /// whole record with its fields joined by commas.
-    fn matched_text(&self, record: &[CsvRecord], m: &Matcher) -> String {
+    /// The text a matcher in block `i` is matched against: its field's
+    /// value, or if there is no CSV field of that name, the let's (this
+    /// repo's extension); or the whole record with its fields joined by
+    /// commas.
+    fn matched_text(&self, record: &[CsvRecord], m: &Matcher, i: usize) -> String {
         match &m.field {
-            Some(r) => self.field_reference(record, r).unwrap_or_default(),
+            Some(r) => self
+                .field_reference(record, r)
+                .or_else(|| self.let_value_above(record, r, i))
+                .unwrap_or_default(),
             None => record_as_approximate_text(record),
         }
+    }
+
+    /// The value of the let a matcher's reference `%NAME` names, as assigned
+    /// above block `i`: by the top-level assignments and the blocks before
+    /// it that match the record, the last one winning; none if the rules
+    /// have no such let. A block's matchers thus depend only on what is
+    /// written above them.
+    fn let_value_above(&self, record: &[CsvRecord], r: &str, i: usize) -> Option<String> {
+        let name = r.strip_prefix('%')?;
+        let name = name
+            .strip_prefix('(')
+            .and_then(|n| n.strip_suffix(')'))
+            .unwrap_or(name);
+        let key = format!("let:{name}");
+        let (top, blocks) = self.by_field.get(&key)?;
+        let mut found: Vec<(&FieldAssignment, Scope)> =
+            top.iter().map(|&a| (&self.assignments[a], None)).collect();
+        for &j in blocks.iter().take_while(|&&j| j < i) {
+            if self.block_active(record, j) {
+                found.extend(
+                    self.blocks[j]
+                        .assignments
+                        .iter()
+                        .filter(|a| a.name == key)
+                        .map(|a| (a, Some(j))),
+                );
+            }
+        }
+        self.value_from(record, &key, &found, &mut Vec::new())
+            .ok()
+            .flatten()
     }
 
     /// The value of a CSV field reference, `%NAME`, `%N` or `%(NAME)`, if

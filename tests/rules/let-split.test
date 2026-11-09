@@ -403,3 +403,89 @@ amount1 %{splt(%amount, 2, 1)}
 $ ./csvtest.sh
 >2 /unknown function "splt" \(known functions: upper, lower, capitalize, capitalise, trim, negate, abs, concat, join, default, replace, substr, split\)/
 >=1
+
+# ** 17. A matcher names a let as it names a CSV field, when there is no CSV field of
+# that name: `%account joint` tests the let's value as assigned above the block, here
+# by an if table; so later blocks can branch on a choice made once.
+<
+2026-09-30,4631,Internal Transfer,Source,-1000.00
+2026-09-30,4324,Internal Transfer,Destination,1000.00
+2026-10-01,4324,Purchase,,-40.00
+2026-10-01,4631,Purchase,,-15.00
+RULES
+fields date, acct, type, side, amount
+if,let:account
+%acct 4324,joint
+%acct 4631,personal
+
+account1 assets:bank:%{account}
+amount1 %amount
+if %account joint
+& %type Internal Transfer
+  skip
+if %account joint
+  account2 expenses:joint
+if %account personal
+  account2 expenses:personal
+
+$ ./csvtest.sh
+2026-09-30
+    assets:bank:personal                       -1000.00
+    expenses:personal                           1000.00
+
+2026-10-01
+    assets:bank:joint                            -40.00
+    expenses:joint                                40.00
+
+2026-10-01
+    assets:bank:personal                         -15.00
+    expenses:personal                             15.00
+
+>=0
+
+# ** 18. Above the let's assignment a matcher sees it empty; `!` negates a let matcher.
+<
+2026-09-30,4324,-40.00
+2026-09-30,4631,-15.00
+RULES
+fields date, acct, amount
+account1 assets:%acct
+amount1 %amount
+if %account joint
+  comment above
+if %acct 4324
+  let account joint
+if !%account joint
+  account2 expenses:other
+if %account joint
+  account2 expenses:joint
+
+$ ./csvtest.sh
+2026-09-30
+    assets:4324                                  -40.00
+    expenses:joint                                40.00
+
+2026-09-30
+    assets:4631                                  -15.00
+    expenses:other                                15.00
+
+>=0
+
+# ** 19. A CSV field of the same name wins over the let, in a matcher as in `%NAME`;
+# `%{NAME}` gives the let.
+<
+2026-09-30,joint,-40.00
+RULES
+fields date, account, amount
+let account personal
+account1 assets:%{account}
+amount1 %amount
+if %account joint
+  account2 expenses:%account
+
+$ ./csvtest.sh
+2026-09-30
+    assets:personal                              -40.00
+    expenses:joint                                40.00
+
+>=0
