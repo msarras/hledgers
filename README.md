@@ -316,6 +316,40 @@ between two owners, the principal equally and the interest 30:70:
         expenses:interest:alice                      100.00
         expenses:interest:bob                        233.33
 
+Conditions need not nest, and `if` blocks can not contain other `if` blocks.
+Every block applies in turn and the last assignment wins, so a `let` carries
+a choice from one block to the next: many inner conditions set only a let,
+and the few outer conditions lay out the postings around it, each written
+once. Here a `card` column says whether a purchase was joint or personal; a
+joint one is split half to the expense and a quarter to each friend:
+
+    skip 1
+    fields date, description, amount, card
+    account1 assets:checking
+    amount1 %amount
+
+    let category expenses:unknown
+    if,let:category
+    DINNER|RESTAURANT,expenses:dining
+    SUPERMARKET|GROCER,expenses:groceries
+    FUEL|SHELL,expenses:car:fuel
+
+    if %card joint
+        account2 %{category}
+        amount2 -%{split(%amount, "2:1:1", 1)}
+        account3 assets:receivable:alice
+        amount3 -%{split(%amount, "2:1:1", 2)}
+        account4 assets:receivable:bob
+        amount4 -%{split(%amount, "2:1:1", 3)}
+    if %card personal
+        account2 %{category}
+
+The row `2026-11-05,DINNER WITH FRIENDS,-90.01,joint` gives dining 45.01 and
+22.50 to each receivable; a personal supermarket row gives one groceries
+posting. The inner conditions could as well be `if` blocks, each setting the
+let. When one case needs both conditions, hledger's `&` matcher lines AND
+them within one block.
+
 `tests/rules/let-split.test` has more examples. Limits: a split part has no
 cost (an `@` cost of `VALUE` is dropped); weights use `.` as their decimal
 mark; and since `split` is a template function, hledger's error for an
