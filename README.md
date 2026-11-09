@@ -1,10 +1,51 @@
 # hledgers
 
-hledgers is a Rust port of [hledger](https://hledger.org), the plain text
-accounting tool: the command-line program and its library, with the same
-commands, flags, output formats and error messages, checked against hledger's
-own functional test corpus. It aims to be substantially faster. hledger-ui and
-hledger-web are not part of it.
+hledgers is a Rust port of [hledger](https://hledger.org) (without the UI/web
+components), the plain text accounting tool: the command-line program and its
+library, with the same commands, flags, output formats and error messages,
+checked against hledger's own functional test corpus. It aims to be
+substantially faster with extended import parsing functionality. As such, the
+philosophy behind hledgers deviates from hledger in a subtle but important way,
+informed by my own experiences using ledger-cli originally and then moving to
+hledger years later for its powerful reporting functionality.
+
+The problem is that I've always struggled with the strict parsing framework of
+hledger's import into journal entries because it meant that I had to lean on
+automated transactions for any arithmetic I wanted to apply. The hard data I saw
+in my journal wasn't the exact representation of my accounts. It had to be
+ingested with `--auto` which meant I had two distinct states depending on the
+CLI invocation. Maybe that's crucial to some, but for me it's an increased
+cognitive load. It also meant that identifying discrepancies was difficult for
+me because I also had to keep track of automated transaction rules and maintain
+a growing list of exceptions, all of which are specified in a journal file
+separate from a `.rules` file. I guess I could have maintained auxiliary scripts
+for parsing but then I would need to just that: maintain them.  Why not just
+build on the already simple and powerful framework of `import` to do everything
+I need? hledger also starts getting slow for journals spanning multiple years
+which meant that I also had to reconcile automated transactions at year-end and
+start a fresh journal for the new year to keep things relatively fast. It meant
+that I'd have to go digging through readmes to remember how to do it, and also
+tinker with it to make sure everything checked out. All of these friction points
+pushed me to flesh out an hledger derivative that aligns with my own way of
+thinking. Namely:
+
+1. The data I see in my plain text journal file should be complete and explicit
+   so I'm never surprised, which means
+2. parsing structured files like CSV and inserting their lines as journal
+   entries should be complete and self-contained, which means
+3. all of my parsing and arithmetic rules are together in their own
+   separate file and one `import` takes care of it all, which also means
+4. I don't have to spend time reconciling transactions and their automated
+   arithmetic at year-end just to start a new journal file to keep runtimes low
+   and,
+5. I wouldn't have to maintain any auxiliary scripts or perform manual
+   processing of structured files prior to parsing, and finally,
+6. it should all be essentially instantaneous to run my personal finance
+   reports regardless of how long or short the period is (monthly or 15+ years)
+
+I know some people swear by automated transactions and may be perfectly happy
+with the way hledger currently works, that's fine. hledgers still does all of
+those things exactly the same way.
 
 The reference is hledger 1.99.6 (development version), pinned as the `hledger/`
 git submodule at commit fb09198fc. That tree supplies the test corpus, the
