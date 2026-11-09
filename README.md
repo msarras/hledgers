@@ -75,7 +75,7 @@ currencies, amounts and amount expressions, balance assertions, postings 1
 to 99, separators, encodings, and included rules files; rules files read
 as data through their source rule (a file pattern, a data cleaning or
 generating command); and CSV and rules files included by journals. CSV
-rules also have this repo's `let` and `split` (below). It reads timeclock
+rules also have this repo's `let`, `split` and `pair` (below). It reads timeclock
 files (clock-in and clock-out sessions, split at midnight, open ones
 ending now; `--old-timeclock`) and timedot files (dots, numbers with
 units, letters), directly or included. `import` appends the new
@@ -316,10 +316,131 @@ between two owners, the principal equally and the interest 30:70:
         expenses:interest:alice                      100.00
         expenses:interest:bob                        233.33
 
+Conditions need not nest, and `if` blocks can not contain other `if` blocks.
+Every block applies in turn and the last assignment wins, so a `let` carries
+a choice from one block to the next: many inner conditions set only a let,
+and the few outer conditions lay out the postings around it, each written
+once. Here a `card` column says whether a purchase was joint or personal; a
+joint one is split half to the expense and a quarter to each friend:
+
+    skip 1
+    fields date, description, amount, card
+    account1 assets:checking
+    amount1 %amount
+
+    let category expenses:unknown
+    if,let:category
+    DINNER|RESTAURANT,expenses:dining
+    SUPERMARKET|GROCER,expenses:groceries
+    FUEL|SHELL,expenses:car:fuel
+
+    if %card joint
+        account2 %{category}
+        amount2 -%{split(%amount, "2:1:1", 1)}
+        account3 assets:receivable:alice
+        amount3 -%{split(%amount, "2:1:1", 2)}
+        account4 assets:receivable:bob
+        amount4 -%{split(%amount, "2:1:1", 3)}
+    if %card personal
+        account2 %{category}
+
+The row `2026-11-05,DINNER WITH FRIENDS,-90.01,joint` gives dining 45.01 and
+22.50 to each receivable; a personal supermarket row gives one groceries
+posting. The inner conditions could as well be `if` blocks, each setting the
+let. When one case needs both conditions, hledger's `&` matcher lines AND
+them within one block.
+
+The choice can also go the other way. A matcher names a let as it names a
+CSV field: `%NAME REGEX` tests the CSV field `NAME` if there is one,
+otherwise the let `NAME` as assigned above the block, by the top-level `let`
+lines and the blocks and tables before it (above its first assignment a let
+is empty, and `!%NAME REGEX` negates the test). So a table can name each
+account number once, and later blocks branch on the name:
+
+    if,let:account
+    %account_number 4324,joint
+    %account_number 4631,personal
+
+    if %account joint
+    & %type Internal Transfer
+      skip
+
 `tests/rules/let-split.test` has more examples. Limits: a split part has no
 cost (an `@` cost of `VALUE` is dropped); weights use `.` as their decimal
 mark; and since `split` is a template function, hledger's error for an
 unknown function, which lists them all, lists it too.
+
+## `pair` in CSV rules
+
+Some banks export every account into one file, and a transfer between two
+of them appears twice: a record for the account the money left and one for
+the account it reached, with the same date and time. hledger converts
+records one at a time (its `merge` rule joins only the records that follow
+one), so the two halves can only become two transactions. hledgers adds a
+`pair` rule that joins them wherever they are in the file:
+
+    if MATCHER
+      pair KEY
+
+A record the block matches is the first row of its group. Its partner is
+the first other record in the file, before or after it, that has no `pair`
+rule of its own, is not paired already, and for which `KEY`, an ordinary
+field template, renders to the same text. The partner's fields are then the
+record's row 2 fields, `%FIELD_2` or `%N_2`, as after `merge`, and the
+partner makes no transaction of its own. A record with no partner converts
+on its own, with its row 2 fields empty (`& !%FIELD_2 .` tests for that).
+Skipped records never pair, and pairing follows merging, so a merged group
+can be a partner, its rows becoming rows 2 and 3. An error in a paired
+transaction cites the first record's line and shows both rows.
+
+Here two of the bank's accounts, 4631 and 4324, are in one export. The
+transfer at 09:24:50 becomes one transaction; the Destination at 08:14:21
+has no Source in the file, so it came from an account outside the export:
+
+    date,time,account_number,type,side,amount
+    2026-09-30,09:24:50,4631,Internal Transfer,Source,-1000.00
+    2026-09-30,08:14:21,4324,Internal Transfer,Destination,1000.00
+    2026-09-30,09:24:50,4324,Internal Transfer,Destination,1000.00
+
+    skip 1
+    fields date, time, account_number, type, side, amount
+    if,let:account
+    %account_number 4324,joint
+    %account_number 4631,personal
+
+    account1 assets:bank:%{account}
+    amount1 %amount
+
+    # A transfer between our own accounts is two records with the same date
+    # and time: the Source becomes posting 1 and its Destination posting 2.
+    if %side Source
+      pair %date %time
+      description transfer to %{to}
+      account2 assets:bank:%{to}
+      amount2 %amount_2
+    if,let:to
+    %account_number_2 4324,joint
+    %account_number_2 4631,personal
+
+    # A Destination without a Source in the file came from an account that
+    # is not in the export.
+    if %side Destination
+      description contribution from partner
+      account2 equity:contributions:partner
+
+    $ hledgers -f bank.csv print
+    2026-09-30 transfer to joint
+        assets:bank:personal                       -1000.00
+        assets:bank:joint                           1000.00
+
+    2026-09-30 contribution from partner
+        assets:bank:joint                           1000.00
+        equity:contributions:partner               -1000.00
+
+`tests/rules/pair.test` has more examples. Limits: the key is compared as
+text, so a field in it must be written the same way in both records; and a
+match group (`\1`) in the key is empty on the partner's side, whose record
+the block did not match.
 
 ## Licence
 

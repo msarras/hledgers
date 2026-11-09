@@ -1,0 +1,206 @@
+# * pair in CSV rules: this repo's extension, not upstream's
+
+# ** 1. A transfer between two of our accounts is two records with the same date and
+# time. The Source record's pair rule joins its Destination as row 2, making one
+# transaction; a Destination without a Source converts on its own; other records
+# are untouched.
+<
+2026-09-30,09:24:50,4631,Internal Transfer,Source,-1000.00
+2026-09-30,08:14:21,4324,Internal Transfer,Destination,1000.00
+2026-09-30,09:24:50,4324,Internal Transfer,Destination,1000.00
+2026-10-01,12:00:00,4324,Purchase,,-40.00
+RULES
+fields date, time, acct, type, side, amount
+if,let:account
+%acct 4324,joint
+%acct 4631,personal
+
+account1 assets:bank:%{account}
+amount1 %amount
+if %side Source
+  pair %date %time
+  description transfer to %{to}
+  account2 assets:bank:%{to}
+  amount2 %amount_2
+if,let:to
+%acct_2 4324,joint
+%acct_2 4631,personal
+
+if %side Destination
+  description from outside
+  account2 equity:outside
+
+$ ./csvtest.sh
+2026-09-30 transfer to joint
+    assets:bank:personal                       -1000.00
+    assets:bank:joint                           1000.00
+
+2026-09-30 from outside
+    assets:bank:joint                           1000.00
+    equity:outside                             -1000.00
+
+2026-10-01
+    assets:bank:joint                            -40.00
+    expenses:unknown                              40.00
+
+>=0
+
+# ** 2. The partner may come before its initiator in the file. An initiator with no
+# partner converts alone, its row 2 fields empty, which a block can test.
+<
+2026-09-30,09:24:50,4324,Destination,1000.00
+2026-09-30,09:24:50,4631,Source,-1000.00
+2026-10-02,10:00:00,4631,Source,-250.00
+RULES
+fields date, time, acct, side, amount
+account1 assets:%acct
+amount1 %amount
+if %side Source
+  pair %date %time
+  description to %acct_2
+  account2 assets:%acct_2
+  amount2 %amount_2
+if %side Source
+& !%acct_2 .
+  description to outside
+  account2 expenses:transfers
+
+$ ./csvtest.sh
+2026-09-30 to 4324
+    assets:4631                                -1000.00
+    assets:4324                                 1000.00
+
+2026-10-02 to outside
+    assets:4631                                 -250.00
+    expenses:transfers                           250.00
+
+>=0
+
+# ** 3. A record is a partner once, for the first initiator in the file; a record with
+# a pair rule of its own is never a partner, so two Sources do not pair each other.
+<
+2026-09-30,09:24:50,A,Source,-100.00
+2026-09-30,09:24:50,B,Source,-100.00
+2026-09-30,09:24:50,C,Destination,100.00
+RULES
+fields date, time, acct, side, amount
+account1 assets:%acct
+amount1 %amount
+if %side Source
+  pair %date %time
+  account2 assets:%acct_2
+  amount2 %amount_2
+
+$ ./csvtest.sh
+2026-09-30
+    assets:A                                    -100.00
+    assets:C                                     100.00
+
+2026-09-30
+    assets:B                                    -100.00
+    assets:                                      100.00
+
+>=0
+
+# ** 4. Pairing follows merging: a merged group can be the partner, its rows becoming
+# rows 2 and 3.
+<
+2026-01-05,A,out,-100.00
+2026-01-05,B,in,90.00
+2026-01-05,B,fee,10.00
+RULES
+fields date, acct, side, amount
+account1 assets:%acct
+amount1 %amount
+if %side in
+  merge
+if %side out
+  pair %date
+  account2 assets:%acct_2
+  amount2 %amount_2
+  account3 expenses:fees
+  amount3 %amount_3
+
+$ ./csvtest.sh
+2026-01-05
+    assets:A                                    -100.00
+    assets:B                                      90.00
+    expenses:fees                                 10.00
+
+>=0
+
+# ** 5. A pair rule needs a key.
+<
+2026-01-05,A,-1
+RULES
+fields date, acct, amount
+account1 %acct
+if A
+  pair
+
+$ ./csvtest.sh
+>2
+hledger: Error: input.rules: pair rule needs a value: the fields that identify the other record of the pair, eg "pair %date %time"
+>=1
+
+# ** 6. An error in a paired transaction cites the initiator's line and shows both rows.
+<
+2026-09-30,09:24:50,A,Source,-100.00
+2026-09-30,09:24:50,B,Destination,90.00
+RULES
+fields date, time, acct, side, amount
+account1 assets:%acct
+amount1 %amount
+if %side Source
+  pair %date %time
+  account2 assets:%acct_2
+  amount2 %amount_2
+
+$ ./csvtest.sh
+>2 /input:1:
+1 \| 2026-09-30
+  \|     assets:A                                    -100\.00
+  \|     assets:B                                      90\.00
+
+This transaction is unbalanced\.
+The real postings' sum should be 0 but is -10\.00
+  -100\.00  \+  90\.00  =  -10\.00
+this entry was converted from:
+record: 2026-09-30,09:24:50,A,Source,-100\.00,2026-09-30,09:24:50,B,Destination,90\.00
+row 1:
+  %1 date    2026-09-30
+  %2 time    09:24:50
+  %3 acct    A
+  %4 side    Source
+  %5 amount  -100\.00
+row 2:
+  %1_2 date_2    2026-09-30
+  %2_2 time_2    09:24:50
+  %3_2 acct_2    B
+  %4_2 side_2    Destination
+  %5_2 amount_2  90\.00/
+>=1
+
+# ** 7. A pair rule's block that matches on a later row's field can never pair, and
+# says so, as a merge rule's does.
+<
+2026-09-30,A,-1
+2026-09-30,B,1
+RULES
+fields date, acct, amount
+account1 assets:%acct
+amount1 %amount
+if %acct_2 B
+  pair %date
+
+$ ./csvtest.sh
+2026-09-30
+    assets:A                                      -1
+    expenses:unknown                               1
+
+2026-09-30
+    assets:B                                       1
+    income:unknown                                -1
+
+>2 /^Warning: input.rules: an if block containing a pair rule matches on a later row's field \(%acct_2\); this can not trigger a pair, since these fields are empty until after pairing$/
+>=0

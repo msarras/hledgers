@@ -219,6 +219,7 @@ rewrite.test
 roi.test
 rules/import-upstream.test
 rules/let-split.test
+rules/pair.test
 run.test
 stats.test
 table-rendering.test
