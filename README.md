@@ -429,8 +429,11 @@ rule of its own, is not paired already, and for which `KEY`, an ordinary
 field template, renders to the same text. The partner's fields are then the
 record's row 2 fields, `%FIELD_2` or `%N_2`, as after `merge`, and the
 partner makes no transaction of its own. A record with no partner converts
-on its own, with its row 2 fields empty (`& !%FIELD_2 .` tests for that).
-Skipped records never pair, and pairing follows merging, so a merged group
+on its own, with its row 2 fields empty. The block's other assignments
+apply whether or not a partner was found, so assignments meant only for a
+pair go in a block that matches a partner field, as `if %side_2 Destination`
+does below, and `!%side_2 .` matches the records left unpaired. Skipped
+records never pair, and pairing follows merging, so a merged group
 can be a partner, its rows becoming rows 2 and 3. An error in a paired
 transaction cites the first record's line and shows both rows.
 
@@ -456,6 +459,9 @@ has no Source in the file, so it came from an account outside the export:
     # and time: the Source becomes posting 1 and its Destination posting 2.
     if %side Source
       pair %date %time
+
+    # Only a Source that found its Destination has row 2 fields.
+    if %side_2 Destination
       description transfer to %{to}
       account2 assets:bank:%{to}
       amount2 %amount_2
