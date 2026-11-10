@@ -225,7 +225,9 @@ a separate process.
 
 ## Release
 
-Set `version` in Cargo.toml, commit, then tag the commit and push the tag:
+Set `version` in Cargo.toml and run `cargo build`, which records it in
+Cargo.lock: the release build is `--locked` and stops if the two disagree.
+Commit both files, then tag the commit and push the tag:
 
     git tag v0.2.0
     git push origin v0.2.0
