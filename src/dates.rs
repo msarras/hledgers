@@ -383,7 +383,8 @@ pub fn advance_to_nth_weekday(n: i64, wd: i64, s: Day) -> Day {
     } else {
         first
     };
-    first.add_days(7 * (n - 1))
+    // a count from the command line can be anything; Haskell's Int wraps
+    first.add_days(7i64.wrapping_mul(n.wrapping_sub(1)))
 }
 
 /// The date `n` months later, on this day of month as nearly as the month
