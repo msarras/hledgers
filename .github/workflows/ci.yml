@@ -1,0 +1,24 @@
+# Formatting, lints and the tests (the unit tests and the functional corpus)
+# on every push to a branch and every pull request, and before a release's
+# builds (release.yml calls this workflow).
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true # build.rs and the tests need hledger/
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --workspace --locked -- -D warnings
+      - run: cargo test --locked
