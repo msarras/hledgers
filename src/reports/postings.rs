@@ -214,10 +214,34 @@ fn matched_postings_before_and_during<'j>(
         query: Query::And(vec![undated, before_end]),
         ..spec.clone()
     };
-    // the valued journal's transactions are the journal's, in the same order
-    let valued = before_and_during.journal_value_and_filter_postings(j)?;
-    let mut ps: Vec<TxnPosting<'j>> = (valued.txns.into_iter().zip(&j.txns))
-        .flat_map(|(vt, t)| vt.postings.into_iter().map(move |p| (p, Some(t))))
+    // the postings the query matches, copied from the journal when nothing
+    // else would change them, or else from the filtered and valued journal,
+    // whose transactions are the journal's, in the same order
+    let matched: Vec<TxnPosting<'j>> = if before_and_during.filters_postings_only() {
+        let types = |a: &str| j.account_type(a);
+        let q = &before_and_during.query;
+        let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
+        let runs = crate::par::map(j.txns.len(), &runs, |ts| {
+            let mut run: Vec<TxnPosting> = (ts.iter())
+                .flat_map(|t| t.postings.iter().map(move |p| (p, t)))
+                .filter(|&(p, t)| q.matches_posting_extra(&types, PostingRef::new(t, p)))
+                .map(|(p, t)| (p.clone(), Some(t)))
+                .collect();
+            run.shrink_to_fit();
+            run
+        });
+        // in a vector of their size, as a vector grown by doubling would
+        // hold room for up to as many again
+        let mut matched = Vec::with_capacity(runs.iter().map(Vec::len).sum());
+        runs.into_iter().for_each(|run| matched.extend(run));
+        matched
+    } else {
+        let valued = before_and_during.journal_value_and_filter_postings(j)?;
+        (valued.txns.into_iter().zip(&j.txns))
+            .flat_map(|(vt, t)| vt.postings.into_iter().map(move |p| (p, Some(t))))
+            .collect()
+    };
+    let mut ps: Vec<TxnPosting<'j>> = (matched.into_iter())
         .filter(|(p, _)| p.has_amount())
         .map(|(mut p, t)| {
             if !ropts.show_costs {
