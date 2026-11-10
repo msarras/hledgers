@@ -13,7 +13,7 @@ use crate::account::{
     account_name_drop, account_name_level, clip_or_ellipsify_account_name,
 };
 use crate::amount::{
-    CommodityStyles, MixedAmount, Precision, Rounding, num, per, styles_with_rounding,
+    Amount, CommodityStyles, MixedAmount, Precision, Rounding, num, per, styles_with_rounding,
 };
 use crate::dates::PeriodData;
 use crate::dates::{
@@ -80,12 +80,15 @@ impl<N, A> PeriodicReportRow<N, A> {
     }
 
     /// Each value transformed (fmap).
-    pub fn map_values(&mut self, mut f: impl FnMut(&A) -> A) {
+    pub fn map_values(&mut self, mut f: impl FnMut(A) -> A)
+    where
+        A: Default,
+    {
         for a in &mut self.amounts {
-            *a = f(a);
+            *a = f(std::mem::take(a));
         }
-        self.total = f(&self.total);
-        self.average = f(&self.average);
+        self.total = f(std::mem::take(&mut self.total));
+        self.average = f(std::mem::take(&mut self.average));
     }
 }
 
@@ -135,7 +138,10 @@ impl<N, A> PeriodicReport<N, A> {
 
 impl<N, A> PeriodicReport<N, A> {
     /// Each value transformed, the totals' too (fmap).
-    pub fn map_values(&mut self, mut f: impl FnMut(&A) -> A) {
+    pub fn map_values(&mut self, mut f: impl FnMut(A) -> A)
+    where
+        A: Default,
+    {
         for r in &mut self.rows {
             r.map_values(&mut f);
         }
@@ -146,7 +152,7 @@ impl<N, A> PeriodicReport<N, A> {
 impl<N> PeriodicReport<N, MixedAmount> {
     /// With every amount styled (HasAmounts' styleAmounts).
     pub fn style_amounts(&mut self, styles: &CommodityStyles) {
-        self.map_values(|m| m.clone().styled(styles));
+        self.map_values(|m| m.styled(styles));
     }
 }
 
@@ -167,7 +173,7 @@ impl<N> CompoundPeriodicReport<N, MixedAmount> {
         for (_, r, _) in &mut self.subreports {
             r.style_amounts(styles);
         }
-        self.totals.map_values(|m| m.clone().styled(styles));
+        self.totals.map_values(|m| m.styled(styles));
     }
 }
 
@@ -653,7 +659,8 @@ fn mark_account_boring(spec: &ReportSpec, acct: &mut AccountTree<BalanceData>) {
                 } else {
                     &b.excl
                 };
-                if strip_costs {
+                let costly = |a: &Amount| a.cost.is_some() || a.cost_basis.is_some();
+                if strip_costs && m.amounts_raw().iter().any(costly) {
                     m.clone().strip_costs().looks_zero()
                 } else {
                     m.looks_zero()

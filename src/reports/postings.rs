@@ -120,13 +120,14 @@ pub fn postings_report_start_balances(
     let (preceding, _) = matched_postings_before_and_during(spec, j, reportspan)?;
     let depth = spec.query.depth();
     for (p, _) in preceding {
-        let a = AccountName::from(clip_or_ellipsify_account_name(&depth, &p.account));
+        let a = clip_or_ellipsify_account_name(&depth, &p.account);
         // M.fromListWith maPlus: the later amount on the left
-        let total = match balances.remove(&a) {
-            Some(prev) => &p.amount + &prev,
-            None => p.amount,
-        };
-        balances.insert(a, total);
+        match balances.get_mut(a) {
+            Some(prev) => *prev = p.amount + std::mem::take(prev),
+            None => {
+                balances.insert(AccountName::from(a), p.amount);
+            }
+        }
     }
     Ok(balances)
 }
@@ -289,12 +290,13 @@ fn summarise_postings_in_date_span(
     // M.fromListWith (flip maPlus): the earlier amount on the left
     let mut balances: BTreeMap<AccountName, MixedAmount> = BTreeMap::new();
     for (p, _) in ps {
-        let a = clip(&p.account);
-        let total = match balances.remove(&a) {
-            Some(prev) => &prev + &p.amount,
-            None => p.amount,
-        };
-        balances.insert(a, total);
+        let a = clip_or_ellipsify_account_name(depth, &p.account);
+        match balances.get_mut(a) {
+            Some(prev) => *prev = std::mem::take(prev) + &p.amount,
+            None => {
+                balances.insert(AccountName::from(a), p.amount);
+            }
+        }
     }
     (balances.into_iter())
         .filter(|(_, amt)| show_empty || !amt.looks_zero())
@@ -409,5 +411,50 @@ pub(crate) mod tests {
             summarise_postings_by_interval(false, &DepthSpec::default(), false, &[], vec![])
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn sums_keep_the_order_of_their_amounts() {
+        // a sum takes its right operand's style: in a summary posting the
+        // later posting's, in a starting balance the earlier one's
+        use crate::amount::{Amount, AmountStyle, Side, usd};
+        let day = |d| Day::from_ymd(2025, 1, d).unwrap();
+        let posting = |d, side| Posting {
+            date: Some(day(d)),
+            account: "a".into(),
+            amount: MixedAmount::from_amount(Amount {
+                style: AmountStyle {
+                    side,
+                    ..AmountStyle::default()
+                },
+                ..usd(Decimal::from_i64(1))
+            }),
+            ..Posting::default()
+        };
+        let side = |m: &MixedAmount| m.amounts_raw()[0].style.side;
+        let summary = summarise_postings_in_date_span(
+            DateSpan::exact(Some(day(1)), Some(day(31))),
+            false,
+            &DepthSpec::default(),
+            false,
+            vec![(posting(1, Side::L), None), (posting(2, Side::R), None)],
+        );
+        assert_eq!(side(&summary[0].0.amount), Side::R);
+        let txn = |d, side| Transaction {
+            date: day(d),
+            postings: vec![posting(d, side)],
+            ..Transaction::default()
+        };
+        let j = Journal {
+            txns: vec![txn(1, Side::L), txn(2, Side::R)],
+            ..Journal::default()
+        };
+        let historical = ReportOpts {
+            balance_accum: BalanceAccumulation::Historical,
+            ..ReportOpts::default()
+        };
+        let after = Query::Date(DateSpan::exact(Some(day(10)), None));
+        let start = postings_report_start_balances(&spec(historical, after), &j).unwrap();
+        assert_eq!(side(&start["a"]), Side::L);
     }
 }

@@ -32,7 +32,7 @@ pub type BudgetReport = PeriodicReport<DisplayName, BudgetCell>;
 impl PeriodicReport<DisplayName, BudgetCell> {
     /// With every amount styled (HasAmounts' styleAmounts).
     pub fn style_amounts(&mut self, styles: &CommodityStyles) {
-        let style = |m: &Option<MixedAmount>| m.as_ref().map(|m| m.clone().styled(styles));
+        let style = |m: Option<MixedAmount>| m.map(|m| m.styled(styles));
         self.map_values(|(actual, goal)| (style(actual), style(goal)));
     }
 }
