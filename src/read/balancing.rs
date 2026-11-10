@@ -780,10 +780,16 @@ pub fn journal_balance_transactions(
                 let t = &j.txns[i];
                 let p = &t.postings[k];
                 if p.has_amount() {
-                    let mut p = p.clone();
-                    p.amount = std::mem::take(&mut p.amount).strip_costs();
-                    let new = state.add(&p.account, &state.running_balance_amount(&p));
-                    state.check_or_defer(t, &p, new)?;
+                    let amount = state.running_balance_amount(p, p.amount.clone().strip_costs());
+                    let new = state.add(&p.account, &amount);
+                    // only an assertion is checked, against a copy of the
+                    // new balance and of the posting as counted
+                    if p.assertion.is_some() {
+                        let new = new.clone();
+                        let mut p = p.clone();
+                        p.amount = std::mem::take(&mut p.amount).strip_costs();
+                        state.check_or_defer(t, &p, new)?;
+                    }
                 }
             }
             Item::Txn(i) => {
@@ -859,23 +865,23 @@ impl Balancer {
             .sum()
     }
 
-    /// The amount a posting adds to its account's running balance: an
-    /// amount converted from an alias with a quantity stays as written,
-    /// without costs (postingRunningBalanceAmount).
-    fn running_balance_amount(&self, p: &Posting) -> MixedAmount {
+    /// The amount a posting adds to its account's running balance, given
+    /// its amount as counted: an amount converted from an alias with a
+    /// quantity stays as written, without costs (postingRunningBalanceAmount).
+    fn running_balance_amount(&self, p: &Posting, amount: MixedAmount) -> MixedAmount {
         if self.aliases.is_empty() {
-            return p.amount.clone();
+            return amount;
         }
         let written = p.original().amount.clone().strip_costs();
         let in_alias = written
             .amounts_raw()
             .iter()
             .any(|a| self.aliases.contains_key(&a.commodity));
-        let stripped = p.amount.clone().strip_costs();
+        let stripped = amount.clone().strip_costs();
         if in_alias && (&self.convert(written.clone()) - &stripped).is_zero() {
             written
         } else {
-            p.amount.clone()
+            amount
         }
     }
 
@@ -896,12 +902,12 @@ impl Balancer {
         )
     }
 
-    /// Add an amount to an account's running balance, returning the new
-    /// balance (addToRunningBalanceB).
-    fn add(&mut self, a: &AccountName, amount: &MixedAmount) -> MixedAmount {
-        let new = &self.balances.get(a).cloned().unwrap_or_default() + amount;
-        self.balances.insert(a.clone(), new.clone());
-        new
+    /// Add an amount to an account's running balance, in place, returning
+    /// the new balance (addToRunningBalanceB).
+    fn add(&mut self, a: &AccountName, amount: &MixedAmount) -> &MixedAmount {
+        let balance = self.balances.entry(a.clone()).or_default();
+        *balance = std::mem::take(balance) + amount;
+        balance
     }
 
     /// Set an account's running balance, returning the change
@@ -962,7 +968,8 @@ impl Balancer {
     /// (addOrAssignAmountAndCheckAssertionB).
     fn add_or_assign(&mut self, t: &Transaction, mut p: Posting) -> Result<Posting, String> {
         if p.has_amount() {
-            let new = self.add(&p.account, &self.running_balance_amount(&p));
+            let amount = self.running_balance_amount(&p, p.amount.clone());
+            let new = self.add(&p.account, &amount).clone();
             self.check_or_defer(t, &p, new)?;
         } else if let Some(ba) = p.assertion.clone() {
             let current = if ba.inclusive {
