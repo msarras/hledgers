@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use crate::account::{AccountName, AccountType, DepthSpec, account_name_level, escape_name};
+use crate::account::{AccountName, AccountType, DepthSpec, account_name_level};
 use crate::amount::render::show_mixed_amount_one_line;
 use crate::amount::{Amount, MixedAmount};
 use crate::dates::{DateSpan, Day, Interval, parse_period_expr, spans_intersect, spans_union};
@@ -104,15 +104,6 @@ pub fn note_tag(value: Option<&str>) -> Result<Query, String> {
 fn special_tag(name: &str, value: Option<&str>) -> Result<Query, String> {
     let value = value.map(to_query_regex).transpose()?;
     Ok(Query::Tag(to_regex_ci(name)?, value))
-}
-
-/// A query for the hidden tag of generated transactions
-/// (generatedTransactionTag).
-pub fn generated_transaction_tag() -> Query {
-    Query::Tag(
-        to_regex_ci("generated-transaction").expect("a valid regex"),
-        None,
-    )
 }
 
 /// The query term prefixes, apart from `not:` (queryprefixes).
@@ -799,10 +790,6 @@ impl Query {
         matches!(self, Query::Acct(_))
     }
 
-    pub fn is_find(&self) -> bool {
-        matches!(self, Query::Find(..))
-    }
-
     pub fn is_type(&self) -> bool {
         matches!(self, Query::Type(_))
     }
@@ -810,11 +797,6 @@ impl Query {
     /// Whether this is a `depth:` term, overall or per account.
     pub fn is_depth(&self) -> bool {
         matches!(self, Query::Depth(_) | Query::DepthAcct(..))
-    }
-
-    /// Whether this is an overall depth limit (queryIsFlatDepth).
-    pub fn is_flat_depth(&self) -> bool {
-        matches!(self, Query::Depth(_))
     }
 
     pub fn is_real(&self) -> bool {
@@ -1374,16 +1356,6 @@ pub fn in_account(opts: &[QueryOpt]) -> Option<(AccountName, bool)> {
         QueryOpt::InAcct(a) => Some((a.clone(), true)),
         QueryOpt::Interval(_) => None,
     })
-}
-
-/// A query matching the account (and subaccounts) an account register is
-/// about, if an option names one (inAccountQuery).
-pub fn in_account_query(opts: &[QueryOpt]) -> Option<Query> {
-    let (a, subs) = in_account(opts)?;
-    let end = if subs { "(:|$)" } else { "$" };
-    let r = to_regex(&format!("^{}{end}", escape_name(&a)))
-        .expect("an escaped account name is a valid regex");
-    Some(Query::Acct(r))
 }
 
 pub(crate) mod tests {

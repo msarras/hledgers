@@ -197,10 +197,6 @@ impl Posting {
         self.realness == Realness::Virtual
     }
 
-    pub fn is_balanced_virtual(&self) -> bool {
-        self.realness == Realness::BalancedVirtual
-    }
-
     /// Whether the amount was written or has been inferred, rather than
     /// being missing (hasAmount).
     pub fn has_amount(&self) -> bool {

@@ -130,32 +130,6 @@ impl<N, A> PeriodicReport<N, A> {
             totals: self.totals,
         }
     }
-
-    /// With each row's name transformed, the rows it gives none for
-    /// dropped (prMapMaybeName).
-    pub fn map_maybe_name<M>(self, mut f: impl FnMut(N) -> Option<M>) -> PeriodicReport<M, A> {
-        let rows = (self.rows.into_iter())
-            .filter_map(|r| {
-                let PeriodicReportRow {
-                    name,
-                    amounts,
-                    total,
-                    average,
-                } = r;
-                f(name).map(|name| PeriodicReportRow {
-                    name,
-                    amounts,
-                    total,
-                    average,
-                })
-            })
-            .collect();
-        PeriodicReport {
-            dates: self.dates,
-            rows,
-            totals: self.totals,
-        }
-    }
 }
 
 impl<N, A> PeriodicReport<N, A> {

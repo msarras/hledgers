@@ -482,11 +482,6 @@ impl DateSpan {
         self.start().map(Day::year)
     }
 
-    /// As upstream's spanEndYear is, the start's year too.
-    pub fn end_year(&self) -> Option<i64> {
-        self.start().map(Day::year)
-    }
-
     /// The years of the start and end, those there are (spanYears).
     pub fn years(&self) -> Vec<i64> {
         self.start()
@@ -1023,11 +1018,6 @@ fn show_arg(n: i64) -> String {
     } else {
         n.to_string()
     }
-}
-
-/// Whether this is the last day of the month (isLastDayOfMonth).
-pub fn is_last_day_of_month(y: i64, m: u32, d: u32) -> bool {
-    (1..=12).contains(&m) && d == days_in_month(y, m)
 }
 
 /// The year and month of the Thursday of the week starting on this day:
