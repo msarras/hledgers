@@ -398,23 +398,32 @@ pub fn show_mixed_amount_lines_parts_b(fmt: &AmountFormat, m: &MixedAmount) -> V
 /// Like [`show_mixed_amount_lines_b`], reusing the text of each amount
 /// that the last mixed amount shown this way had in the same position (as
 /// the previous running total of a register usually does), and keeping
-/// this one's amounts and texts in `last` for the next.
+/// this one's amounts and texts in `last` for the next: a reused one is
+/// left there as it is.
 pub fn show_mixed_amount_lines_reusing(
     fmt: &AmountFormat,
     m: &MixedAmount,
     last: &mut Vec<(Amount, Wide)>,
 ) -> Vec<Wide> {
-    let mut texts = Vec::with_capacity(last.len());
+    let mut shown = 0;
     let lines = lines_parts_with(fmt, m, |i, a| {
-        let text = match last.get(i) {
+        shown += 1;
+        match last.get_mut(i) {
             // equal amounts with the same decimal places show alike
-            Some((b, text)) if b == a && b.quantity.places() == a.quantity.places() => text.clone(),
-            _ => show_amount_b(fmt, a),
-        };
-        texts.push((a.clone(), text.clone()));
-        text
+            Some((b, text)) if *b == *a && b.quantity.places() == a.quantity.places() => {
+                text.clone()
+            }
+            kept => {
+                let text = show_amount_b(fmt, a);
+                match kept {
+                    Some(kept) => *kept = (a.clone(), text.clone()),
+                    None => last.push((a.clone(), text.clone())),
+                }
+                text
+            }
+        }
     });
-    *last = texts;
+    last.truncate(shown);
     lines.into_iter().map(|(w, _)| w).collect()
 }
 
