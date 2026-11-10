@@ -63,13 +63,19 @@ pub fn budget_report(
         .flat_map(expand_account_name)
         .collect();
     let actualj = journal_with_budget_account_names(&budgeted, ropts.empty, j);
-    let budgetj = journal_add_budget_goal_transactions(bopts, &ropts, report_span, j)?;
+    let budgetj = journal_add_budget_goal_transactions(bopts, &ropts, report_span, j);
     let oracle = PriceOracle::new(ropts.infer_prices, ropts.debug, j);
     let budget_spec = ReportSpec {
         query: budget_goal_query(&spec.query),
         ..spec.clone()
     };
     let (_, actual_spans) = spec.report_span(&actualj)?;
+    // a report with no columns never looks at the goal transactions, so
+    // as upstream's, which are computed lazily, it does not fail on them
+    let budgetj = match budgetj {
+        Err(_) if actual_spans.is_none() => j.with_txns(Vec::new()),
+        goals => goals?,
+    };
     let (_, budget_spans) = budget_spec.report_span(&budgetj)?;
     let all_spans = match (&ropts.interval, &budget_spans) {
         // without an interval, the goals' span may be shorter than the

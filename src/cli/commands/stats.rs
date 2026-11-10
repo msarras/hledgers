@@ -36,7 +36,7 @@ const LABEL_WIDTH: usize = 20;
 /// --oneline; then a line of run time statistics, with --oneline also the
 /// version and the main file's name, tab-separated.
 pub fn stats(opts: &CliOpts, j: Journal) -> Result<String, String> {
-    warn_if_large_multi_period_report(opts, &j);
+    warn_if_large_multi_period_report(opts, &j)?;
     let raw = &opts.raw;
     let oneline = raw.bool("oneline");
     let verbose = raw.bool("verbose");

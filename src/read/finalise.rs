@@ -37,7 +37,7 @@ pub fn journal_finalise(
     j.default_commodity = st.default_commodity;
     j.parse_decimal_mark = st.decimal_mark;
     j.parse_year = st.year;
-    warn_if_many_forecast_transactions(iopts, &j);
+    warn_if_many_forecast_transactions(iopts, &j)?;
     // setup
     journal_set_last_read_time(&mut j);
     journal_add_file(&mut j, file, text);
@@ -505,15 +505,14 @@ const MAX_EXPECTED_FORECAST_TXNS: usize = 100_000;
 
 /// Warn before generating an implausible number of forecast transactions,
 /// counting them without generating them (#1683).
-fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) {
+fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) -> Result<(), String> {
     let Some(span) = forecast_period(iopts, j) else {
-        return;
+        return Ok(());
     };
-    let n: usize = j
-        .periodic_txns
-        .iter()
-        .map(|pt| super::modifiers::periodic_transaction_dates(pt, span).map_or(0, |ds| ds.count()))
-        .sum();
+    let mut n = 0;
+    for pt in &j.periodic_txns {
+        n += super::modifiers::periodic_transaction_dates(pt, span)?.count();
+    }
     if n > MAX_EXPECTED_FORECAST_TXNS {
         crate::console::warn(
             &iopts.prog_args,
@@ -523,6 +522,7 @@ fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) {
             ),
         );
     }
+    Ok(())
 }
 
 /// Add to each posting the tags of its account and its account's parents,

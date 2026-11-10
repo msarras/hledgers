@@ -213,7 +213,7 @@ pub fn compound_balance_command(
     opts: &CliOpts,
     j: &Journal,
 ) -> Result<String, String> {
-    warn_if_large_multi_period_report(opts, j);
+    warn_if_large_multi_period_report(opts, j)?;
     let fmt = opts.output_format();
     let chart = chart_requested(opts);
     match fmt.as_str() {

@@ -614,10 +614,13 @@ impl ReportSpec {
         let ropts = &self.opts;
         let gain = ropts.balance_calc == BalanceCalculation::Gain;
         let periods = match (&ropts.value, &ropts.interval) {
-            (Some(ValuationType::AtEnd(_)), Interval::NoInterval) => self.report_span(&j)?.1,
-            (Some(ValuationType::AtEnd(_)), _) => self.report_span_both_dates(&j)?.1,
-            _ => None,
+            (Some(ValuationType::AtEnd(_)), Interval::NoInterval) => self.report_span(&j),
+            (Some(ValuationType::AtEnd(_)), _) => self.report_span_both_dates(&j),
+            _ => Ok((DateSpan::default(), None)),
         };
+        // an error in them is raised when a posting first needs its
+        // period, as upstream's lazily computed spans raise it
+        let periods = periods.map(|(_, ps)| ps);
         let styles = j.commodity_styles();
         if !gain {
             let op = ropts.conversion_op.unwrap_or(ConversionOp::NoConversionOp);
@@ -631,6 +634,7 @@ impl ReportSpec {
                 let p = &t.postings[i];
                 // the period's last day (postingperiodend)
                 let period_last = || {
+                    let periods = periods.as_ref().map_err(String::clone)?;
                     let d = ropts.posting_date(p, Some(t));
                     let last = match ropts.interval {
                         Interval::NoInterval => periods.as_ref().map(|ps| ps.start_end().1),

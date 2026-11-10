@@ -233,13 +233,14 @@ pub fn lines_with_title<S: AsRef<str>>(
 
 /// Warn if the report has a report interval and more than 10000 periods,
 /// which might be a mistyped date (warnIfLargeMultiPeriodReport).
-pub fn warn_if_large_multi_period_report(opts: &CliOpts, j: &crate::model::Journal) {
+pub fn warn_if_large_multi_period_report(
+    opts: &CliOpts,
+    j: &crate::model::Journal,
+) -> Result<(), String> {
     if opts.spec.opts.interval == crate::dates::Interval::NoInterval {
-        return;
+        return Ok(());
     }
-    let Ok((span, periods)) = opts.spec.report_span(j) else {
-        return;
-    };
+    let (span, periods) = opts.spec.report_span(j)?;
     let n = periods.map_or(0, |p| p.periods().count());
     if n > 10000 {
         crate::console::warn(
@@ -250,6 +251,7 @@ pub fn warn_if_large_multi_period_report(opts: &CliOpts, j: &crate::model::Journ
             ),
         );
     }
+    Ok(())
 }
 
 /// The error for an output format a command doesn't support

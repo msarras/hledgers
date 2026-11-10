@@ -1,0 +1,126 @@
+# * Errors upstream raises lazily, with error', where hledgers once panicked:
+# the message, the exit code, and when they are and are not raised.
+
+# ** 1. A regular expression alias whose replacement names a missing group is
+# an error with no place in the file.
+<
+alias /a/=\2
+
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - print
+>2 /^hledger: Error: problem in account alias applied to a: no match group exists for backreference "\\2"$/
+>=1
+
+# ** 2. An interval with a day of month that does not exist is an error when
+# the report's span is split into periods.
+<
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - balance -p 'every 32nd day of month'
+>2 /^hledger: Error: nextnthdayofmonth: day should be 1..31, not 32$/
+>=1
+
+# ** 3. A report that never splits its span does not fail.
+<
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - print -p 'every 32nd day of month'
+2024-01-01 x
+    a                                              1
+    b
+
+>=0
+
+# ** 4. It is raised by the large report warning, before the output format is
+# checked.
+<
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - balance -O bogus -p 'every 32nd day of month'
+>2 /^hledger: Error: nextnthdayofmonth: day should be 1..31, not 32$/
+>=1
+
+# ** 5. An end valuation needs the periods only when a posting is valued.
+<
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - print -V -p 'every 32nd day of month in 2025'
+>=0
+
+# ** 6. With --forecast a periodic rule's invalid interval is an error raised
+# when its transactions are counted, before a later error.
+<
+commodity USD 1.00
+    ; alias: $
+
+commodity AUD 1.00
+    ; alias: $
+
+~ every 32nd day of month
+    a   5 USD
+    b
+
+$ hledger -f - print --forecast
+>2 /^hledger: Error: nextnthdayofmonth: day should be 1..31, not 32$/
+>=1
+
+# ** 7. Without --forecast it is not used.
+<
+~ every 32nd day of month
+    a   1
+    b
+
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - print
+2024-01-01 x
+    a                                              1
+    b
+
+>=0
+
+# ** 8. A budget report fails on it,
+<
+~ every 32nd day of month
+    a   1
+    b
+
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - balance --budget
+>2 /^hledger: Error: nextnthdayofmonth: day should be 1..31, not 32$/
+>=1
+
+# ** 9. but not one with no columns, which never looks at the goals.
+<
+~ every 32nd day of month
+    a   1
+    b
+
+2024-01-01 x
+    a   1
+    b
+
+$ hledger -f - balance --budget -e 2020
+Budget performance in ..:
+
+  || .. 
+==++====
+--++----
+  ||  0 
+>=0

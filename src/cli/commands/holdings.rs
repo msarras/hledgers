@@ -1558,7 +1558,7 @@ fn holdings_bars_chart(
 
 /// Run the holdings command (holdings).
 pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
-    warn_if_large_multi_period_report(opts, j);
+    warn_if_large_multi_period_report(opts, j)?;
     let ropts = &opts.spec.opts;
     if matches!(ropts.value, Some(ValuationType::AtThen(_))) {
         return Err("holdings: --value=then is not supported".to_string());

@@ -154,7 +154,7 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     };
     let one_line = AmountFormat::ONE_LINE_NO_COST;
     if budget {
-        warn_if_large_multi_period_report(opts, j);
+        warn_if_large_multi_period_report(opts, j)?;
         if !known {
             return Err(unsupported_output_format_error(&fmt));
         }
@@ -180,7 +180,7 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             }
         }
     } else if multiperiod {
-        warn_if_large_multi_period_report(opts, j);
+        warn_if_large_multi_period_report(opts, j)?;
         if !known {
             return Err(unsupported_output_format_error(&fmt));
         }
@@ -238,7 +238,7 @@ fn balance_chart(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let ropts = &opts.spec.opts;
     let multiperiod = ropts.interval != Interval::NoInterval;
     if multiperiod {
-        warn_if_large_multi_period_report(opts, j);
+        warn_if_large_multi_period_report(opts, j)?;
     }
     check_chart_format(opts)?;
     // the layout is needed only for the html

@@ -218,6 +218,7 @@ related.test
 rewrite.test
 roi.test
 rules/import-upstream.test
+rules/lazy-errors.test
 rules/let-split.test
 rules/pair.test
 run.test
