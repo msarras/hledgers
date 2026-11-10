@@ -47,7 +47,7 @@ fn parse_check(s: &str) -> Option<usize> {
 /// Reject an unknown check name while the arguments are parsed, before
 /// the journal is read and can hide it with its own errors (checkmode's
 /// checkArg, reported the way cmdargs reports an argument's error).
-pub fn validate_check_args(raw: &crate::cli::args::RawOpts) -> Result<(), String> {
+pub fn validate_check_args(raw: &crate::reports::opts::RawOpts) -> Result<(), String> {
     for a in raw.args() {
         let name = words_quoted(a).and_then(|ws| ws.into_iter().next());
         if name.as_deref().and_then(parse_check).is_none() {

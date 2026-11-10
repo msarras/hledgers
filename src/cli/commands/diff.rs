@@ -163,8 +163,8 @@ fn unmatched_txns<'a, 'j: 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::args::RawOpts;
     use crate::dates::Day;
+    use crate::reports::opts::RawOpts;
 
     // Expectations from the reference hledger 1.99: with these files as
     // d1.j and d2.j, `hledger -f d1.j -f d2.j diff assets:bank`.

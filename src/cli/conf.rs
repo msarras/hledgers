@@ -139,7 +139,7 @@ pub fn expand_command_alias(
 /// Which config file the options select, the rightmost --conf or --no-conf
 /// counting: Some(Some(file)), Some(None) for none, or None to search
 /// (confFileSpecFromRawOpts).
-fn conf_file_spec(raw: &super::args::RawOpts) -> Option<Option<&str>> {
+fn conf_file_spec(raw: &crate::reports::opts::RawOpts) -> Option<Option<&str>> {
     raw.0.iter().rev().find_map(|(n, v)| match n.as_str() {
         "conf" => Some(Some(v.as_str())),
         "no-conf" => Some(None),
@@ -150,7 +150,10 @@ fn conf_file_spec(raw: &super::args::RawOpts) -> Option<Option<&str>> {
 /// The config file the options select, read and checked, and its path; an
 /// empty one with --no-conf or if none is found; or an error if it can not
 /// be read or parsed (getConf).
-pub fn get_conf(raw: &super::args::RawOpts, debug: bool) -> Result<(Conf, Option<String>), String> {
+pub fn get_conf(
+    raw: &crate::reports::opts::RawOpts,
+    debug: bool,
+) -> Result<(Conf, Option<String>), String> {
     let dbg = |msg: &str| {
         if debug {
             eprintln!("{msg}");
@@ -214,7 +217,7 @@ fn read_conf_file(f: &str) -> Result<(Conf, Option<String>), String> {
 
 /// Whether the config file may run shell command aliases: one given with
 /// --conf, or a user's own (confFileIsTrusted).
-pub fn conf_file_is_trusted(raw: &super::args::RawOpts, file: Option<&str>) -> bool {
+pub fn conf_file_is_trusted(raw: &crate::reports::opts::RawOpts, file: Option<&str>) -> bool {
     match (file, conf_file_spec(raw)) {
         (None, _) => false,
         (Some(_), Some(Some(_))) => true,

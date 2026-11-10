@@ -1,12 +1,13 @@
 //! Command-line options (Hledger.Cli.CliOptions): the general flags every
 //! command accepts, and CliOpts, the options of a command run.
 
-use super::args::{Arity, Flag, RawOpts};
+use super::args::{Arity, Flag};
 use crate::amount::CommodityStyles;
 use crate::console::usage_error;
 use crate::dates::{DateSpan, Day, Interval, fix_smart_date_str_ef, parse_period_expr};
 use crate::parse::{PResult, ParseError, Parser};
 use crate::read::{BalancingOpts, InputOpts};
+use crate::reports::opts::RawOpts;
 use crate::reports::opts::{ReportOpts, ReportSpec};
 use crate::valuation::ConversionOp;
 

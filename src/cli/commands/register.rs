@@ -610,8 +610,8 @@ fn compare_strings(s1: &[char], s2: &[char]) -> f64 {
 
 pub(crate) mod tests {
     use super::*;
-    use crate::cli::args::RawOpts;
     use crate::dates::Day;
+    use crate::reports::opts::RawOpts;
     use crate::reports::periodic::tests::read;
 
     // tests_Register

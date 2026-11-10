@@ -6,12 +6,13 @@ use std::cell::{OnceCell, RefCell};
 use std::io::{BufRead, IsTerminal, Write};
 use std::time::SystemTime;
 
-use crate::cli::args::{self, Arity, Flag, Mode, RawOpts};
+use crate::cli::args::{self, Arity, Flag, Mode};
 use crate::cli::conf::{self, ResolvedCommand};
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::cli::{commands, docs, io};
 use crate::model::Journal;
 use crate::read::InputOpts;
+use crate::reports::opts::RawOpts;
 use crate::text::{quote_for_command_line, strip};
 
 /// The hidden flag marking run's inline commands: put before the first

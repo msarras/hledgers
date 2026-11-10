@@ -4,7 +4,6 @@
 
 use crate::account::DepthSpec;
 use crate::amount::{MixedAmount, Sym};
-use crate::cli::args::RawOpts;
 use crate::console::usage_error;
 use crate::dates::{
     DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
@@ -83,6 +82,68 @@ pub enum SortField {
     Amount(bool),
     Date(bool),
     Description(bool),
+}
+
+/// Parsed options as (name, value) pairs in command-line order; positional
+/// arguments have the name `args`. Where a flag repeats, the rightmost wins.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawOpts(pub Vec<(String, String)>);
+
+impl RawOpts {
+    pub fn bool(&self, name: &str) -> bool {
+        self.0.iter().any(|(n, _)| n == name)
+    }
+
+    pub fn string(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    pub fn args(&self) -> impl Iterator<Item = &str> {
+        self.list("args")
+    }
+
+    /// The values of every option with this name, in order
+    /// (listofstringopt).
+    pub fn list<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
+        self.0
+            .iter()
+            .filter(move |(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Whether the option appears an odd number of times (toggleopt).
+    pub fn toggle(&self, name: &str) -> bool {
+        self.list(name).count() % 2 == 1
+    }
+
+    /// What `f` makes of the last option name it accepts (choiceopt).
+    pub fn choice<T>(&self, f: impl Fn(&str) -> Option<T>) -> Option<T> {
+        self.0.iter().filter_map(|(n, _)| f(n)).next_back()
+    }
+
+    /// The option's value as an integer from 0 to the largest Int
+    /// (maybeposintopt).
+    pub fn posint(&self, name: &str) -> Result<Option<usize>, String> {
+        let Some(v) = self.string(name) else {
+            return Ok(None);
+        };
+        let usage = crate::console::usage_error;
+        let n: i128 = v
+            .trim()
+            .parse()
+            .map_err(|_| usage(&format!("could not parse {name} number: {v}")))?;
+        if !(0..=i128::from(i64::MAX)).contains(&n) {
+            return Err(usage(&format!(
+                "argument to {name} must lie in the range 0 to {}, but is {n}",
+                i64::MAX
+            )));
+        }
+        Ok(Some(n as usize))
+    }
 }
 
 /// Options for customising reports (ReportOpts). Some options' errors
