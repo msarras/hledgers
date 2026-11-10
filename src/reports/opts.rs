@@ -545,6 +545,20 @@ impl ReportSpec {
         )
     }
 
+    /// Whether filtering and valuing the journal as this spec says only
+    /// keeps the postings the query matches, as they are: without
+    /// --related, nothing converted or valued, and no parts of amounts
+    /// selected by `cur:` or `amt:` terms.
+    pub fn filters_postings_only(&self) -> bool {
+        !self.opts.related
+            && self.opts.value.is_none()
+            && matches!(
+                self.opts.conversion_op,
+                None | Some(ConversionOp::NoConversionOp)
+            )
+            && self.query.clone().filter(Query::is_amt_or_cur).is_null()
+    }
+
     /// The journal with just the postings, and parts of amounts, the query
     /// matches (or with --related, their sibling postings), converted to
     /// cost and/or to value as the options say, using its own market

@@ -8,7 +8,7 @@ use crate::account::{ACCT_SEP, AccountName, UNBUDGETED_ACCOUNT_NAME, expand_acco
 use crate::amount::{CommodityStyles, MixedAmount};
 use crate::dates::PeriodData;
 use crate::dates::{DateSpan, Interval, interval_boundary_before};
-use crate::model::{Journal, PostingRef, Transaction};
+use crate::model::{Journal, Transaction};
 use crate::query::Query;
 use crate::read::BalancingOpts;
 use crate::read::balancing::journal_balance_transactions;
@@ -84,10 +84,15 @@ pub fn budget_report(
         (Interval::NoInterval, _) | (_, None) => actual_spans.clone(),
         (_, Some(b)) => actual_spans.as_ref().and_then(|a| b.union(a)),
     };
-    let actual = get_postings(spec, &actualj, &oracle, report_span)?;
-    let goals = get_postings(&budget_spec, &budgetj, &oracle, report_span)?;
-    let actual: Vec<PostingRef> = actual.postings().collect();
-    let goals: Vec<PostingRef> = goals.postings().collect();
+    let (mut actual_valued, mut goals_valued) = (None, None);
+    let actual = get_postings(spec, &actualj, &oracle, report_span, &mut actual_valued)?;
+    let goals = get_postings(
+        &budget_spec,
+        &budgetj,
+        &oracle,
+        report_span,
+        &mut goals_valued,
+    )?;
     let actual =
         generate_multi_balance_account(spec, &actualj, &oracle, actual_spans.as_ref(), &actual)?;
     // without goals, no zero goals either

@@ -4,7 +4,6 @@
 //! and a totals row. One engine makes the multi-period balance report; the
 //! single-column balance report is its one-period case.
 
-use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashSet};
 
@@ -20,7 +19,7 @@ use crate::dates::{
     DateSpan, Day, DayPartition, empty_date_span, maybe_day_partition_to_date_spans, null_date,
 };
 use crate::decimal::Decimal;
-use crate::model::{Journal, Posting, PostingRef};
+use crate::model::{Journal, Posting, PostingRef, Transaction};
 use crate::query::Query;
 use crate::reports::account_tree::{Account, AccountTree, BalanceData, ROOT};
 use crate::reports::opts::{
@@ -265,8 +264,8 @@ pub fn multi_balance_report_with(
 ) -> Result<MultiBalanceReport, String> {
     let (span, colspans) = spec.report_span(j)?;
     let spec = make_report_query(spec, span);
-    let valued = get_postings(&spec, j, oracle, span)?;
-    let postings: Vec<PostingRef> = valued.postings().collect();
+    let mut valued = None;
+    let postings = get_postings(&spec, j, oracle, span, &mut valued)?;
     let acct = generate_multi_balance_account(&spec, j, oracle, colspans.as_ref(), &postings)?;
     generate_multi_balance_report(&spec.opts, colspans.as_ref(), acct)
 }
@@ -285,7 +284,8 @@ pub fn compound_balance_report(
     let oracle = PriceOracle::new(spec.opts.infer_prices, spec.opts.debug, j);
     let (span, colspans) = spec.report_span(j)?;
     let spec = make_report_query(spec, span);
-    let valued = get_postings(&spec, j, &oracle, span)?;
+    let mut valued = None;
+    let postings = get_postings(&spec, j, &oracle, span, &mut valued)?;
     let counting = is_count(spec.opts.balance_calc);
     let types = |a: &str| j.account_type(a);
     let mut subreports = Vec::with_capacity(sections.len());
@@ -300,7 +300,7 @@ pub fn compound_balance_report(
             query: Query::And(vec![q.clone(), spec.query.clone()]),
             ..spec.clone()
         };
-        let matched: Vec<PostingRef> = (valued.postings())
+        let matched: Vec<PostingRef> = (postings.iter().copied())
             .filter(|p| q.matches_posting_extra(&types, *p))
             .collect();
         // with --count, a normally negative section counts each posting
@@ -368,18 +368,21 @@ pub fn make_report_query(spec: &ReportSpec, span: DateSpan) -> ReportSpec {
     }
 }
 
-/// The journal with just the postings, and parts of amounts, the query
-/// matches (or with --related, their sibling postings) within the report
-/// span, which for a report needing the postings before its start is all
-/// time to the report's end; valued as the options say, unless that
-/// happens after summing; without postings that have no amount; with every
-/// amount 1 when counting (getPostings, journalValueAndFilterPostingsWith).
-pub fn get_postings<'j>(
+/// The postings, and parts of amounts, the query matches (or with
+/// --related, their sibling postings) within the report span, which for a
+/// report needing the postings before its start is all time to the
+/// report's end; valued as the options say, unless that happens after
+/// summing; without postings that have no amount; with every amount 1 when
+/// counting (getPostings, journalValueAndFilterPostingsWith). They are the
+/// journal's own when no amount changes, otherwise those of a filtered and
+/// valued copy of it, kept in `valued`.
+pub fn get_postings<'a>(
     spec: &ReportSpec,
-    j: &'j Journal,
+    j: &'a Journal,
     oracle: &PriceOracle,
     span: DateSpan,
-) -> Result<Cow<'j, Journal>, String> {
+    valued: &'a mut Option<Journal>,
+) -> Result<Vec<PostingRef<'a>>, String> {
     let ropts = &spec.opts;
     let full_span = if ropts.requires_historical() {
         DateSpan::exact(None, span.end())
@@ -412,31 +415,21 @@ pub fn get_postings<'j>(
         ..spec.clone()
     };
     let count = is_count(ropts.balance_calc);
-    // when nothing is converted, valued or counted, and the query matches
-    // every posting, all with amounts, those are the journal's own
-    let unchanged = !count
-        && !spec.opts.related
-        && spec.opts.value.is_none()
-        && matches!(
-            spec.opts.conversion_op,
-            None | Some(ConversionOp::NoConversionOp)
-        )
-        && spec.query.clone().filter(Query::is_amt_or_cur).is_null()
-        && {
-            let types = |a: &str| j.account_type(a);
-            let q = &spec.query;
-            crate::par::map(j.txns.len(), &j.txns, |t| {
-                (t.postings.iter()).all(|p| {
-                    p.has_amount() && q.matches_posting_extra(&types, PostingRef::new(t, p))
-                })
-            })
-            .into_iter()
-            .all(|all| all)
-        };
-    if unchanged {
-        return Ok(Cow::Borrowed(j));
+    // when nothing is converted, valued or counted, the postings the query
+    // matches, with amounts, are the journal's own, found on all cores
+    if !count && spec.filters_postings_only() {
+        let types = |a: &str| j.account_type(a);
+        let q = &spec.query;
+        let runs: Vec<&[Transaction]> = j.txns.chunks(1024).collect();
+        let matched = crate::par::map(j.txns.len(), &runs, |ts| {
+            (ts.iter())
+                .flat_map(|t| t.postings.iter().map(move |p| PostingRef::new(t, p)))
+                .filter(|p| p.p.has_amount() && q.matches_posting_extra(&types, *p))
+                .collect::<Vec<PostingRef>>()
+        });
+        return Ok(matched.concat());
     }
-    let mut valued = spec.journal_value_and_filter_postings_with(j, oracle)?;
+    let valued = valued.insert(spec.journal_value_and_filter_postings_with(j, oracle)?);
     for t in &mut valued.txns {
         t.postings.retain(|p| p.has_amount());
         if count {
@@ -445,7 +438,7 @@ pub fn get_postings<'j>(
             }
         }
     }
-    Ok(Cow::Owned(valued))
+    Ok(valued.postings().collect())
 }
 
 /// The account tree of a multi-period balance report, from its postings:
