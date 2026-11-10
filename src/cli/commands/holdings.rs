@@ -10,7 +10,6 @@
 use crate::i18n::Translations;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -853,13 +852,11 @@ fn flat_report(
     };
     let totals = grand_totals(&flat, &top_rows);
     let mut styles = flat.styles.clone();
-    styles.entry(Sym::from("%")).or_insert_with(|| {
-        Arc::new(AmountStyle {
-            side: Side::R,
-            precision: Precision::Fixed(1),
-            rounding: Rounding::Hard,
-            ..AmountStyle::default()
-        })
+    styles.entry(Sym::from("%")).or_insert_with(|| AmountStyle {
+        side: Side::R,
+        precision: Precision::Fixed(1),
+        rounding: Rounding::Hard,
+        ..AmountStyle::default()
     });
     if let Some(e) = flat.error.borrow_mut().take() {
         return Err(e);

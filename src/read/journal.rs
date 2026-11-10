@@ -42,7 +42,7 @@ pub struct ParseState {
     /// The year of dates written without one (Y), initially this year.
     pub year: Option<i64>,
     /// The commodity of amounts written without one, and its style (D).
-    pub default_commodity: Option<(Sym, Arc<AmountStyle>)>,
+    pub default_commodity: Option<(Sym, AmountStyle)>,
     /// The decimal mark numbers must use (decimal-mark).
     pub decimal_mark: Option<char>,
     /// The parent accounts from apply account, outermost first.
@@ -299,7 +299,7 @@ struct JournalParser<'a, 's> {
     iopts: &'s InputOpts,
     /// A known position: offset, line, and the offset of that line's start.
     anchor: (usize, usize, usize),
-    /// The account names, commodity symbols and amount styles read so far.
+    /// The account names and commodity symbols read so far.
     interned: RefCell<Interned>,
 }
 
@@ -915,7 +915,7 @@ impl<'a> JournalParser<'a, '_> {
                 }
                 self.add_commodity(Commodity {
                     symbol: a.commodity.clone(),
-                    format: Some((*a.style).clone()),
+                    format: Some(a.style),
                     comment,
                     tags,
                     aliases: aliases.into_iter().map(|a| (a, pos.clone())).collect(),
@@ -980,7 +980,7 @@ impl<'a> JournalParser<'a, '_> {
         if a.style.decimal_mark.is_none() {
             return Err(please_include_decimal_point(&self.c, off));
         }
-        Ok((*a.style).clone())
+        Ok(a.style)
     }
 
     /// Add a commodity declaration; a commodity declared again adds to its

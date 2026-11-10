@@ -7,23 +7,21 @@
 //! the cursor where it started, so its caller can treat the part as absent;
 //! errors are reported as megaparsec reports them where hledger's tests look.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::account::AccountAlias;
-use crate::amount::AmountStyle;
 use crate::dates::{Day, is_date_sep_char};
 use crate::model::{Status, Tag};
 use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space};
 use crate::regex::to_regex_ci;
 use crate::text::is_space;
 
-/// The account names, commodity symbols and amount styles read so far, each
-/// kept once: a journal repeats a few of each many times.
+/// The account names and commodity symbols read so far, each kept once: a
+/// journal repeats a few of each many times.
 #[derive(Debug, Default)]
 pub struct Interned {
     names: HashSet<Arc<str>>,
-    styles: BTreeSet<Arc<AmountStyle>>,
 }
 
 impl Interned {
@@ -35,18 +33,6 @@ impl Interned {
                 let name: Arc<str> = Arc::from(s);
                 self.names.insert(name.clone());
                 name
-            }
-        }
-    }
-
-    /// The shared copy of an amount style.
-    pub fn style(&mut self, style: AmountStyle) -> Arc<AmountStyle> {
-        match self.styles.get(&style) {
-            Some(s) => s.clone(),
-            None => {
-                let s = Arc::new(style);
-                self.styles.insert(s.clone());
-                s
             }
         }
     }

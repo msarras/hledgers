@@ -1950,12 +1950,12 @@ impl CsvRules {
         }
         let part = Amount {
             quantity: Decimal::new(mantissa, places),
-            style: Arc::new(AmountStyle {
+            style: AmountStyle {
                 digit_groups: None,
                 decimal_mark: Some(decimal_mark.unwrap_or('.')),
                 precision: Precision::Fixed(places),
-                ..(*amount.style).clone()
-            }),
+                ..amount.style
+            },
             ..Amount::null()
         };
         let part = Amount {

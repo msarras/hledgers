@@ -1152,7 +1152,6 @@ pub(crate) mod tests {
         AmountStyle, DigitGroups, Side, commodity_styles_from_amounts, eur, num, usd,
     };
     use crate::dates::Day;
-    use std::sync::Arc;
 
     fn d(s: &str) -> Decimal {
         s.parse().unwrap()
@@ -1277,7 +1276,7 @@ pub(crate) mod tests {
         let style = |groups: Option<DigitGroups>, mark: char, precision: u8| AmountStyle {
             side: Side::L,
             spaced: false,
-            digit_groups: groups,
+            digit_groups: groups.map(DigitGroups::intern),
             decimal_mark: Some(mark),
             precision: Precision::Fixed(precision),
             rounding: Rounding::No,
@@ -1289,17 +1288,17 @@ pub(crate) mod tests {
             })
         };
         let a1 = Amount {
-            style: Arc::new(style(None, ',', 3)),
+            style: style(None, ',', 3),
             ..num(d("1000"))
         };
         let a2 = Amount {
-            style: Arc::new(style(comma3(), '.', 2)),
+            style: style(comma3(), '.', 2),
             ..num(d("1000"))
         };
         let expected = style(comma3(), '.', 3);
         for amounts in [[a1.clone(), a2.clone()], [a2, a1]] {
             let styles = commodity_styles_from_amounts(&amounts);
-            assert_eq!(*styles[""], expected);
+            assert_eq!(styles[""], expected);
         }
     }
 

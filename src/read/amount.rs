@@ -45,12 +45,12 @@ pub struct AmountCtx<'s> {
     pub decimal_mark: Option<char>,
     /// The default commodity and its style, from the latest D directive
     /// (jparsedefaultcommodity).
-    pub default_commodity: Option<&'s (Sym, Arc<AmountStyle>)>,
+    pub default_commodity: Option<&'s (Sym, AmountStyle)>,
     /// The commodities declared so far (jdeclaredcommodities).
     pub commodities: Option<&'s BTreeMap<Sym, Commodity>>,
     /// The default year, for lot dates without one (jparsedefaultyear).
     pub year: Option<i64>,
-    /// Where to keep the symbols and styles read, if they are to be shared.
+    /// Where to keep the symbols read, if they are to be shared.
     pub interned: Option<&'s RefCell<Interned>>,
 }
 
@@ -63,21 +63,13 @@ impl AmountCtx<'_> {
         }
     }
 
-    /// An amount style, shared if styles are kept.
-    fn style(&self, style: AmountStyle) -> Arc<AmountStyle> {
-        match self.interned {
-            Some(i) => i.borrow_mut().style(style),
-            None => Arc::new(style),
-        }
-    }
-
     /// The style declared for this commodity by its commodity directive, or
     /// else by the D directive (journalAmountStyleFor).
     fn style_for(&self, commodity: &str) -> Option<&AmountStyle> {
         self.commodities
             .and_then(|cs| cs.get(commodity))
             .and_then(|c| c.format.as_ref())
-            .or(self.default_commodity.map(|(_, s)| &**s))
+            .or(self.default_commodity.map(|(_, s)| s))
     }
 
     /// How to read an ambiguous number in this commodity: by the declared
@@ -540,14 +532,14 @@ fn left_symbol_amountp(c: &mut Cursor, ctx: &AmountCtx, kind: AmountKind) -> PRe
     Ok(Amount {
         commodity: ctx.symbol(commodity),
         quantity: if negative { -q } else { q },
-        style: ctx.style(AmountStyle {
+        style: AmountStyle {
             side: Side::L,
             spaced,
-            digit_groups: groups,
+            digit_groups: groups.map(DigitGroups::intern),
             decimal_mark: mark,
             precision: Precision::Fixed(precision),
             ..AmountStyle::default()
-        }),
+        },
         ..Amount::null()
     })
 }
@@ -602,14 +594,14 @@ fn right_or_no_symbol_amountp(
             Ok(Amount {
                 commodity: ctx.symbol(commodity),
                 quantity: q,
-                style: ctx.style(AmountStyle {
+                style: AmountStyle {
                     side: Side::R,
                     spaced,
-                    digit_groups: groups,
+                    digit_groups: groups.map(DigitGroups::intern),
                     decimal_mark: mark,
                     precision: Precision::Fixed(precision),
                     ..AmountStyle::default()
-                }),
+                },
                 ..Amount::null()
             })
         }
@@ -618,12 +610,12 @@ fn right_or_no_symbol_amountp(
             let style = AmountStyle {
                 precision: Precision::Fixed(precision),
                 decimal_mark: mark,
-                digit_groups: groups,
+                digit_groups: groups.map(DigitGroups::intern),
                 ..AmountStyle::default()
             };
             let a = Amount {
                 quantity: q,
-                style: ctx.style(style),
+                style,
                 ..Amount::null()
             };
             Ok(if kind == AmountKind::Multiplier {
@@ -662,12 +654,12 @@ fn with_default_commodity(ctx: &AmountCtx, a: Amount) -> Amount {
     match ctx.default_commodity {
         Some((commodity, style)) => Amount {
             commodity: commodity.clone(),
-            style: Arc::new(AmountStyle {
+            style: AmountStyle {
                 precision: style.precision.max(a.style.precision),
                 decimal_mark: style.decimal_mark.or(a.style.decimal_mark),
-                digit_groups: style.digit_groups.clone().or(a.style.digit_groups.clone()),
-                ..(**style).clone()
-            }),
+                digit_groups: style.digit_groups.or(a.style.digit_groups),
+                ..*style
+            },
             ..a
         },
         None => a,
@@ -812,10 +804,10 @@ fn add_amounts(
     };
     Ok(Amount {
         quantity,
-        style: Arc::new(AmountStyle {
+        style: AmountStyle {
             precision,
-            ..(*base.style).clone()
-        }),
+            ..base.style
+        },
         ..base
     })
 }
@@ -1128,12 +1120,12 @@ pub(crate) mod tests {
         s.parse().unwrap()
     }
 
-    fn style(precision: u8, decimal_mark: Option<char>) -> Arc<AmountStyle> {
-        Arc::new(AmountStyle {
+    fn style(precision: u8, decimal_mark: Option<char>) -> AmountStyle {
+        AmountStyle {
             precision: Precision::Fixed(precision),
             decimal_mark,
             ..AmountStyle::default()
-        })
+        }
     }
 
     fn amount(s: &str) -> Result<Amount, String> {
@@ -1270,7 +1262,7 @@ pub(crate) mod tests {
         );
         assert_eq!(&*expr("10 EUR/ + 2 EUR/").unwrap().commodity, "EUR/");
         err("($1 + $2", "closing parenthesis");
-        let d = (Sym::from("$"), Arc::new(AmountStyle::default()));
+        let d = (Sym::from("$"), AmountStyle::default());
         let ctx = AmountCtx {
             default_commodity: Some(&d),
             ..AmountCtx::default()

@@ -7,7 +7,6 @@
 //! lots, and the lot checks only when lots are not ignored.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use super::InputOpts;
 use super::journal::ParseState;
@@ -193,7 +192,7 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
             .flat_map(|p| {
                 let explicit = p.is_explicit_amount();
                 (p.amount.amounts_raw().iter().rev())
-                    .map(move |a| (a, &*a.commodity, &*a.style, explicit))
+                    .map(move |a| (a, &*a.commodity, &a.style, explicit))
             })
             .collect::<Vec<_>>()
     });
@@ -206,7 +205,7 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
     }
     let default_amount = j.default_commodity.as_ref().map(|(c, s)| Amount {
         commodity: c.clone(),
-        style: s.clone(),
+        style: *s,
         ..Amount::null()
     });
     let directive_amounts: Vec<&Amount> = default_amount
@@ -219,10 +218,10 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
     }
     for (c, s) in all {
         let s = match explicit.get(&c) {
-            Some(e) if e.precision != s.precision => Arc::new(crate::amount::AmountStyle {
+            Some(e) if e.precision != s.precision => crate::amount::AmountStyle {
                 precision: e.precision,
-                ..(*s).clone()
-            }),
+                ..s
+            },
             _ => s,
         };
         j.inferred_commodity_styles.insert(c, s);
@@ -319,15 +318,10 @@ pub fn convert_alias_amount(aliases: &CommodityAliases, a: &Amount) -> (Amount, 
         return (a.clone(), one);
     };
     if *q == one {
-        let style = style.as_ref().map_or_else(
-            || a.style.clone(),
-            |s| {
-                Arc::new(AmountStyle {
-                    precision: a.style.precision,
-                    ..(**s).clone()
-                })
-            },
-        );
+        let style = style.map_or(a.style, |s| AmountStyle {
+            precision: a.style.precision,
+            ..s
+        });
         let a = Amount {
             commodity: c.clone(),
             style,
@@ -344,18 +338,15 @@ pub fn convert_alias_amount(aliases: &CommodityAliases, a: &Amount) -> (Amount, 
     let exact = &converted.quantity * q == a.quantity;
     let (style, precision) = match style {
         Some(s) => match s.precision {
-            Precision::Fixed(n) => ((**s).clone(), if exact { n.max(digits) } else { n }),
-            Precision::Natural => ((**s).clone(), digits.min(DEFAULT_MAX_DISPLAY_PRECISION)),
+            Precision::Fixed(n) => (*s, if exact { n.max(digits) } else { n }),
+            Precision::Natural => (*s, digits.min(DEFAULT_MAX_DISPLAY_PRECISION)),
         },
-        None => (
-            (*a.style).clone(),
-            digits.min(DEFAULT_MAX_DISPLAY_PRECISION),
-        ),
+        None => (a.style, digits.min(DEFAULT_MAX_DISPLAY_PRECISION)),
     };
-    let style = Arc::new(AmountStyle {
+    let style = AmountStyle {
         precision: Precision::Fixed(precision),
         ..style
-    });
+    };
     (Amount { style, ..converted }, q.clone())
 }
 
@@ -819,7 +810,7 @@ pub fn commodity_combine(
         }
     }
     crate::model::Commodity {
-        format: c1.format.clone().or(c2.format),
+        format: c1.format.or(c2.format),
         tags,
         aliases,
         ..c1

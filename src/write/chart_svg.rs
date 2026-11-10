@@ -1907,10 +1907,10 @@ fn tick_label(unit: &Amount, decimals: usize, ticks: &[f64], t: f64) -> String {
         } else {
             Sym::from("")
         },
-        style: std::sync::Arc::new(AmountStyle {
+        style: AmountStyle {
             precision: Precision::Fixed(decimals as u8),
-            ..(*unit.style).clone()
-        }),
+            ..unit.style
+        },
         ..unit.clone()
     };
     show_value(&u, &tick_quantity(decimals, t))

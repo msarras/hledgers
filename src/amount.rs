@@ -6,11 +6,12 @@
 pub mod currency;
 pub mod render;
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::iter::Sum;
 use std::ops::{Add, Mul, Neg, Sub};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use dashu_int::IBig;
 
@@ -21,7 +22,7 @@ use crate::decimal::Decimal;
 pub type Sym = Arc<str>;
 
 /// The display style to use for each commodity.
-pub type CommodityStyles = BTreeMap<Sym, Arc<AmountStyle>>;
+pub type CommodityStyles = BTreeMap<Sym, AmountStyle>;
 
 /// Which side of the quantity a commodity symbol goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,20 +52,49 @@ pub enum Rounding {
 /// Digit group marks for the integer part of a number: the separator and the
 /// group sizes from the decimal mark leftward, the last size repeating (at
 /// least one digit each). Thousands separated by commas are `,` and `[3]`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DigitGroups {
     pub sep: char,
     pub sizes: Vec<u8>,
 }
 
+impl DigitGroups {
+    /// The one copy of these digit groups, which styles refer to. A journal
+    /// uses few kinds, each kept until the program ends; a thread looks in
+    /// the copies shared by all threads only for a kind it has not seen.
+    pub fn intern(self) -> &'static DigitGroups {
+        thread_local! {
+            static SEEN: RefCell<HashSet<&'static DigitGroups>> = RefCell::default();
+        }
+        static ALL: LazyLock<Mutex<HashSet<&'static DigitGroups>>> =
+            LazyLock::new(Default::default);
+        SEEN.with_borrow_mut(|seen| {
+            if let Some(&g) = seen.get(&self) {
+                return g;
+            }
+            let mut all = ALL.lock().unwrap();
+            let g = match all.get(&self) {
+                Some(&g) => g,
+                None => {
+                    let g: &'static DigitGroups = Box::leak(Box::new(self));
+                    all.insert(g);
+                    g
+                }
+            };
+            seen.insert(g);
+            g
+        })
+    }
+}
+
 /// How to display amounts of a commodity, as learned from the journal.
 /// `rounding` is not used for display, but says how this style's precision is
 /// applied when it is given to other amounts.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AmountStyle {
     pub side: Side,
     pub spaced: bool,
-    pub digit_groups: Option<DigitGroups>,
+    pub digit_groups: Option<&'static DigitGroups>,
     pub decimal_mark: Option<char>,
     pub precision: Precision,
     pub rounding: Rounding,
@@ -109,7 +139,7 @@ pub struct CostBasis {
 pub struct Amount {
     pub commodity: Sym,
     pub quantity: Decimal,
-    pub style: Arc<AmountStyle>,
+    pub style: AmountStyle,
     pub cost: Option<AmountCost>,
     pub cost_basis: Option<Box<CostBasis>>,
 }
@@ -118,7 +148,6 @@ pub struct Amount {
 /// of divisions that do not terminate.
 pub const DEFAULT_MAX_DISPLAY_PRECISION: u8 = 8;
 
-static DEFAULT_STYLE: LazyLock<Arc<AmountStyle>> = LazyLock::new(Default::default);
 static NO_SYMBOL: LazyLock<Sym> = LazyLock::new(|| Sym::from(""));
 
 impl Amount {
@@ -127,7 +156,7 @@ impl Amount {
         Amount {
             commodity: NO_SYMBOL.clone(),
             quantity: Decimal::ZERO,
-            style: DEFAULT_STYLE.clone(),
+            style: AmountStyle::default(),
             cost: None,
             cost_basis: None,
         }
@@ -363,7 +392,10 @@ impl Amount {
     /// With this display precision (amountSetPrecision).
     pub fn with_precision(self, precision: Precision) -> Amount {
         Amount {
-            style: style_with_precision(&self.style, precision),
+            style: AmountStyle {
+                precision,
+                ..self.style
+            },
             ..self
         }
     }
@@ -436,20 +468,9 @@ impl Amount {
     /// With the default style (amountUnstyled).
     pub fn unstyled(self) -> Amount {
         Amount {
-            style: DEFAULT_STYLE.clone(),
+            style: AmountStyle::default(),
             ..self
         }
-    }
-}
-
-fn style_with_precision(style: &Arc<AmountStyle>, precision: Precision) -> Arc<AmountStyle> {
-    if style.precision == precision {
-        style.clone()
-    } else {
-        Arc::new(AmountStyle {
-            precision,
-            ..(**style).clone()
-        })
     }
 }
 
@@ -461,10 +482,13 @@ fn style_with_precision(style: &Arc<AmountStyle>, precision: Precision) -> Arc<A
 ///   hiding non-zero digits;
 /// - Hard: for a cost, keep it; otherwise the new;
 /// - All: the new.
-fn restyle(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Arc<AmountStyle> {
+fn restyle(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> AmountStyle {
     match styles.get(&a.commodity) {
-        None => a.style.clone(),
-        Some(new) => style_with_precision(new, restyled_precision(styles, is_cost, a)),
+        None => a.style,
+        Some(new) => AmountStyle {
+            precision: restyled_precision(styles, is_cost, a),
+            ..*new
+        },
     }
 }
 
@@ -492,15 +516,7 @@ fn restyled_precision(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Pr
 pub fn styles_with_rounding(rounding: Rounding, styles: &CommodityStyles) -> CommodityStyles {
     styles
         .iter()
-        .map(|(c, s)| {
-            (
-                c.clone(),
-                Arc::new(AmountStyle {
-                    rounding,
-                    ..(**s).clone()
-                }),
-            )
-        })
+        .map(|(c, s)| (c.clone(), AmountStyle { rounding, ..*s }))
         .collect()
 }
 
@@ -508,8 +524,8 @@ pub fn styles_with_rounding(rounding: Rounding, styles: &CommodityStyles) -> Com
 /// of their digit group styles, and a decimal mark that is not the digit
 /// group mark (canonicalStyle).
 fn canonical_style(a: &AmountStyle, b: &AmountStyle) -> AmountStyle {
-    let digit_groups = a.digit_groups.clone().or_else(|| b.digit_groups.clone());
-    let default_mark = match &digit_groups {
+    let digit_groups = a.digit_groups.or(b.digit_groups);
+    let default_mark = match digit_groups {
         Some(DigitGroups { sep: '.', .. }) => ',',
         _ => '.',
     };
@@ -521,7 +537,7 @@ fn canonical_style(a: &AmountStyle, b: &AmountStyle) -> AmountStyle {
         precision: a.precision.max(b.precision),
         decimal_mark,
         digit_groups,
-        ..a.clone()
+        ..*a
     }
 }
 
@@ -533,7 +549,7 @@ pub fn add_amount_style(a: &Amount, styles: &mut CommodityStyles) {
 }
 
 /// [`add_amount_style`] given the amount's commodity symbol and style,
-/// read already; the amount itself is read only to keep its style.
+/// read already; the amount itself is read only to keep its symbol.
 pub fn add_amount_style_as(
     a: &Amount,
     commodity: &str,
@@ -542,12 +558,12 @@ pub fn add_amount_style_as(
 ) {
     match styles.get(commodity) {
         None => {
-            styles.insert(a.commodity.clone(), a.style.clone());
+            styles.insert(a.commodity.clone(), *style);
         }
         Some(old) => {
             let new = canonical_style(style, old);
-            if new != **old {
-                styles.insert(a.commodity.clone(), Arc::new(new));
+            if new != *old {
+                styles.insert(a.commodity.clone(), new);
             }
         }
     }
@@ -583,7 +599,10 @@ fn similar_amounts_op(
     Amount {
         commodity: b.commodity.clone(),
         quantity: op(&a.quantity, &b.quantity),
-        style: style_with_precision(&b.style, a.style.precision.max(b.style.precision)),
+        style: AmountStyle {
+            precision: a.style.precision.max(b.style.precision),
+            ..b.style
+        },
         cost: None,
         cost_basis: None,
     }
@@ -643,7 +662,7 @@ fn with_style(commodity: &str, quantity: Decimal, style: AmountStyle) -> Amount 
     Amount {
         commodity: Sym::from(commodity),
         quantity,
-        style: Arc::new(style),
+        style,
         ..Amount::null()
     }
 }
@@ -1491,17 +1510,20 @@ pub(crate) mod tests {
     }
 
     #[cfg(test)]
-    fn style(precision: Precision, rounding: Rounding) -> Arc<AmountStyle> {
-        Arc::new(AmountStyle {
+    fn style(precision: Precision, rounding: Rounding) -> AmountStyle {
+        AmountStyle {
             spaced: true,
-            digit_groups: Some(DigitGroups {
-                sep: ',',
-                sizes: vec![3],
-            }),
+            digit_groups: Some(
+                DigitGroups {
+                    sep: ',',
+                    sizes: vec![3],
+                }
+                .intern(),
+            ),
             precision,
             rounding,
             ..AmountStyle::default()
-        })
+        }
     }
 
     #[cfg(test)]
@@ -1576,7 +1598,7 @@ pub(crate) mod tests {
         assert!(a.style.spaced && a.style.digit_groups.is_some());
         // An amount whose commodity has no style is unchanged.
         assert_eq!(usd(d("1")).styled(&styles), usd(d("1")));
-        assert_eq!(a.unstyled().style, Arc::new(AmountStyle::default()));
+        assert_eq!(a.unstyled().style, AmountStyle::default());
         let soft = styles_with_rounding(Soft, &styles);
         assert_eq!(soft[&sym("A")].rounding, Soft);
     }
@@ -1591,14 +1613,17 @@ pub(crate) mod tests {
         };
         let amount = |s: AmountStyle| Amount {
             commodity: sym("A"),
-            style: Arc::new(s),
+            style: s,
             ..num(d("1"))
         };
         let grouped = |sep| AmountStyle {
-            digit_groups: Some(DigitGroups {
-                sep,
-                sizes: vec![3],
-            }),
+            digit_groups: Some(
+                DigitGroups {
+                    sep,
+                    sizes: vec![3],
+                }
+                .intern(),
+            ),
             ..plain(Side::R, None, 0)
         };
         // The first amount's side, the most decimal places.
@@ -1606,7 +1631,7 @@ pub(crate) mod tests {
             amount(plain(Side::L, Some(','), 1)),
             amount(plain(Side::R, Some('.'), 3)),
         ]);
-        assert_eq!(*styles[&sym("A")], plain(Side::L, Some(','), 3));
+        assert_eq!(styles[&sym("A")], plain(Side::L, Some(','), 3));
         // The first digit group style seen, and a decimal mark that differs.
         let styles = commodity_styles_from_amounts(&[
             amount(plain(Side::L, Some('.'), 2)),
@@ -1627,9 +1652,9 @@ pub(crate) mod tests {
         assert_eq!(styles[&sym("A")].decimal_mark, Some('.'));
         let mut styles = CommodityStyles::new();
         add_amount_style(&usd(d("1")), &mut styles);
-        let first = styles[&sym("$")].clone();
+        let first = styles[&sym("$")];
         add_amount_style(&usd(d("2")), &mut styles);
-        assert!(Arc::ptr_eq(&first, &styles[&sym("$")]));
+        assert_eq!(first, styles[&sym("$")]);
     }
 
     #[test]

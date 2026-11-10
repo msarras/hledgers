@@ -1457,7 +1457,7 @@ impl Converter<'_> {
         expr: bool,
     ) -> Result<Result<crate::amount::Amount, String>, String> {
         let decimal_mark = self.decimal_mark()?;
-        let parse = |default: Option<&(Sym, Arc<AmountStyle>)>| {
+        let parse = |default: Option<&(Sym, AmountStyle)>| {
             parse_csv_amount(text, expr, decimal_mark, default)
         };
         if currency.is_empty() {
@@ -1524,17 +1524,14 @@ impl Converter<'_> {
 /// A currency rule's value as a default commodity and style: an amount such
 /// as `1 USD` or `USD 1`, or a commodity symbol, placed on the left with no
 /// space (parseCurrency).
-pub fn parse_currency(
-    currency: &str,
-    decimal_mark: Option<char>,
-) -> Option<(Sym, Arc<AmountStyle>)> {
+pub fn parse_currency(currency: &str, decimal_mark: Option<char>) -> Option<(Sym, AmountStyle)> {
     let as_default = |t: &str| {
         let ctx = AmountCtx {
             decimal_mark,
             ..AmountCtx::default()
         };
         match run_parser(t, |c| amountp(c, &ctx, AmountKind::Style)) {
-            Ok(a) if !a.commodity.is_empty() => Some((a.commodity.clone(), a.style.clone())),
+            Ok(a) if !a.commodity.is_empty() => Some((a.commodity.clone(), a.style)),
             _ => None,
         }
     };
@@ -1548,7 +1545,7 @@ pub fn parse_csv_amount(
     text: &str,
     expr: bool,
     decimal_mark: Option<char>,
-    default: Option<&(Sym, Arc<AmountStyle>)>,
+    default: Option<&(Sym, AmountStyle)>,
 ) -> Result<crate::amount::Amount, String> {
     let ctx = AmountCtx {
         decimal_mark,

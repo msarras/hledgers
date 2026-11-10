@@ -685,7 +685,7 @@ fn pivot_component(name: &str, t: &Transaction, p: &Posting) -> String {
 /// Each commodity alias, with its commodity, the number of alias units in
 /// one unit of the commodity, and the commodity's style if known
 /// (CommodityAliases).
-pub type CommodityAliases = BTreeMap<Sym, (Sym, Decimal, Option<Arc<AmountStyle>>)>;
+pub type CommodityAliases = BTreeMap<Sym, (Sym, Decimal, Option<AmountStyle>)>;
 
 /// A journal: what was read from one or more files, finalised.
 #[derive(Clone, Debug, Default)]
@@ -714,7 +714,7 @@ pub struct Journal {
     /// The default commodity and style of the D directive in effect at the
     /// end of parsing (jparsedefaultcommodity), whose style counts as a
     /// declared one.
-    pub default_commodity: Option<(Sym, Arc<AmountStyle>)>,
+    pub default_commodity: Option<(Sym, AmountStyle)>,
     /// The decimal mark and the default year in effect at the end of
     /// parsing (jparsedecimalmark, jparsedefaultyear), which add's amounts
     /// are read with.
@@ -795,14 +795,12 @@ impl Journal {
     pub fn commodity_styles(&self) -> CommodityStyles {
         let mut explicit = self.global_commodity_styles.clone();
         for (sym, c) in &self.declared_commodities {
-            if let Some(s) = &c.format {
-                explicit
-                    .entry(sym.clone())
-                    .or_insert_with(|| Arc::new(s.clone()));
+            if let Some(s) = c.format {
+                explicit.entry(sym.clone()).or_insert(s);
             }
         }
         if let Some((sym, s)) = &self.default_commodity {
-            explicit.entry(sym.clone()).or_insert_with(|| s.clone());
+            explicit.entry(sym.clone()).or_insert(*s);
         }
         let inferred = &self.inferred_commodity_styles;
         let mut styles = explicit.clone();
@@ -812,17 +810,15 @@ impl Journal {
             };
             for (a, _) in &c.aliases {
                 let pst = inferred.get(&a.commodity).unwrap_or(cst);
-                styles.entry(a.commodity.clone()).or_insert_with(|| {
-                    Arc::new(AmountStyle {
-                        side: pst.side,
-                        spaced: pst.spaced,
-                        ..(**cst).clone()
-                    })
+                styles.entry(a.commodity.clone()).or_insert(AmountStyle {
+                    side: pst.side,
+                    spaced: pst.spaced,
+                    ..*cst
                 });
             }
         }
         for (k, v) in inferred {
-            styles.entry(k.clone()).or_insert_with(|| v.clone());
+            styles.entry(k.clone()).or_insert(*v);
         }
         styles
     }

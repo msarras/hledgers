@@ -202,7 +202,7 @@ impl TimedotParser<'_, '_> {
                 c.clone(),
                 AmountStyle {
                     precision: s.precision.max(Precision::Fixed(2)),
-                    ..(**s).clone()
+                    ..*s
                 },
             ),
             None => (
@@ -213,7 +213,6 @@ impl TimedotParser<'_, '_> {
                 },
             ),
         };
-        let style = Arc::new(style);
         let postings = durations
             .into_iter()
             .map(|(hours, letter)| {
@@ -230,7 +229,7 @@ impl TimedotParser<'_, '_> {
                     amount: MixedAmount::from_amount(Amount {
                         commodity: commodity.clone(),
                         quantity: hours,
-                        style: style.clone(),
+                        style,
                         ..Amount::null()
                     }),
                     realness: Realness::Virtual,

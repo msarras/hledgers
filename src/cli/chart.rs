@@ -62,7 +62,7 @@ pub fn parse_chart_arg(
                 c.clone(),
                 Commodity {
                     symbol: c.clone(),
-                    format: Some(st.clone()),
+                    format: Some(*st),
                     comment: String::new(),
                     tags: Vec::new(),
                     aliases: Vec::new(),
@@ -182,7 +182,7 @@ pub fn render_chart(
     report_html: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
     let styles: BTreeMap<Sym, AmountStyle> = (chart.panels.iter())
-        .map(|p| (p.unit.commodity.clone(), (*p.unit.style).clone()))
+        .map(|p| (p.unit.commodity.clone(), p.unit.style))
         .collect();
     let (kind, scales) = (opts.raw.string("chart"))
         .and_then(|s| parse_chart_arg(&styles, s).ok())
@@ -1047,7 +1047,7 @@ fn row_summaries<N>(
     let amount_in = |m: &MixedAmount| match m.amounts_raw().iter().find(|a| &a.commodity == c) {
         Some(a) => Amount {
             quantity: quantity_in(c, m),
-            style: a.style.clone(),
+            style: a.style,
             ..unit.clone()
         },
         None => unit.clone(),

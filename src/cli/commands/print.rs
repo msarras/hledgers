@@ -376,9 +376,7 @@ fn entries_report_as_sql(txns: &[Transaction]) -> String {
         for p in &mut t.postings {
             p.amount = p.amount.map(|a| {
                 let mut a = a.clone();
-                let mut style = (*a.style).clone();
-                style.decimal_mark = Some('.');
-                a.style = style.into();
+                a.style.decimal_mark = Some('.');
                 a
             });
         }

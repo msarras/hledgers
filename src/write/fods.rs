@@ -88,11 +88,7 @@ fn commodity_style(a: &Amount) -> CommodityStyle {
             Precision::Fixed(n) => PrecisionKey::Fixed(n),
             Precision::Natural => PrecisionKey::Natural,
         },
-        grouping: a
-            .style
-            .digit_groups
-            .as_ref()
-            .is_some_and(|g| !g.sizes.is_empty()),
+        grouping: a.style.digit_groups.is_some_and(|g| !g.sizes.is_empty()),
     }
 }
 

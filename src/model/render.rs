@@ -485,10 +485,10 @@ fn amount_integer_width(fmt: &AmountFormat, a: &Amount) -> usize {
     let sign_lost = a.quantity.is_negative() && truncated.is_zero() && shows_fraction;
     let int_amount = Amount {
         quantity: truncated,
-        style: std::sync::Arc::new(crate::amount::AmountStyle {
+        style: crate::amount::AmountStyle {
             precision: Precision::Fixed(0),
-            ..(*a.style).clone()
-        }),
+            ..a.style
+        },
         ..a.clone()
     };
     let quantity_width = show_amount_quantity(false, &int_amount).width + usize::from(sign_lost);

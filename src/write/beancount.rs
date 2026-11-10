@@ -592,10 +592,8 @@ fn to_title(c: char) -> String {
 fn amount_to_beancount(a: &Amount) -> Amount {
     let mut b = a.clone();
     b.commodity = commodity_to_beancount(&a.commodity).into();
-    let mut style = (*a.style).clone();
-    style.side = Side::R;
-    style.spaced = true;
-    b.style = style.into();
+    b.style.side = Side::R;
+    b.style.spaced = true;
     b.cost = a.cost.as_ref().map(|c| match c {
         AmountCost::Unit(c) => AmountCost::Unit(Box::new(amount_to_beancount(c))),
         AmountCost::Total(c) => AmountCost::Total(Box::new(amount_to_beancount(c))),

@@ -222,7 +222,7 @@ impl ToJson for AmountStyle {
                 Side::R => "R",
             },
             "ascommodityspaced": self.spaced,
-            "asdigitgroups": self.digit_groups.as_ref().map(|g| json!([g.sep.to_string(), g.sizes])),
+            "asdigitgroups": self.digit_groups.map(|g| json!([g.sep.to_string(), g.sizes])),
             "asdecimalmark": self.decimal_mark.map(|c| c.to_string()),
             "asprecision": match self.precision {
                 Precision::Fixed(n) => Some(n),

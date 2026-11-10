@@ -121,7 +121,7 @@ pub fn show_amount_b(fmt: &AmountFormat, a: &Amount) -> Wide {
         } else {
             a.commodity.to_string()
         };
-        let groups = a.style.digit_groups.as_ref().filter(|_| fmt.digit_groups);
+        let groups = a.style.digit_groups.filter(|_| fmt.digit_groups);
         (quantity_b(fmt.force_decimal_mark, a, groups), commodity)
     };
     let space = !commodity.is_empty() && a.style.spaced;
@@ -168,7 +168,7 @@ pub fn show_amount_b(fmt: &AmountFormat, a: &Amount) -> Wide {
 /// digit group marks and no decimals gets a trailing decimal mark
 /// (showAmountQuantity).
 pub fn show_amount_quantity(disambiguate: bool, a: &Amount) -> Wide {
-    quantity_b(disambiguate, a, a.style.digit_groups.as_ref())
+    quantity_b(disambiguate, a, a.style.digit_groups)
 }
 
 fn quantity_b(disambiguate: bool, a: &Amount, groups: Option<&DigitGroups>) -> Wide {
@@ -663,17 +663,20 @@ pub(crate) mod tests {
     fn styled(q: &str, style: AmountStyle) -> Amount {
         Amount {
             commodity: Sym::from("X"),
-            style: Arc::new(style),
+            style,
             ..num(q.parse().unwrap())
         }
     }
 
     #[cfg(test)]
-    fn groups(sep: char, sizes: &[u8]) -> Option<DigitGroups> {
-        Some(DigitGroups {
-            sep,
-            sizes: sizes.to_vec(),
-        })
+    fn groups(sep: char, sizes: &[u8]) -> Option<&'static DigitGroups> {
+        Some(
+            DigitGroups {
+                sep,
+                sizes: sizes.to_vec(),
+            }
+            .intern(),
+        )
     }
 
     #[cfg(test)]
@@ -805,7 +808,7 @@ pub(crate) mod tests {
             precision: Precision::Natural,
             ..style(0)
         };
-        assert_eq!(show("1.50", natural.clone()), "X1.50");
+        assert_eq!(show("1.50", natural), "X1.50");
         let comma = AmountStyle {
             decimal_mark: Some(','),
             ..style(2)
@@ -887,10 +890,10 @@ pub(crate) mod tests {
         assert_eq!(show_amount(&hrs(d("1.5"))), "1.50h");
         let spaced = |c: &str| Amount {
             commodity: Sym::from(c),
-            style: Arc::new(AmountStyle {
+            style: AmountStyle {
                 spaced: true,
                 ..style(0)
-            }),
+            },
             ..num(d("3"))
         };
         assert_eq!(show_amount(&spaced("AAPL")), "AAPL 3");

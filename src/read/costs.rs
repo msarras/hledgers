@@ -342,7 +342,7 @@ pub fn transaction_infer_equity_postings(
                         };
                         Amount {
                             quantity: a.quantity.round_to(places),
-                            style: s.clone(),
+                            style: *s,
                             ..a.clone()
                         }
                     }

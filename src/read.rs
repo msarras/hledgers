@@ -19,7 +19,6 @@ pub mod timeclock;
 pub mod timedot;
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use crate::amount::render::show_amount;
 use crate::amount::{Amount, AmountStyle, CommodityStyles, Rounding, Sym};
@@ -257,7 +256,7 @@ fn commodity_style_conflicts(journals: &[Journal]) -> Vec<String> {
         }
     }
     let unrounded = |c: &Commodity| {
-        c.format.clone().map(|st| AmountStyle {
+        c.format.map(|st| AmountStyle {
             rounding: Rounding::No,
             ..st
         })
@@ -273,7 +272,7 @@ fn commodity_style_conflicts(journals: &[Journal]) -> Vec<String> {
                 let a = Amount {
                     commodity: Sym::from(sym),
                     quantity: Decimal::from_i64(1000),
-                    style: Arc::new(c.format.clone().unwrap_or_default()),
+                    style: c.format.unwrap_or_default(),
                     ..Amount::null()
                 };
                 lines.push(format!(
