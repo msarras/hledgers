@@ -3,6 +3,8 @@
 //! options, as [`Wide`] text that knows its width.
 
 use super::{Amount, AmountCost, CostBasis, DigitGroups, MixedAmount, Precision, Side, Sym};
+use std::borrow::Cow;
+
 use crate::text::Wide;
 
 /// Options for rendering amounts, which can override their styles. The
@@ -514,10 +516,12 @@ fn show_one_line(fmt: &AmountFormat, m: &MixedAmount) -> Wide {
 /// zeros for commodities not present (orderedAmounts, whose `if` takes the
 /// ordering into its `else` branch).
 fn ordered_amounts(fmt: &AmountFormat, m: &MixedAmount) -> Vec<Amount> {
-    let m = if fmt.cost {
-        m.clone()
+    // stripping costs changes nothing when there are none, the usual case
+    let costless = |a: &Amount| a.cost.is_none() && a.cost_basis.is_none();
+    let m = if fmt.cost || m.amounts_raw().iter().all(costless) {
+        Cow::Borrowed(m)
     } else {
-        m.clone().strip_costs()
+        Cow::Owned(m.clone().strip_costs())
     };
     if fmt.zero_commodity {
         return m.amounts_preserving_zeros();

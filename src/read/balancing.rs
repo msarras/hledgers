@@ -151,7 +151,7 @@ pub fn transaction_check_balanced(bopts: &BalancingOpts, t: &Transaction) -> Vec
     let balancing = |p: &Posting| posting_balancing_amount(set_aside(p), p);
     let local_styles = OnceCell::new();
     let looks_zero_globally = |a: &MixedAmount| match &bopts.commodity_styles {
-        Some(styles) => a.clone().styled(styles).looks_zero(),
+        Some(styles) => a.looks_zero_styled(styles),
         None => a.looks_zero(),
     };
     let looks_zero = |a: &MixedAmount| {
@@ -161,7 +161,7 @@ pub fn transaction_check_balanced(bopts: &BalancingOpts, t: &Transaction) -> Vec
             } else {
                 let styles = local_styles
                     .get_or_init(|| styles_with_rounding(Rounding::Hard, &t.commodity_styles()));
-                a.clone().styled(styles).looks_zero()
+                a.looks_zero_styled(styles)
             }
     };
     let signs_ok = |ps: &[&Posting]| {
@@ -457,7 +457,7 @@ fn infer_balancing_amount(
             } else {
                 p.amount.clone().to_cost()
             };
-            sums[i] = &sums[i] + &a;
+            sums[i] = std::mem::take(&mut sums[i]) + a;
         } else {
             amountless[i] += 1;
         }
@@ -480,8 +480,9 @@ fn infer_balancing_amount(
             continue;
         }
         let a = match p.realness {
-            Realness::Real => sums[0].clone(),
-            Realness::BalancedVirtual => sums[1].clone(),
+            // at most one posting of each kind has no amount
+            Realness::Real => std::mem::take(&mut sums[0]),
+            Realness::BalancedVirtual => std::mem::take(&mut sums[1]),
             Realness::Virtual => MixedAmount::from_amount(Amount::null()),
         };
         let a = (-a).to_cost();

@@ -229,16 +229,29 @@ impl Amount {
     /// Whether the quantity, and any total cost, shows as zero at its display
     /// precision (amountLooksZero).
     pub fn looks_zero(&self) -> bool {
-        self.and_total_cost(|a| {
-            let q = &a.quantity;
-            match a.style.precision {
-                // Half-even rounding takes half a unit of the last shown digit to zero.
-                Precision::Fixed(d) if q.places() > d => {
-                    q.abs() <= Decimal::new(IBig::from(5), d + 1)
-                }
-                _ => q.is_zero(),
+        self.and_total_cost(|a| a.quantity_looks_zero_at(a.style.precision))
+    }
+
+    /// Whether it would look zero with these styles: what
+    /// `styled(styles).looks_zero()` says, without the styled copy.
+    pub fn looks_zero_styled(&self, styles: &CommodityStyles) -> bool {
+        let main = self.quantity_looks_zero_at(restyled_precision(styles, false, self));
+        match &self.cost {
+            Some(AmountCost::Total(c)) => {
+                main && c.quantity_looks_zero_at(restyled_precision(styles, true, c))
             }
-        })
+            _ => main,
+        }
+    }
+
+    /// Whether the quantity shows as zero at this display precision.
+    fn quantity_looks_zero_at(&self, precision: Precision) -> bool {
+        let q = &self.quantity;
+        match precision {
+            // Half-even rounding takes half a unit of the last shown digit to zero.
+            Precision::Fixed(d) if q.places() > d => q.abs() <= Decimal::new(IBig::from(5), d + 1),
+            _ => q.is_zero(),
+        }
     }
 
     fn and_total_cost(&self, test: impl Fn(&Amount) -> bool) -> bool {
@@ -449,11 +462,19 @@ fn style_with_precision(style: &Arc<AmountStyle>, precision: Precision) -> Arc<A
 /// - Hard: for a cost, keep it; otherwise the new;
 /// - All: the new.
 fn restyle(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Arc<AmountStyle> {
+    match styles.get(&a.commodity) {
+        None => a.style.clone(),
+        Some(new) => style_with_precision(new, restyled_precision(styles, is_cost, a)),
+    }
+}
+
+/// The precision of an amount's new style (see [`restyle`]).
+fn restyled_precision(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Precision {
     let Some(new) = styles.get(&a.commodity) else {
-        return a.style.clone();
+        return a.style.precision;
     };
     let old = a.style.precision;
-    let precision = match new.rounding {
+    match new.rounding {
         Rounding::No => old,
         Rounding::Soft | Rounding::Hard if is_cost => old,
         Rounding::Soft => match (new.precision, old) {
@@ -464,8 +485,7 @@ fn restyle(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Arc<AmountSty
             _ => Precision::Natural,
         },
         Rounding::Hard | Rounding::All => new.precision,
-    };
-    style_with_precision(new, precision)
+    }
 }
 
 /// These styles with this rounding strategy (amountStylesSetRounding).
@@ -968,6 +988,12 @@ impl MixedAmount {
     /// Whether every amount shows as zero (mixedAmountLooksZero).
     pub fn looks_zero(&self) -> bool {
         self.0.iter().all(Amount::looks_zero)
+    }
+
+    /// Whether every amount would show as zero with these styles: what
+    /// `styled(styles).looks_zero()` says, without the styled copy.
+    pub fn looks_zero_styled(&self, styles: &CommodityStyles) -> bool {
+        self.0.iter().all(|a| a.looks_zero_styled(styles))
     }
 
     /// With the quantities' absolute values.
