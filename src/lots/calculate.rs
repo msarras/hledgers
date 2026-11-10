@@ -19,8 +19,7 @@ use super::{
     is_transfer_from_posting, is_transfer_to_posting, is_unclassified_lotful_posting,
     lot_costs_match, lot_direction_or_long, merge_cost_basis_for_method, posting_at_err_prefix,
     posting_err_prefix, resolve_reduction_method, show_lot_name, show_lot_name_for_method,
-    style_lot_cb_cost, transaction_has_lotful_amounts, txn_err_prefix, unclassified_lot_warning,
-    widen_lot_cb_cost,
+    style_lot_cb_cost, txn_err_prefix, unclassified_lot_warning, widen_lot_cb_cost,
 };
 use crate::account::{
     AccountName, AccountType, DEFAULT_GAIN_ACCOUNT, account_name_type, lot_base_account,
@@ -190,12 +189,13 @@ fn method_declaration(j: &Journal, acct: &str, c: &Sym) -> Option<crate::model::
 /// Calculate the lots: walk the transactions in date order, processing
 /// their acquire, dispose and transfer postings, which get lot subaccounts
 /// (journalCalculateLots). `tied` has the classified postings of each
-/// transaction that could involve lots, as error messages find postings.
-/// The transactions end up in date order.
+/// transaction that could involve lots, as error messages find postings;
+/// the others, with none, are left as they are. The transactions end up in
+/// date order.
 pub fn journal_calculate_lots(
     verbose: bool,
     mut j: Journal,
-    tied: Vec<Option<Vec<Posting>>>,
+    mut tied: Vec<Option<Vec<Posting>>>,
 ) -> Result<Journal, String> {
     let txns = std::mem::take(&mut j.txns);
     if !txns.iter().any(|t| t.postings.iter().any(is_lot_posting)) {
@@ -213,7 +213,6 @@ pub fn journal_calculate_lots(
         return Ok(j);
     }
     validate_user_labels(&txns)?;
-    let lotful = j.lotful_commodities();
     let calc = Calc {
         j: &j,
         styles: styles_with_rounding(Rounding::No, &j.commodity_styles()),
@@ -228,16 +227,12 @@ pub fn journal_calculate_lots(
     let mut out = Vec::with_capacity(txns.len());
     for i in order {
         let t = txns[i].take().expect("each transaction once");
-        if !transaction_has_lotful_amounts(&lotful, &t) {
+        let Some(postings) = tied.get_mut(i).and_then(Option::take) else {
             out.push(t);
             continue;
-        }
+        };
         let tied = Transaction {
-            postings: tied
-                .get(i)
-                .cloned()
-                .flatten()
-                .unwrap_or_else(|| t.postings.clone()),
+            postings,
             ..t.clone()
         };
         let t2 = calc

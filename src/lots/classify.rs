@@ -818,6 +818,15 @@ pub fn journal_classify_lot_postings(
 pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
     let mut txns = std::mem::take(&mut j.txns);
     for t in &mut txns {
+        // only an amount with a basis cost and no transacted cost gets one
+        if !t
+            .postings
+            .iter()
+            .flat_map(|p| p.amount.amounts_raw())
+            .any(|a| a.cost.is_none() && has_basis_cost(a))
+        {
+            continue;
+        }
         let is_equity = |a: &str| {
             j.account_type(a)
                 .is_some_and(|ty| ty.is_subtype_of(AccountType::Equity))
@@ -832,7 +841,7 @@ pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
             .map(|p| {
                 let dir = lot_direction(&j, &p.account).unwrap_or(LotDirection::Long);
                 let needs = |a: &Amount| {
-                    a.cost_basis.as_ref().is_some_and(|cb| cb.cost.is_some())
+                    has_basis_cost(a)
                         && a.cost.is_none()
                         && dir.is_inflow(a)
                         && !has_transfer_from_counterpart(t, p, a)
@@ -859,6 +868,11 @@ pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
     }
     j.txns = txns;
     j
+}
+
+/// Has this amount a cost basis with a cost?
+fn has_basis_cost(a: &Amount) -> bool {
+    a.cost_basis.as_ref().is_some_and(|cb| cb.cost.is_some())
 }
 
 /// Has another posting an explicit negative amount of this commodity and
@@ -908,6 +922,15 @@ pub fn journal_check_acquire_basis(mut j: Journal) -> Result<Journal, String> {
     for t in &mut txns {
         for idx in 0..t.postings.len() {
             let p = &t.postings[idx];
+            // only an amount with a basis cost and a transacted cost is checked
+            if !p
+                .amount
+                .amounts_raw()
+                .iter()
+                .any(|a| a.cost.is_some() && has_basis_cost(a))
+            {
+                continue;
+            }
             let Some(dir) = lot_direction(&j, &p.account).filter(|_| p.is_real()) else {
                 continue;
             };
