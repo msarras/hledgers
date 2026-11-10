@@ -98,18 +98,24 @@ impl ReductionMethod {
     /// space (parseReductionMethod).
     pub fn parse(v: &str) -> Option<ReductionMethod> {
         use ReductionMethod::*;
-        Some(match v.trim().to_uppercase().as_str() {
-            "FIFO" => Fifo,
-            "LIFO" => Lifo,
-            "HIFO" => Hifo,
-            "AVERAGE" => Average,
-            "SPECID" => Specid,
-            "FIFOALL" => FifoAll,
-            "LIFOALL" => LifoAll,
-            "HIFOALL" => HifoAll,
-            "AVERAGEALL" => AverageAll,
-            _ => return None,
-        })
+        Some(
+            match v
+                .trim_matches(crate::text::is_space)
+                .to_uppercase()
+                .as_str()
+            {
+                "FIFO" => Fifo,
+                "LIFO" => Lifo,
+                "HIFO" => Hifo,
+                "AVERAGE" => Average,
+                "SPECID" => Specid,
+                "FIFOALL" => FifoAll,
+                "LIFOALL" => LifoAll,
+                "HIFOALL" => HifoAll,
+                "AVERAGEALL" => AverageAll,
+                _ => return None,
+            },
+        )
     }
 
     /// Whether disposals use the pool's weighted average cost
@@ -226,7 +232,7 @@ impl LotLookups<'_> {
 
 /// Is this lots: tag value NONE, ignoring case (isNoneLotsTagValue)?
 pub fn is_none_lots_tag_value(v: &str) -> bool {
-    v.trim().to_uppercase() == "NONE"
+    v.trim_matches(crate::text::is_space).to_uppercase() == "NONE"
 }
 
 /// The first lots: tag value among these tags, ignoring the name's case.
@@ -425,7 +431,7 @@ pub fn parse_lot_name(
     let Some(inner) = t.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
         return Err(format!("lot name must be enclosed in braces: {t}"));
     };
-    let inner = inner.trim();
+    let inner = inner.trim_matches(crate::text::is_space);
     let mut cb = CostBasis::default();
     if inner.is_empty() {
         return Ok(cb);
@@ -481,7 +487,7 @@ fn missing_date_comma_hint(p: &str) -> Option<String> {
         return None;
     }
     let (candidate, rest) = split_chars(p, 10);
-    let rest = rest.trim_start();
+    let rest = rest.trim_start_matches(crate::text::is_space);
     (is_date_part(candidate) && !rest.is_empty() && !rest.starts_with(',')).then(|| {
         format!("Missing comma in lot name: {p}\nDid you mean:              {candidate}, {rest} ?")
     })
@@ -494,7 +500,7 @@ fn wrong_order_hint(t: &str, p: &str) -> Option<String> {
     let after_commas = p
         .char_indices()
         .filter(|(_, c)| *c == ',')
-        .map(|(i, _)| p[i + 1..].trim_start());
+        .map(|(i, _)| p[i + 1..].trim_start_matches(crate::text::is_space));
     (is_date_part(split_chars(p, 10).0) || after_commas.into_iter().any(starts_another)).then(
         || {
             format!(
@@ -509,15 +515,16 @@ fn wrong_order_hint(t: &str, p: &str) -> Option<String> {
 /// comma, or a quoted commodity symbol) don't split it (splitParts).
 fn split_lot_name_parts(s: &str) -> Vec<&str> {
     fn strip_sep(s: &str) -> &str {
-        let s = s.trim_start();
-        s.strip_prefix(',').map_or(s, str::trim_start)
+        let s = s.trim_start_matches(crate::text::is_space);
+        s.strip_prefix(',')
+            .map_or(s, |s| s.trim_start_matches(crate::text::is_space))
     }
     let mut parts = Vec::new();
     let mut rest = s;
     // a date, followed by the end or a comma
     if rest.chars().count() >= 10 {
         let (candidate, after) = split_chars(rest, 10);
-        let after_trimmed = after.trim_start();
+        let after_trimmed = after.trim_start_matches(crate::text::is_space);
         if is_date_part(candidate) && (after_trimmed.is_empty() || after_trimmed.starts_with(',')) {
             parts.push(candidate);
             rest = strip_sep(after);
@@ -530,7 +537,7 @@ fn split_lot_name_parts(s: &str) -> Vec<&str> {
     {
         let after = &s1[i + 1..];
         let continues_cost = after
-            .trim_start()
+            .trim_start_matches(crate::text::is_space)
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.'));
@@ -539,7 +546,7 @@ fn split_lot_name_parts(s: &str) -> Vec<&str> {
             rest = strip_sep(after);
         }
     }
-    let cost = rest.trim();
+    let cost = rest.trim_matches(crate::text::is_space);
     if !cost.is_empty() {
         parts.push(cost);
     }

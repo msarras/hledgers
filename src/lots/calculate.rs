@@ -75,7 +75,7 @@ pub fn journal_check_lots_tag_values(j: &Journal) -> Result<(), String> {
             continue;
         };
         for (k, v) in tags {
-            if k.to_lowercase() != "lots" || v.trim().is_empty() {
+            if k.to_lowercase() != "lots" || v.trim_matches(crate::text::is_space).is_empty() {
                 continue;
             }
             let (f, l, ex) = commodity_tag_error_excerpt(comm);
@@ -98,7 +98,7 @@ pub fn journal_check_lots_tag_values(j: &Journal) -> Result<(), String> {
                 continue;
             }
             let (f, l, ex) = account_tag_error_excerpt(a, info);
-            if v.trim().is_empty() {
+            if v.trim_matches(crate::text::is_space).is_empty() {
                 return Err(format!(
                     "{f}:{l}:\n{ex}\n\
                      An account lots: tag sets the disposal order for lot-tracked commodities there,\n\
