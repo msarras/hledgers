@@ -586,12 +586,7 @@ impl ReportSpec {
                 filter_transaction_related_postings(q, &mut t);
                 t
             } else {
-                t.with_postings(
-                    (t.postings.iter())
-                        .filter(|p| q.matches_posting_extra(&types, PostingRef::new(t, p)))
-                        .cloned()
-                        .collect(),
-                )
+                t.with_postings_where(|p| q.matches_posting_extra(&types, PostingRef::new(t, p)))
             }
         });
         let mut filtered = j.with_txns(txns);

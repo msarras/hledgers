@@ -219,12 +219,7 @@ pub fn account_transactions_report(
 /// The transaction with just the postings the query matches
 /// (filterTransactionPostings).
 fn filter_transaction_postings(q: &Query, t: &Transaction) -> Transaction {
-    t.with_postings(
-        (t.postings.iter())
-            .filter(|p| q.matches_posting(PostingRef::new(t, p)))
-            .cloned()
-            .collect(),
-    )
+    t.with_postings_where(|p| q.matches_posting(PostingRef::new(t, p)))
 }
 
 /// The transaction with just the postings the query matches, `type:`
@@ -234,12 +229,7 @@ fn filter_transaction_postings_extra(
     q: &Query,
     t: &Transaction,
 ) -> Transaction {
-    t.with_postings(
-        (t.postings.iter())
-            .filter(|p| q.matches_posting_extra(types, PostingRef::new(t, p)))
-            .cloned()
-            .collect(),
-    )
+    t.with_postings_where(|p| q.matches_posting_extra(types, PostingRef::new(t, p)))
 }
 
 /// The date to show for a transaction in an account's register: the

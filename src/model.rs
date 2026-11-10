@@ -401,9 +401,17 @@ impl Default for Transaction {
 }
 
 impl Transaction {
-    /// A copy of the transaction with these postings instead of its own,
-    /// which are not copied.
-    pub fn with_postings(&self, postings: Vec<Posting>) -> Transaction {
+    /// A copy of the transaction with just the postings `keep` is true of,
+    /// which alone are copied, kept with room for all its postings, as in
+    /// a whole copy, rather than in a vector grown by doubling.
+    pub fn with_postings_where(&self, mut keep: impl FnMut(&Posting) -> bool) -> Transaction {
+        let mut postings = Vec::new();
+        for p in self.postings.iter().filter(|p| keep(p)) {
+            if postings.capacity() == 0 {
+                postings.reserve_exact(self.postings.len());
+            }
+            postings.push(p.clone());
+        }
         let Transaction {
             index,
             preceding_comment,
