@@ -884,9 +884,9 @@ impl<'a> JournalParser<'a, '_> {
 
     /// An account name with the alias directives applied
     /// (aliasedaccountnamep).
-    fn aliased_account_namep(&mut self, allow_semicolon: bool) -> PResult<String> {
+    fn aliased_account_namep(&mut self, allow_semicolon: bool) -> R<String> {
         let a = accountnamep(&mut self.c, allow_semicolon)?;
-        Ok(alias_or_die(&self.st.aliases, &a))
+        alias_or_fail(&self.st.aliases, &a).map_err(Failure::Unlocated)
     }
 
     /// An account name with the parent account and --alias options applied
@@ -1489,7 +1489,7 @@ impl<'a> JournalParser<'a, '_> {
         let account = if unchanged {
             written
         } else {
-            let aliased = alias_or_die(&self.st.aliases, &written);
+            let aliased = alias_or_fail(&self.st.aliases, &written).map_err(Failure::Unlocated)?;
             self.apply_parent_and_option_aliases(&aliased)?
         };
         let realness = account_name_posting_type(&account);
@@ -1556,7 +1556,8 @@ pub(super) fn modified_account_namep(
     allow_semicolon: bool,
 ) -> R<String> {
     let a = accountnamep(c, allow_semicolon)?;
-    apply_parent_and_option_aliases(st, &alias_or_die(&st.aliases, &a))
+    let aliased = alias_or_fail(&st.aliases, &a).map_err(Failure::Unlocated)?;
+    apply_parent_and_option_aliases(st, &aliased)
 }
 
 /// An account name with the parent account and --alias options applied
@@ -1567,16 +1568,15 @@ fn apply_parent_and_option_aliases(st: &ParseState, a: &str) -> R<String> {
         .opt_aliases
         .as_ref()
         .map_err(|e| Failure::Unlocated(e.clone()))?;
-    Ok(alias_or_die(aliases, &join_account_names(&parent, a)))
+    alias_or_fail(aliases, &join_account_names(&parent, a)).map_err(Failure::Unlocated)
 }
 
 /// The aliases applied to an account name; a regular expression alias whose
-/// replacement fails is a fatal error, as upstream's (orAliasError).
-fn alias_or_die(aliases: &[AccountAlias], a: &str) -> String {
-    match account_name_apply_aliases(aliases, a) {
-        Ok(n) => n,
-        Err(e) => panic!("problem in account alias applied to {a}: {e}"),
-    }
+/// replacement fails is an error with no place in the file, as upstream's
+/// (orAliasError).
+fn alias_or_fail(aliases: &[AccountAlias], a: &str) -> Result<String, String> {
+    account_name_apply_aliases(aliases, a)
+        .map_err(|e| format!("problem in account alias applied to {a}: {e}"))
 }
 
 /// The byte length of an account name parsed from the start of `src`
@@ -1991,6 +1991,17 @@ pub(crate) mod tests {
         let mut j = parse(s).unwrap();
         assert_eq!(j.txns.len(), 1, "{s}");
         j.txns.remove(0)
+    }
+
+    // A regular expression alias whose replacement fails is an error with no
+    // place in the file (orAliasError), not a panic.
+    #[test]
+    fn alias_replacement_error() {
+        let e = parse("alias /a/=\\2\n\n2024-01-01 x\n    a   1\n    b\n").unwrap_err();
+        assert_eq!(
+            e,
+            "problem in account alias applied to a: no match group exists for backreference \"\\2\""
+        );
     }
 
     /// The single posting of a transaction with this posting line.
