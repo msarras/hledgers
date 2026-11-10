@@ -7,7 +7,7 @@ use crate::amount::render::{AmountFormat, show_amount_b};
 use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
 use crate::cli::anchor::set_account_anchor;
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::io::with_title;
+use crate::cli::io::{unsupported_output_format_error, with_title};
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::dates::Day;
 use crate::model::{
@@ -528,35 +528,6 @@ fn posting_to_spreadsheet(
             ]
         })
         .collect()
-}
-
-/// The error for an output format a command doesn't support
-/// (unsupportedOutputFormatError).
-pub fn unsupported_output_format_error(fmt: &str) -> String {
-    let mut msg = format!(
-        "Sorry, output format \"{fmt}\" is unrecognised or not yet supported for this kind of report."
-    );
-    let ext = fmt.rsplit('.').next().unwrap_or("");
-    if fmt.contains('.')
-        && [
-            "txt",
-            "beancount",
-            "csv",
-            "json",
-            "html",
-            "ledger",
-            "sql",
-            "tsv",
-            "fods",
-            "svg",
-        ]
-        .contains(&ext)
-    {
-        msg.push_str(&format!(
-            "\nTo write to a file named {fmt}, use -o (--output-file), not -O (--output-format)."
-        ));
-    }
-    msg
 }
 
 /// The transaction with its postings shown as written, unless explicit

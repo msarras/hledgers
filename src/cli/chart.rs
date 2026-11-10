@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::account::{AccountName, AccountType, parent_account_names};
 use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
-use crate::cli::commands::balance::report_period_name;
-use crate::cli::commands::print::unsupported_output_format_error;
+use crate::cli::args::{Arity, Flag};
+use crate::cli::io::unsupported_output_format_error;
 use crate::cli::opts::CliOpts;
 use crate::dates::{DateSpan, Day, Period};
 use crate::decimal::Decimal;
@@ -16,7 +16,7 @@ use crate::i18n::Translations;
 use crate::model::{Commodity, Posting, SourcePos, Transaction};
 use crate::read::amount::{AmountCtx, parse_amount_with};
 use crate::reports::account_txns::AccountTransactionsReportItem;
-use crate::reports::opts::{BalanceAccumulation, ReportOpts};
+use crate::reports::opts::{BalanceAccumulation, ReportOpts, report_period_name};
 use crate::reports::periodic::{
     BalanceReport, CompoundPeriodicReport, DisplayName, MultiBalanceReport, MultiBalanceReportRow,
     PeriodicReportRow,
@@ -105,6 +105,26 @@ pub fn parse_chart_arg(
         )),
     }
 }
+
+/// The --chart flag (chartFlag).
+pub const CHART_FLAG: Flag = Flag::new(
+    &["chart"],
+    Arity::Opt,
+    "SCALE",
+    "show a chart: instead of the table (txt), above it (html), or as data (csv, tsv, json). SCALE: the amount that fills the chart (eg 1000 or 1000 USD; one per commodity), for comparable charts.",
+)
+.default("auto")
+.check(check_chart_arg);
+
+/// The --width flag of commands that can show a chart (chartWidthFlag).
+pub const CHART_WIDTH_FLAG: Flag = Flag::new(
+    &["width"],
+    Arity::Req,
+    "N",
+    "with --chart: draw the chart N characters wide (default: the terminal width)",
+)
+.short(&['w'])
+.check(check_chart_width);
 
 /// The check of --chart's value on the command line, with no commodity
 /// styles (chartFlagWith's setchart).

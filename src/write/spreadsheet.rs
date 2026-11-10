@@ -339,6 +339,30 @@ pub fn integer_cell(n: impl ToString) -> Cell<String> {
     }
 }
 
+/// Totals rows: in the totals style, a double line above the first
+/// (addTotalBorders).
+pub fn add_total_borders<T>(rows: Vec<Vec<Cell<T>>>) -> Vec<Vec<Cell<T>>> {
+    (rows.into_iter().enumerate())
+        .map(|(i, row)| {
+            let top = if i == 0 {
+                Lines::DoubleLine
+            } else {
+                Lines::NoLine
+            };
+            (row.into_iter())
+                .map(|c| Cell {
+                    style: Style::Body(Emphasis::Total),
+                    border: Border {
+                        top,
+                        ..Border::default()
+                    },
+                    ..c
+                })
+                .collect()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

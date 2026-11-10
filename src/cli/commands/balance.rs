@@ -21,11 +21,12 @@ use crate::cli::anchor::{
 };
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{
-    balance_report_as_chart, chart_requested, check_chart_arg, check_chart_format,
-    check_chart_width, multi_balance_report_as_chart, render_chart,
+    CHART_FLAG, CHART_WIDTH_FLAG, balance_report_as_chart, chart_requested, check_chart_format,
+    multi_balance_report_as_chart, render_chart,
 };
-use crate::cli::commands::print::unsupported_output_format_error;
-use crate::cli::io::{warn_if_large_multi_period_report, with_title};
+use crate::cli::io::{
+    unsupported_output_format_error, warn_if_large_multi_period_report, with_title,
+};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
@@ -34,8 +35,8 @@ use crate::decimal::Decimal;
 use crate::model::Journal;
 use crate::reports::budget::{BudgetCell, BudgetReport, budget_report};
 use crate::reports::opts::{
-    AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, PeriodTitles,
-    ReportOpts, ReportSpec,
+    AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts,
+    ReportSpec, report_period_name,
 };
 use crate::reports::periodic::{
     BalanceReport, DisplayName, MultiBalanceReport, PeriodicReportRow, balance_report,
@@ -49,7 +50,7 @@ use crate::write::fods::{locale_encoding_name, print_fods};
 use crate::write::html::titled_table_html;
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
-    self as spr, Border, CellType, Emphasis, Lines, Style, add_header_borders, add_row_span_header,
+    self as spr, Border, CellType, add_header_borders, add_row_span_header, add_total_borders,
     cell_from_amount, cell_from_mixed_amount, cells_from_mixed_amount, horizontal_span,
     raw_table_content,
 };
@@ -102,26 +103,6 @@ pub static MODE: Mode = Mode {
     doc: crate::command_doc!("Balance"),
     ..Mode::DEFAULT
 };
-
-/// The --chart flag (chartFlag).
-pub const CHART_FLAG: Flag = Flag::new(
-    &["chart"],
-    OPT,
-    "SCALE",
-    "show a chart: instead of the table (txt), above it (html), or as data (csv, tsv, json). SCALE: the amount that fills the chart (eg 1000 or 1000 USD; one per commodity), for comparable charts.",
-)
-.default("auto")
-.check(check_chart_arg);
-
-/// The --width flag of commands that can show a chart (chartWidthFlag).
-pub const CHART_WIDTH_FLAG: Flag = Flag::new(
-    &["width"],
-    REQ,
-    "N",
-    "with --chart: draw the chart N characters wide (default: the terminal width)",
-)
-.short(&['w'])
-.check(check_chart_width);
 
 /// Run the balance command (balance): a budget report with --budget, a
 /// multi-period report with a report interval, otherwise a single-column
@@ -1069,35 +1050,6 @@ pub fn multi_balance_report_table_as_text(
     )
 }
 
-/// A report period's column heading: for changes, its compact name (with
-/// the month abbreviated unless the report spans several years) or with
-/// --period-titles=dates its dates; for accumulated balances, its last
-/// date (reportPeriodName).
-pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan]) -> impl Fn(&DateSpan) -> String {
-    // whether the spans start in more than one year, found once for them all
-    let multiyear = spans
-        .iter()
-        .map(DateSpan::start_year)
-        .collect::<BTreeSet<_>>()
-        .len()
-        > 1;
-    let months = ropts.translations.month_names();
-    let (accum, titles) = (ropts.balance_accum, ropts.period_titles);
-    move |span: &DateSpan| match accum {
-        BalanceAccumulation::PerPeriod => match titles {
-            PeriodTitles::Dates => span.show_full(),
-            PeriodTitles::Compact if multiyear => span.to_string(),
-            PeriodTitles::Compact => {
-                let abbrevs: Vec<&str> = months.iter().map(|(_, a)| a.as_str()).collect();
-                span.show_abbrev_with(&abbrevs)
-            }
-        },
-        _ => span
-            .end()
-            .map_or_else(String::new, |e| prevday(e).to_string()),
-    }
-}
-
 // Spreadsheet output (csv, tsv, html, fods)
 
 /// Whether a row has an account's figures or the totals (RowClass).
@@ -1226,30 +1178,6 @@ fn budget_average_class(rc: RowClass) -> &'static str {
         RowClass::Value => "budget rowaverage",
         RowClass::Total => "budget colaverage",
     }
-}
-
-/// Totals rows: in the totals style, a double line above the first
-/// (addTotalBorders).
-pub fn add_total_borders<T>(rows: Vec<Vec<spr::Cell<T>>>) -> Vec<Vec<spr::Cell<T>>> {
-    (rows.into_iter().enumerate())
-        .map(|(i, row)| {
-            let top = if i == 0 {
-                Lines::DoubleLine
-            } else {
-                Lines::NoLine
-            };
-            (row.into_iter())
-                .map(|c| spr::Cell {
-                    style: Style::Body(Emphasis::Total),
-                    border: Border {
-                        top,
-                        ..Border::default()
-                    },
-                    ..c
-                })
-                .collect()
-        })
-        .collect()
 }
 
 /// A single-column balance report as a spreadsheet: the heading row, a

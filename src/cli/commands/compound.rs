@@ -13,18 +13,16 @@ use crate::amount::{MixedAmount, Sym};
 use crate::cli::anchor::{LinkOpts, header_date_span_cell};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{
-    chart_requested, check_chart_arg, check_chart_format, compound_balance_report_as_chart,
-    render_chart,
+    CHART_WIDTH_FLAG, chart_requested, check_chart_arg, check_chart_format,
+    compound_balance_report_as_chart, render_chart,
 };
 use crate::cli::commands::balance::{
-    ACCOUNT_CLASS, CHART_WIDTH_FLAG, NBSP, TIDY_COLUMN_LABELS, TOTAL_ROW_HEADING_SPREADSHEET,
+    ACCOUNT_CLASS, NBSP, TIDY_COLUMN_LABELS, TOTAL_ROW_HEADING_SPREADSHEET,
     balance_sub_report_as_spreadsheet_parts, multi_balance_report_as_part_table,
     multi_balance_report_num_header_columns, multi_balance_report_table_as_text,
-    multi_balance_row_as_text, multi_balance_totals_rows, report_link_opts, report_period_name,
-    valuation_description,
+    multi_balance_row_as_text, multi_balance_totals_rows, report_link_opts, valuation_description,
 };
-use crate::cli::commands::print::unsupported_output_format_error;
-use crate::cli::io::warn_if_large_multi_period_report;
+use crate::cli::io::{unsupported_output_format_error, warn_if_large_multi_period_report};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
@@ -32,7 +30,7 @@ use crate::dates::{DateSpan, Day, Interval, prevday, spans_span};
 use crate::model::Journal;
 use crate::reports::opts::{
     BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts, ReportSpec,
-    balance_accumulation_override,
+    balance_accumulation_override, report_period_name,
 };
 use crate::reports::periodic::{
     CompoundPeriodicReport, DisplayName, PeriodicReport, SubreportSpec, balance_report_styles,

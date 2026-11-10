@@ -1,5 +1,6 @@
-//! A command's output, and a warning before a large one
-//! (writeOutputLazyText, withTitle and warnIfLargeMultiPeriodReport in
+//! A command's output, a warning before a large one, and the error for an
+//! output format a command lacks (writeOutputLazyText, withTitle,
+//! warnIfLargeMultiPeriodReport and unsupportedOutputFormatError in
 //! Hledger.Cli.Utils).
 
 use std::io::Write;
@@ -259,4 +260,33 @@ pub fn warn_if_large_multi_period_report(opts: &CliOpts, j: &crate::model::Journ
             ),
         );
     }
+}
+
+/// The error for an output format a command doesn't support
+/// (unsupportedOutputFormatError).
+pub fn unsupported_output_format_error(fmt: &str) -> String {
+    let mut msg = format!(
+        "Sorry, output format \"{fmt}\" is unrecognised or not yet supported for this kind of report."
+    );
+    let ext = fmt.rsplit('.').next().unwrap_or("");
+    if fmt.contains('.')
+        && [
+            "txt",
+            "beancount",
+            "csv",
+            "json",
+            "html",
+            "ledger",
+            "sql",
+            "tsv",
+            "fods",
+            "svg",
+        ]
+        .contains(&ext)
+    {
+        msg.push_str(&format!(
+            "\nTo write to a file named {fmt}, use -o (--output-file), not -O (--output-format)."
+        ));
+    }
+    msg
 }

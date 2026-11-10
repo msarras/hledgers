@@ -5,7 +5,8 @@
 
 use crate::account::DepthSpec;
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::balance::{CHART_WIDTH_FLAG, balance};
+use crate::cli::chart::CHART_WIDTH_FLAG;
+use crate::cli::commands::balance::balance;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::dates::Interval;
 use crate::model::Journal;

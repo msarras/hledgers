@@ -11,14 +11,14 @@ use crate::amount::render::AmountFormat;
 use crate::amount::{Rounding, styles_with_rounding};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{
-    account_transactions_report_as_chart, chart_requested, check_chart_format, render_chart,
+    CHART_FLAG, account_transactions_report_as_chart, chart_requested, check_chart_format,
+    render_chart,
 };
-use crate::cli::commands::balance::CHART_FLAG;
-use crate::cli::commands::print::unsupported_output_format_error;
 use crate::cli::commands::register::{
     ALIGN_ALL_FLAG, WIDTH_FLAG, postings_or_transactions_report_as_text, register_columns,
     register_line,
 };
+use crate::cli::io::unsupported_output_format_error;
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::model::Journal;
 use crate::query::Query;

@@ -2,12 +2,14 @@
 //! command-line options and query arguments ask a report to show, and the
 //! query they make.
 
+use std::collections::BTreeSet;
+
 use crate::account::DepthSpec;
 use crate::amount::{MixedAmount, Sym};
 use crate::console::usage_error;
 use crate::dates::{
     DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
-    parsedate, split_span,
+    parsedate, prevday, split_span,
 };
 use crate::model::{Journal, Posting, PostingRef, Status, Transaction};
 use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
@@ -978,6 +980,35 @@ fn layout_opt(raw: &RawOpts) -> Result<Layout, String> {
     } else {
         Layout::Wide(None)
     })
+}
+
+/// A report period's column heading: for changes, its compact name (with
+/// the month abbreviated unless the report spans several years) or with
+/// --period-titles=dates its dates; for accumulated balances, its last
+/// date (reportPeriodName).
+pub fn report_period_name(ropts: &ReportOpts, spans: &[DateSpan]) -> impl Fn(&DateSpan) -> String {
+    // whether the spans start in more than one year, found once for them all
+    let multiyear = spans
+        .iter()
+        .map(DateSpan::start_year)
+        .collect::<BTreeSet<_>>()
+        .len()
+        > 1;
+    let months = ropts.translations.month_names();
+    let (accum, titles) = (ropts.balance_accum, ropts.period_titles);
+    move |span: &DateSpan| match accum {
+        BalanceAccumulation::PerPeriod => match titles {
+            PeriodTitles::Dates => span.show_full(),
+            PeriodTitles::Compact if multiyear => span.to_string(),
+            PeriodTitles::Compact => {
+                let abbrevs: Vec<&str> = months.iter().map(|(_, a)| a.as_str()).collect();
+                span.show_abbrev_with(&abbrevs)
+            }
+        },
+        _ => span
+            .end()
+            .map_or_else(String::new, |e| prevday(e).to_string()),
+    }
 }
 
 #[cfg(test)]

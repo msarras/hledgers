@@ -13,11 +13,9 @@ use crate::amount::{MixedAmount, Rounding, styles_with_rounding};
 use crate::cli::anchor::{date_cell, set_account_anchor};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{
-    chart_requested, check_chart_format, postings_report_as_chart, render_chart,
+    CHART_FLAG, chart_requested, check_chart_format, postings_report_as_chart, render_chart,
 };
-use crate::cli::commands::balance::CHART_FLAG;
-use crate::cli::commands::print::unsupported_output_format_error;
-use crate::cli::io::with_title;
+use crate::cli::io::{unsupported_output_format_error, with_title};
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::model::Journal;
 use crate::reports::opts::PeriodTitles;
