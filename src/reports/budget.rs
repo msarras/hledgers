@@ -228,7 +228,7 @@ fn journal_add_budget_goal_transactions(
             });
         }
     }
-    let mut budgetj = Journal { txns, ..j.clone() };
+    let mut budgetj = j.with_txns(txns);
     journal_number_and_tie_transactions(&mut budgetj);
     journal_style_amounts(&mut budgetj)?;
     Ok(journal_balance_transactions(bopts, budgetj, false)?.0)

@@ -3,6 +3,8 @@
 //! amount it posts there and the running total or balance after it. The
 //! aregister command shows it.
 
+use std::borrow::Cow;
+
 use crate::account::AccountName;
 use crate::amount::{CommodityStyles, MixedAmount};
 use crate::dates::{DateSpan, Day};
@@ -71,21 +73,24 @@ pub fn account_transactions_report(
     let statusq = reportq.clone().filter(Query::is_status);
     let relevantq = (!realq.is_null() || !statusq.is_null())
         .then(|| Query::And(vec![realq, statusq]).simplify());
-    let mut aj = j.clone();
     let mut needed = false;
-    aj.txns.retain(|t| {
-        let relevant = match &relevantq {
-            None => t.clone(),
-            Some(q) => filter_transaction_postings(q, t),
-        };
-        match thisacctq {
-            Ok(q) => q.matches_transaction(&relevant),
-            Err(_) => {
-                needed |= !relevant.postings.is_empty();
-                false
+    let matched: Vec<Transaction> = (j.txns.iter())
+        .filter(|t| {
+            let relevant = match &relevantq {
+                None => Cow::Borrowed(*t),
+                Some(q) => Cow::Owned(filter_transaction_postings(q, t)),
+            };
+            match thisacctq {
+                Ok(q) => q.matches_transaction(&relevant),
+                Err(_) => {
+                    needed |= !relevant.postings.is_empty();
+                    false
+                }
             }
-        }
-    });
+        })
+        .cloned()
+        .collect();
+    let mut aj = j.with_txns(matched);
     let thisacctq = match thisacctq {
         Ok(q) => q,
         Err(e) if needed => return Err(e.to_string()),
