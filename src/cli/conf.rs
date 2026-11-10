@@ -2,6 +2,7 @@
 //! command aliases, read from a hledger.conf file (Hledger.Cli.Conf).
 
 use crate::parse::{Item, ParseError};
+use crate::platform::home_dir;
 
 /// Config file sections: each name with its argument lines and their line
 /// numbers.
@@ -225,10 +226,6 @@ pub fn conf_file_is_trusted(raw: &super::args::RawOpts, file: Option<&str>) -> b
 fn file_exists(f: &str) -> bool {
     let p = std::path::Path::new(f);
     p.exists() && !p.is_dir()
-}
-
-fn home_dir() -> String {
-    std::env::var("HOME").unwrap_or_default()
 }
 
 /// The user's XDG config directory for hledger (getXdgDirectory XdgConfig).

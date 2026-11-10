@@ -566,13 +566,9 @@ fn journal_filesystem_can_append(f: &str) {
 
 /// The executables of this name in PATH, in order (findExecutables).
 fn find_executables(name: &str) -> Vec<String> {
-    use std::os::unix::fs::PermissionsExt;
-    let executable = |f: &std::path::Path| {
-        f.metadata()
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    };
-    if name.contains('/') {
-        return if executable(std::path::Path::new(name)) {
+    use crate::platform::is_executable;
+    if name.contains(std::path::is_separator) {
+        return if is_executable(std::path::Path::new(name)) {
             vec![name.to_string()]
         } else {
             Vec::new()
@@ -581,7 +577,7 @@ fn find_executables(name: &str) -> Vec<String> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
         .map(|d| d.join(name))
-        .filter(|f| executable(f))
+        .filter(|f| is_executable(f))
         .map(|f| f.display().to_string())
         .collect()
 }

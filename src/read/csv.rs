@@ -228,7 +228,7 @@ pub fn read_rules_data_with(
             };
             let mut found = source_files(&primary, pat)?;
             if found.is_empty() && !anchored && !absolute_or_tilde {
-                let home = std::env::var("HOME").unwrap_or_default();
+                let home = crate::platform::home_dir();
                 found = source_files(&path_join(&home, "Downloads"), pat)?;
             }
             if iopts.importing && rules.directive("archive").is_some() {
@@ -387,11 +387,9 @@ fn source_files(dir: &str, pattern: &str) -> Result<Vec<String>, String> {
 /// output. A data generating command's error output is shown as a warning
 /// when it succeeds (runCommand, runCommandAsFilter).
 fn run_command(rules_file: &str, cmd: &str, input: Option<&str>) -> Result<String, String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let failed_pipes = || format!("in {rules_file}: failed to create pipes for command execution");
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(cmd)
+    let mut child = crate::platform::shell_command(cmd)
         .current_dir(take_directory(rules_file))
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -418,9 +416,10 @@ fn run_command(rules_file: &str, cmd: &str, input: Option<&str>) -> Result<Strin
     let out = String::from_utf8_lossy(&output.stdout).into_owned();
     let err = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
-        let code = output.status.code().unwrap_or_else(|| {
-            -std::os::unix::process::ExitStatusExt::signal(&output.status).unwrap_or(0)
-        });
+        let code = output
+            .status
+            .code()
+            .unwrap_or_else(|| -crate::platform::exit_signal(output.status).unwrap_or(0));
         let detail = if err.is_empty() {
             String::new()
         } else {

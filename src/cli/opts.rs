@@ -435,8 +435,7 @@ impl CliOpts {
         }
         let ledger_file = std::env::var("LEDGER_FILE").unwrap_or_default();
         let f = if ledger_file.is_empty() {
-            let home = std::env::var("HOME").unwrap_or_default();
-            format!("{home}/.hledger.journal")
+            format!("{}/.hledger.journal", crate::platform::home_dir())
         } else {
             expand_path_or_glob(&cwd, &ledger_file)?
         };

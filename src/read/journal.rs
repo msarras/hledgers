@@ -1677,7 +1677,7 @@ pub fn split_reader_prefix(f: &str) -> (Option<&str>, &str) {
 /// A path with a leading `~` replaced by the home directory
 /// (expandHomePath).
 pub fn expand_home_path(p: &str) -> Result<String, String> {
-    let home = || std::env::var("HOME").unwrap_or_default();
+    let home = crate::platform::home_dir;
     if p == "~" {
         Ok(home())
     } else if let Some(rest) = p.strip_prefix("~/") {

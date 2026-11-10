@@ -11,6 +11,7 @@ pub mod lots;
 pub mod model;
 pub mod par;
 pub mod parse;
+pub mod platform;
 pub mod query;
 pub mod read;
 pub mod regex;

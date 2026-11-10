@@ -258,8 +258,7 @@ fn with_manual_file(
 
 /// Run a shell command, failing if it does (callCommand).
 fn call_command(cmd: &str) -> Result<(), String> {
-    let status = Command::new("sh")
-        .args(["-c", cmd])
+    let status = crate::platform::shell_command(cmd)
         .status()
         .map_err(|e| format!("callCommand: {cmd}: {e}"))?;
     match status.code() {

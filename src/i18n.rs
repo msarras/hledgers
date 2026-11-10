@@ -208,7 +208,7 @@ fn override_dir() -> String {
     let base = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|d| d.starts_with('/'))
-        .unwrap_or_else(|| format!("{}/.config", std::env::var("HOME").unwrap_or_default()));
+        .unwrap_or_else(|| format!("{}/.config", crate::platform::home_dir()));
     format!("{base}/hledger/locale")
 }
 

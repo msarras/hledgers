@@ -26,7 +26,16 @@ use opts::CliOpts;
 pub fn run(args: impl Iterator<Item = OsString>) -> i32 {
     let mut args = args.map(|a| a.to_string_lossy().into_owned());
     let argv0 = args.next().unwrap_or_default();
-    let progname = argv0.rsplit('/').next().unwrap_or_default().to_string();
+    let progname = argv0
+        .rsplit(std::path::is_separator)
+        .next()
+        .unwrap_or_default();
+    let progname = if cfg!(windows) {
+        progname.strip_suffix(".exe").unwrap_or(progname)
+    } else {
+        progname
+    }
+    .to_string();
     let args: Vec<String> = args.collect();
     match dispatch(&progname, &args) {
         Ok(status) => status,
@@ -416,8 +425,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
 
 /// Run a shell command line with sh, returning its exit status (system).
 pub fn run_shell(cmd: &str) -> Result<i32, String> {
-    let status = std::process::Command::new("sh")
-        .args(["-c", cmd])
+    let status = crate::platform::shell_command(cmd)
         .status()
         .map_err(|e| format!("{cmd}: {e}"))?;
     Ok(exit_code(status))
@@ -425,10 +433,9 @@ pub fn run_shell(cmd: &str) -> Result<i32, String> {
 
 /// A child process's exit status as ours.
 pub fn exit_code(status: std::process::ExitStatus) -> i32 {
-    use std::os::unix::process::ExitStatusExt;
     status
         .code()
-        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
+        .unwrap_or_else(|| 128 + crate::platform::exit_signal(status).unwrap_or(0))
 }
 
 /// Whether, when the config file can not be read, this command line can do

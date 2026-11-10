@@ -48,20 +48,15 @@ fn write_output_with(opts: &CliOpts, text: &str, paged: bool) -> Result<(), Stri
 /// view.FMT in hledger's cache directory, made (or emptied), readable only
 /// by the user, after saying where it is (viewFile).
 fn view_file(opts: &CliOpts) -> Result<String, String> {
-    use std::os::unix::fs::OpenOptionsExt;
     let base = std::env::var("XDG_CACHE_HOME")
         .ok()
         .filter(|d| d.starts_with('/'))
-        .unwrap_or_else(|| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
+        .unwrap_or_else(|| format!("{}/.cache", crate::platform::home_dir()));
     let dir = format!("{base}/hledger");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{dir}: {e}"))?;
     let f = format!("{dir}/view.{}", opts.output_format());
     eprintln!("writing {f} (if it's sensitive, delete it after viewing)");
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    crate::platform::private_file_options()
         .open(&f)
         .map_err(|e| format!("{f}: {e}"))?;
     Ok(f)
@@ -75,8 +70,8 @@ pub fn run_pager(opts: &CliOpts, text: &str) -> Result<(), String> {
         print_stdout(text);
         return Ok(());
     };
-    let mut cmd = std::process::Command::new("sh");
-    cmd.args(["-c", &pager]).stdin(std::process::Stdio::piped());
+    let mut cmd = crate::platform::shell_command(&pager);
+    cmd.stdin(std::process::Stdio::piped());
     let is_less = pager
         .rsplit('/')
         .next()
@@ -136,18 +131,12 @@ fn pager_for(opts: &CliOpts, text: &str) -> Option<String> {
 /// Whether a program can be run: a path to an executable file, or a name
 /// found in PATH (findExecutable).
 fn find_executable(p: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let executable = |f: &std::path::Path| {
-        f.metadata()
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    };
-    if p.contains('/') {
-        return executable(std::path::Path::new(p));
+    use crate::platform::is_executable;
+    if p.contains(std::path::is_separator) {
+        return is_executable(std::path::Path::new(p));
     }
-    std::env::var("PATH")
-        .unwrap_or_default()
-        .split(':')
-        .any(|d| executable(&std::path::Path::new(d).join(p)))
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path).any(|d| is_executable(&d.join(p)))
 }
 
 /// The LESS value to run less with (lessVarValue): HLEDGER_LESS if set,
