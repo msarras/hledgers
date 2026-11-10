@@ -394,7 +394,7 @@ pub fn translations_for_lang_option(
         Some(l) => Ok(load_translations(&l, prog_args)),
         None => {
             let shown: Vec<String> = available.iter().map(|l| short_lang_tag(l)).collect();
-            Err(crate::reports::opts::usage_error(&format!(
+            Err(crate::console::usage_error(&format!(
                 "--lang: no translations are available for {} (available: {})",
                 crate::text::show_string(s),
                 shown.join(", ")

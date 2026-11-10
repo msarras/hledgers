@@ -320,7 +320,7 @@ impl RawOpts {
         let Some(v) = self.string(name) else {
             return Ok(None);
         };
-        let usage = crate::reports::opts::usage_error;
+        let usage = crate::console::usage_error;
         let n: i128 = v
             .trim()
             .parse()
@@ -608,7 +608,7 @@ pub fn check_req_val_flag_args_have_values(
         (fa.no_val.iter().chain(&fa.req_val).chain(&fa.opt_val)).any(|x| x == b)
             || long_prefixes.iter().any(|p| b.starts_with(p.as_str()))
     };
-    let usage = crate::reports::opts::usage_error;
+    let usage = crate::console::usage_error;
     for (i, a) in args.iter().enumerate() {
         if a == "--" {
             break;

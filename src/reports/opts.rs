@@ -5,6 +5,7 @@
 use crate::account::DepthSpec;
 use crate::amount::{MixedAmount, Sym};
 use crate::cli::args::RawOpts;
+use crate::console::usage_error;
 use crate::dates::{
     DateSpan, Day, DayPartition, EfDay, Interval, Period, fix_smart_date_str_ef, parse_period_expr,
     parsedate, split_span,
@@ -198,14 +199,6 @@ impl Default for ReportOpts {
             debug: 0,
         }
     }
-}
-
-/// An error about a command-line option, with the hint upstream adds
-/// (usageError).
-pub fn usage_error(msg: &str) -> String {
-    let msg = msg.trim_end_matches('\n');
-    let sep = if msg.contains('\n') { "\n" } else { " " };
-    format!("{msg}{sep}(use -h to see usage)")
 }
 
 impl ReportOpts {

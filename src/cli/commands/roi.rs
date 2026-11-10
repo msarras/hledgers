@@ -11,11 +11,12 @@ use crate::amount::{Amount, CommodityStyles, MixedAmount, Rounding, Sym, styles_
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::{warn_if_large_multi_period_report, with_title, write_output};
 use crate::cli::opts::CliOpts;
+use crate::console::usage_error;
 use crate::dates::{Day, Period};
 use crate::decimal::Decimal;
 use crate::model::{Journal, Posting, PostingRef, Transaction};
 use crate::query::{Query, parse_query};
-use crate::reports::opts::{ReportOpts, usage_error};
+use crate::reports::opts::ReportOpts;
 use crate::reports::postings::sum_postings;
 use crate::text::{quote_if_needed, show_ffloat, show_string};
 use crate::valuation::{

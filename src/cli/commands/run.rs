@@ -463,7 +463,7 @@ impl<'a> Session<'a> {
         cmdline: &[String],
     ) -> R<()> {
         let args = crate::cli::replace_numeric_flags(&args::expand_args_at(&args)?);
-        let raw = args::process(mode, &args).map_err(|e| crate::reports::opts::usage_error(&e))?;
+        let raw = args::process(mode, &args).map_err(|e| crate::console::usage_error(&e))?;
         let ctx = self.ctx;
         if raw.bool("help") {
             let opts = self.cli_opts(raw)?;
@@ -596,7 +596,7 @@ impl<'a> Session<'a> {
     }
 
     fn debug(&self, msg: &str) {
-        if crate::cli::debug_level(&self.ctx.prog_args) >= 1 {
+        if crate::console::debug_level(&self.ctx.prog_args) >= 1 {
             eprintln!("{msg}");
         }
     }

@@ -196,7 +196,7 @@ pub fn read_journal_files_and_latest_dates(
         journals.push(j);
         latest.extend(l);
     }
-    if crate::cli::debug_level(&iopts.prog_args) >= 1 {
+    if crate::console::debug_level(&iopts.prog_args) >= 1 {
         for msg in commodity_style_conflicts(&journals) {
             eprintln!("{msg}");
         }

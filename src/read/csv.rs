@@ -1215,7 +1215,7 @@ impl Converter<'_> {
                     }
                 });
                 if let Err(e) = checked {
-                    return Err(crate::reports::opts::usage_error(&e.pretty("", a)));
+                    return Err(crate::console::usage_error(&e.pretty("", a)));
                 }
             }
             let amount = self.amount(&errpfx, record, &currency, p1_virtual, n)?;

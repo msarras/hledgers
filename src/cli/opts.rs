@@ -3,10 +3,11 @@
 
 use super::args::{Arity, Flag, RawOpts};
 use crate::amount::CommodityStyles;
+use crate::console::usage_error;
 use crate::dates::{DateSpan, Day, Interval, fix_smart_date_str_ef, parse_period_expr};
 use crate::parse::{PResult, ParseError, Parser};
 use crate::read::{BalancingOpts, InputOpts};
-use crate::reports::opts::{ReportOpts, ReportSpec, usage_error};
+use crate::reports::opts::{ReportOpts, ReportSpec};
 use crate::valuation::ConversionOp;
 
 const NONE: Arity = Arity::None;

@@ -7,10 +7,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::lines_with_title;
 use crate::cli::opts::{CliOpts, Declarables, find_matched_by_argument};
+use crate::console::usage_error;
 use crate::model::{Journal, Tag};
 use crate::query::{Query, parse_query_list};
 use crate::regex::to_regex_ci;
-use crate::reports::opts::usage_error;
 
 const NONE: Arity = Arity::None;
 

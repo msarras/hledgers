@@ -1,6 +1,7 @@
 //! Messages on stderr and whether to colour them (the parts of
 //! Hledger.Utils.IO that both the reader and the commands use: printError,
-//! warnIO, useColorOnStderr, useColorOnStdout and colorOption).
+//! warnIO, useColorOnStderr, useColorOnStdout, colorOption and usageError),
+//! and the --debug level (Hledger.Utils.Debug's debugLevel).
 
 use std::io::IsTerminal;
 
@@ -110,4 +111,26 @@ pub fn color_flag_without_value(args: &[String]) -> Option<&'static str> {
         }),
         _ => None,
     }
+}
+
+/// An error about a command-line option, with the hint upstream adds
+/// (usageError).
+pub fn usage_error(msg: &str) -> String {
+    let msg = msg.trim_end_matches('\n');
+    let sep = if msg.contains('\n') { "\n" } else { " " };
+    format!("{msg}{sep}(use -h to see usage)")
+}
+
+/// The --debug level the command line asks for: the value of the last
+/// --debug, 1 if it has none, or 0 (debugLevel).
+pub fn debug_level(args: &[String]) -> usize {
+    let mut level = 0;
+    for (i, a) in args.iter().enumerate() {
+        if a == "--debug" {
+            level = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1);
+        } else if let Some(v) = a.strip_prefix("--debug=") {
+            level = v.parse().unwrap_or(1);
+        }
+    }
+    level
 }

@@ -64,20 +64,6 @@ pub fn replace_numeric_flags(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The --debug level the command line asks for: the value of the last
-/// --debug, 1 if it has none, or 0 (debugLevel).
-pub fn debug_level(args: &[String]) -> usize {
-    let mut level = 0;
-    for (i, a) in args.iter().enumerate() {
-        if a == "--debug" {
-            level = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1);
-        } else if let Some(v) = a.strip_prefix("--debug=") {
-            level = v.parse().unwrap_or(1);
-        }
-    }
-    level
-}
-
 /// The first list without one occurrence of each item of the second (\\).
 fn list_difference(xs: &[String], ys: &[String]) -> Vec<String> {
     let mut out = xs.to_vec();
@@ -107,7 +93,7 @@ fn show_list(xs: &[String]) -> String {
 /// final command line, and act on it. Returns the exit status.
 fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     use args::{cmdargs_parse_with, drop_unsupported_opts, flag_args};
-    let debug = debug_level(prog_args) >= 1;
+    let debug = crate::console::debug_level(prog_args) >= 1;
     let dbg = |label: &str, value: &str| {
         if debug {
             eprintln!("{label}: {value}");
@@ -418,7 +404,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
             .map_err(|e| format!("{exe}: rawSystem: {}", crate::read::io_error_text(&e)))?;
         return Ok(exit_code(status));
     }
-    Err(crate::reports::opts::usage_error(&format!(
+    Err(crate::console::usage_error(&format!(
         "could not understand the arguments {finalargs:?}"
     )))
 }
