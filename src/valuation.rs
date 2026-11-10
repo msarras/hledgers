@@ -447,6 +447,9 @@ fn price_lookup(index: &PriceIndex, d: Day, from: &Sym, to: &Sym) -> Option<(Sym
     Some((last, rate))
 }
 
+/// The longest chain of prices a search goes on to extend (maxpathlength).
+const MAX_PATH_LENGTH: usize = 1000;
+
 /// The first of the shortest chains of prices leading from one commodity
 /// to another, found by a breadth-first search over prices with at most
 /// one per directed commodity pair, never revisiting a commodity
@@ -478,6 +481,20 @@ fn prices_shortest_path<'p>(
             }
         }
         if extended.is_empty() {
+            return None;
+        }
+        // as upstream, which gives up with a warning rather than search on
+        if 2 + paths[0].0.len() > MAX_PATH_LENGTH {
+            // once, however many amounts need the chain
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                crate::console::warn(
+                    &[],
+                    &format!(
+                        "gave up searching for a price chain at length {MAX_PATH_LENGTH}, please report a bug"
+                    ),
+                );
+            });
             return None;
         }
         if let Some((path, _)) = extended
