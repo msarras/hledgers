@@ -1423,6 +1423,10 @@ fn check_split(args: &[Expr]) -> Result<(), String> {
     }
 }
 
+/// The most equal parts split makes: more is surely a mistake, and a count
+/// from a rules file must not decide how much memory is asked for.
+const MAX_SPLIT_PARTS: usize = 1_000_000;
+
 const SPLIT_WEIGHTS_ERROR: &str =
     "split's weights should be a positive count or a list like \"30:70\"";
 
@@ -1431,7 +1435,7 @@ const SPLIT_WEIGHTS_ERROR: &str =
 fn split_weights(s: &str) -> Option<Vec<IBig>> {
     let s = strip(s);
     if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
-        let n: usize = s.parse().ok().filter(|&n| n > 0)?;
+        let n: usize = (s.parse().ok()).filter(|n| (1..=MAX_SPLIT_PARTS).contains(n))?;
         return Some(vec![IBig::ONE; n]);
     }
     let ws: Vec<Decimal> = s
