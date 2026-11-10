@@ -1,5 +1,7 @@
 //! hledgers: a Rust port of the hledger plain text accounting tool.
 
+#![forbid(unsafe_code)]
+
 pub mod account;
 pub mod amount;
 pub mod cli;

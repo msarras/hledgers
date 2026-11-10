@@ -266,14 +266,16 @@ fn with_manual_file(
     let path = std::env::temp_dir().join(format!("hledger-{tool}{}.{ext}", std::process::id()));
     let path_str = path.to_string_lossy().into_owned();
     std::fs::write(&path, manual(tool, format) + "\n").map_err(|e| format!("{path_str}: {e}"))?;
-    let result = call_command(&cmd(&single_quote_if_needed(&path_str)));
+    let result = call_command(&cmd(&single_quote_if_needed(&path_str)), &[]);
     let _ = std::fs::remove_file(&path);
     result
 }
 
-/// Run a shell command, failing if it does (callCommand).
-fn call_command(cmd: &str) -> Result<(), String> {
+/// Run a shell command, with these variables added to its environment,
+/// failing if it does (callCommand).
+fn call_command(cmd: &str, env: &[(&str, &str)]) -> Result<(), String> {
     let status = crate::platform::shell_command(cmd)
+        .envs(env.iter().copied())
         .status()
         .map_err(|e| format!("callCommand: {cmd}: {e}"))?;
     match status.code() {
@@ -336,12 +338,10 @@ pub fn run_tldr_for_page(name: &str) -> Result<(), String> {
     if std::fs::write(&path, format!("{page}\n")).is_err() {
         return fallback();
     }
-    // SAFETY: the program is single-threaded here.
-    unsafe { std::env::set_var("TLDR_AUTO_UPDATE_DISABLED", "1") };
-    let result = call_command(&format!(
-        "tldr --render {}",
-        single_quote_if_needed(&path_str)
-    ));
+    let result = call_command(
+        &format!("tldr --render {}", single_quote_if_needed(&path_str)),
+        &[("TLDR_AUTO_UPDATE_DISABLED", "1")],
+    );
     let _ = std::fs::remove_file(&path);
     result.or_else(|_| fallback())
 }
