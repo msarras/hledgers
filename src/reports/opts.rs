@@ -567,17 +567,18 @@ impl ReportSpec {
         let types = |a: &str| j.account_type(a);
         // each transaction copied with the postings the query matches
         let txns = crate::par::map(j.txns.len(), &j.txns, |t| {
-            let mut t = t.clone();
             if related {
+                let mut t = t.clone();
                 filter_transaction_related_postings(q, &mut t);
+                t
             } else {
-                let keep: Vec<bool> = (t.postings.iter())
-                    .map(|p| q.matches_posting_extra(&types, PostingRef::new(&t, p)))
-                    .collect();
-                let mut keep = keep.into_iter();
-                t.postings.retain(|_| keep.next().unwrap_or(false));
+                t.with_postings(
+                    (t.postings.iter())
+                        .filter(|p| q.matches_posting_extra(&types, PostingRef::new(t, p)))
+                        .cloned()
+                        .collect(),
+                )
             }
-            t
         });
         let mut filtered = j.with_txns(txns);
         let amtq = q.clone().filter(Query::is_amt_or_cur);

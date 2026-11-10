@@ -219,13 +219,12 @@ pub fn account_transactions_report(
 /// The transaction with just the postings the query matches
 /// (filterTransactionPostings).
 fn filter_transaction_postings(q: &Query, t: &Transaction) -> Transaction {
-    Transaction {
-        postings: (t.postings.iter())
+    t.with_postings(
+        (t.postings.iter())
             .filter(|p| q.matches_posting(PostingRef::new(t, p)))
             .cloned()
             .collect(),
-        ..t.clone()
-    }
+    )
 }
 
 /// The transaction with just the postings the query matches, `type:`
@@ -235,13 +234,12 @@ fn filter_transaction_postings_extra(
     q: &Query,
     t: &Transaction,
 ) -> Transaction {
-    Transaction {
-        postings: (t.postings.iter())
+    t.with_postings(
+        (t.postings.iter())
             .filter(|p| q.matches_posting_extra(types, PostingRef::new(t, p)))
             .cloned()
             .collect(),
-        ..t.clone()
-    }
+    )
 }
 
 /// The date to show for a transaction in an account's register: the
@@ -257,9 +255,11 @@ pub fn transaction_register_date(
     thisacctq: &Query,
     t: &Transaction,
 ) -> Day {
-    let reported = filter_transaction_postings_extra(types, reportq, t);
-    (reported.postings.iter())
-        .filter(|p| thisacctq.matches_posting(PostingRef::new(t, p)))
+    (t.postings.iter())
+        .filter(|p| {
+            reportq.matches_posting_extra(types, PostingRef::new(t, p))
+                && thisacctq.matches_posting(PostingRef::new(t, p))
+        })
         .map(|p| {
             if date2 {
                 p.date2_in(Some(t))

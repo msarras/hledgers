@@ -401,6 +401,37 @@ impl Default for Transaction {
 }
 
 impl Transaction {
+    /// A copy of the transaction with these postings instead of its own,
+    /// which are not copied.
+    pub fn with_postings(&self, postings: Vec<Posting>) -> Transaction {
+        let Transaction {
+            index,
+            preceding_comment,
+            pos,
+            date,
+            date2,
+            status,
+            code,
+            description,
+            comment,
+            tags,
+            postings: _,
+        } = self;
+        Transaction {
+            index: *index,
+            preceding_comment: preceding_comment.clone(),
+            pos: pos.clone(),
+            date: *date,
+            date2: *date2,
+            status: *status,
+            code: code.clone(),
+            description: description.clone(),
+            comment: comment.clone(),
+            tags: tags.clone(),
+            postings,
+        }
+    }
+
     /// The payee: the description up to a `|`, or all of it (transactionPayee).
     pub fn payee(&self) -> &str {
         payee_and_note_from_description(&self.description).0
