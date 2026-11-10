@@ -758,22 +758,17 @@ fn gain_heuristic_ok(
 pub fn journal_tag_gain_postings(lenient: bool, verbose: bool, mut j: Journal) -> Journal {
     let lotful = j.lotful_commodities();
     let lots_tags = j.account_lots_tags();
-    let txns = std::mem::take(&mut j.txns);
+    let mut txns = std::mem::take(&mut j.txns);
     let lk = LotLookups {
         account_types: &j.account_types,
         lotful: &lotful,
         lots_tags: &lots_tags,
     };
-    let txns = txns
-        .into_iter()
-        .map(|t| {
-            if transaction_has_lotful_amounts(&lotful, &t) {
-                transaction_tag_gain_postings(!lenient, verbose, &lk, t)
-            } else {
-                t
-            }
-        })
-        .collect();
+    crate::par::for_each_mut(txns.len(), &mut txns, |t| {
+        if transaction_has_lotful_amounts(&lotful, t) {
+            *t = transaction_tag_gain_postings(!lenient, verbose, &lk, std::mem::take(t));
+        }
+    });
     j.txns = txns;
     j
 }
@@ -817,7 +812,7 @@ pub fn journal_classify_lot_postings(
 /// from the basis (journalInferPostingsTransactedCost).
 pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
     let mut txns = std::mem::take(&mut j.txns);
-    for t in &mut txns {
+    crate::par::for_each_mut(txns.len(), &mut txns, |t| {
         // only an amount with a basis cost and no transacted cost gets one
         if !t
             .postings
@@ -825,7 +820,7 @@ pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
             .flat_map(|p| p.amount.amounts_raw())
             .any(|a| a.cost.is_none() && has_basis_cost(a))
         {
-            continue;
+            return;
         }
         let is_equity = |a: &str| {
             j.account_type(a)
@@ -865,7 +860,7 @@ pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
                 p.amount = m;
             }
         }
-    }
+    });
     j.txns = txns;
     j
 }

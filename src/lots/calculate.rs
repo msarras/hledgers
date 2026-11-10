@@ -1648,14 +1648,16 @@ fn group_indexed_transfer_postings(
 /// the postings classification left unclassified
 /// (journalStripBalancerCopiedBases).
 pub fn journal_strip_balancer_copied_bases(j: &mut Journal) {
-    for p in j.txns.iter_mut().flat_map(|t| &mut t.postings) {
-        if has_balancer_copied_basis(p) && !is_classified_posting(p) {
-            p.amount = p.amount.map(|a| Amount {
-                cost_basis: None,
-                ..a.clone()
-            });
+    crate::par::for_each_mut(j.txns.len(), &mut j.txns, |t| {
+        for p in &mut t.postings {
+            if has_balancer_copied_basis(p) && !is_classified_posting(p) {
+                p.amount = p.amount.map(|a| Amount {
+                    cost_basis: None,
+                    ..a.clone()
+                });
+            }
         }
-    }
+    });
 }
 
 /// In each disposal with a transacted price, add a realised gain posting
