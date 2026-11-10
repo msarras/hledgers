@@ -199,7 +199,7 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         return Err("No relevant transactions found. Check your investments query".to_string());
     }
     let filtered = j.with_txns(r.trans.iter().map(|t| (*t).clone()).collect());
-    let (full_span, periods) = spec.report_span(&filtered);
+    let (full_span, periods) = spec.report_span(&filtered)?;
     let undefined = || cant_compute("Undefined start or end of the period");
     let spans: Vec<(Day, Day)> = periods
         .ok_or_else(undefined)?

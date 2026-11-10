@@ -177,7 +177,7 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         if !known {
             return Err(unsupported_output_format_error(&fmt));
         }
-        let (span, _) = spec.report_span(j);
+        let (span, _) = spec.report_span(j)?;
         let mut report = budget_report(&spec, &opts.input.balancing, span, j)?;
         report.style_amounts(&styles);
         match fmt.as_str() {

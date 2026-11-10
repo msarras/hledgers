@@ -40,7 +40,7 @@ pub fn stats(opts: &CliOpts, j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
     let oneline = raw.bool("oneline");
     let verbose = raw.bool("verbose");
-    let (_, periods) = opts.spec.report_span_both_dates(&j);
+    let (_, periods) = opts.spec.report_span_both_dates(&j)?;
     let j = ledger_journal(&opts.spec.query, j);
     let (texts, counts): (Vec<String>, Vec<usize>) =
         maybe_day_partition_to_date_spans(periods.as_ref())

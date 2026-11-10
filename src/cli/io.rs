@@ -246,7 +246,9 @@ pub fn warn_if_large_multi_period_report(opts: &CliOpts, j: &crate::model::Journ
     if opts.spec.opts.interval == crate::dates::Interval::NoInterval {
         return;
     }
-    let (span, periods) = opts.spec.report_span(j);
+    let Ok((span, periods)) = opts.spec.report_span(j) else {
+        return;
+    };
     let n = periods.map_or(0, |p| p.periods().count());
     if n > 10000 {
         crate::console::warn(

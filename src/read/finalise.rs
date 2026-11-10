@@ -46,7 +46,7 @@ pub fn journal_finalise(
     journal_style_amounts(&mut j)?;
     let mut j = journal_apply_commodity_aliases(j)?;
     // forecast and account tags
-    j = journal_add_forecast(iopts, j);
+    j = journal_add_forecast(iopts, j)?;
     journal_postings_add_account_tags(&mut j);
     // pre-balancing cost and equity tagging
     j = journal_tag_costs_and_equity_and_maybe_infer_costs(iopts, false, j)?;
@@ -459,23 +459,25 @@ impl AliasConverter<'_> {
 
 /// With `--forecast`, add the transactions the periodic transaction rules
 /// generate in the forecast period, styled (journalAddForecast).
-fn journal_add_forecast(iopts: &InputOpts, mut j: Journal) -> Journal {
+fn journal_add_forecast(iopts: &InputOpts, mut j: Journal) -> Result<Journal, String> {
     let Some(span) = forecast_period(iopts, &j) else {
-        return j;
+        return Ok(j);
     };
     let styles = j.commodity_styles();
-    let generated: Vec<Transaction> = j
-        .periodic_txns
-        .iter()
-        .flat_map(|pt| super::modifiers::run_periodic_transaction(iopts.verbose_tags, pt, span))
-        .filter(|t| span.contains(t.date))
-        .map(|mut t| {
-            t.style_amounts(&styles);
-            t
-        })
-        .collect();
+    let mut generated = Vec::new();
+    for pt in &j.periodic_txns {
+        let txns = super::modifiers::run_periodic_transaction(iopts.verbose_tags, pt, span)?;
+        generated.extend(
+            txns.into_iter()
+                .filter(|t| span.contains(t.date))
+                .map(|mut t| {
+                    t.style_amounts(&styles);
+                    t
+                }),
+        );
+    }
     j.txns.extend(generated);
-    j
+    Ok(j)
 }
 
 /// The span to generate forecast transactions in, with `--forecast`: its
@@ -510,7 +512,7 @@ fn warn_if_many_forecast_transactions(iopts: &InputOpts, j: &Journal) {
     let n: usize = j
         .periodic_txns
         .iter()
-        .map(|pt| super::modifiers::periodic_transaction_dates(pt, span).count())
+        .map(|pt| super::modifiers::periodic_transaction_dates(pt, span).map_or(0, |ds| ds.count()))
         .sum();
     if n > MAX_EXPECTED_FORECAST_TXNS {
         crate::console::warn(

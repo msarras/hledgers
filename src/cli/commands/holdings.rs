@@ -1769,7 +1769,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
 fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<String, String> {
     let spec = &opts.spec;
     let ropts = &spec.opts;
-    let periods = maybe_day_partition_to_date_spans(spec.report_span_both_dates(j).1.as_ref());
+    let periods = maybe_day_partition_to_date_spans(spec.report_span_both_dates(j)?.1.as_ref());
     let mut reports: Vec<(DateSpan, Report)> = Vec::new();
     for spn in periods {
         let Some(e) = spn.end() else { continue };

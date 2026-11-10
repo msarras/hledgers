@@ -282,7 +282,7 @@ pub fn multi_balance_report_with(
     j: &Journal,
     oracle: &PriceOracle,
 ) -> Result<MultiBalanceReport, String> {
-    let (span, colspans) = spec.report_span(j);
+    let (span, colspans) = spec.report_span(j)?;
     let spec = make_report_query(spec, span);
     let valued = get_postings(&spec, j, oracle, span)?;
     let postings: Vec<PostingRef> = valued.postings().collect();
@@ -302,7 +302,7 @@ pub fn compound_balance_report(
     sections: &[SubreportSpec],
 ) -> Result<CompoundPeriodicReport<DisplayName, MixedAmount>, String> {
     let oracle = PriceOracle::new(spec.opts.infer_prices, spec.opts.debug, j);
-    let (span, colspans) = spec.report_span(j);
+    let (span, colspans) = spec.report_span(j)?;
     let spec = make_report_query(spec, span);
     let valued = get_postings(&spec, j, &oracle, span)?;
     let counting = is_count(spec.opts.balance_calc);

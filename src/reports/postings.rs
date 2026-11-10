@@ -59,7 +59,7 @@ pub fn postings_report<'j>(
     j: &'j Journal,
 ) -> Result<Vec<PostingsReportItem<'j>>, String> {
     let ropts = &spec.opts;
-    let (reportspan, periods) = spec.report_span_both_dates(j);
+    let (reportspan, periods) = spec.report_span_both_dates(j)?;
     let colspans = maybe_day_partition_to_date_spans(periods.as_ref());
     let date2 = ropts.date2;
     let depth = spec.query.depth();
@@ -116,7 +116,7 @@ pub fn postings_report_start_balances(
     if ropts.balance_accum != BalanceAccumulation::Historical || ropts.average {
         return Ok(balances);
     }
-    let (reportspan, _) = spec.report_span_both_dates(j);
+    let (reportspan, _) = spec.report_span_both_dates(j)?;
     let (preceding, _) = matched_postings_before_and_during(spec, j, reportspan)?;
     let depth = spec.query.depth();
     for (p, _) in preceding {

@@ -157,11 +157,13 @@ fn render_posting_comment_dates(p: &mut Posting) {
 pub fn periodic_transaction_dates(
     pt: &PeriodicTransaction,
     requested: DateSpan,
-) -> impl Iterator<Item = Day> {
+) -> Result<impl Iterator<Item = Day>, String> {
     let span = pt.span.valid_defaults_from(requested);
-    split_span_to_date_spans(span.start().is_none(), &pt.interval, span)
-        .filter_map(|s| s.start())
-        .filter(move |d| requested.contains(*d))
+    Ok(
+        split_span_to_date_spans(span.start().is_none(), &pt.interval, span)?
+            .filter_map(|s| s.start())
+            .filter(move |d| requested.contains(*d)),
+    )
 }
 
 /// The transactions a periodic transaction rule generates in a span,
@@ -171,7 +173,7 @@ pub fn run_periodic_transaction(
     verbose_tags: bool,
     pt: &PeriodicTransaction,
     requested: DateSpan,
-) -> Vec<Transaction> {
+) -> Result<Vec<Transaction>, String> {
     let mut t = Transaction {
         pos: pt.pos.clone(),
         status: pt.status,
@@ -187,9 +189,9 @@ pub fn run_periodic_transaction(
         format!("~ {}", pt.period_expr),
     );
     t.add_hidden_and_maybe_visible_tag(verbose_tags, tag);
-    periodic_transaction_dates(pt, requested)
+    Ok(periodic_transaction_dates(pt, requested)?
         .map(|date| Transaction { date, ..t.clone() })
-        .collect()
+        .collect())
 }
 
 pub(crate) mod tests {
@@ -253,6 +255,7 @@ pub(crate) mod tests {
             postings: vec![Posting::new("a", usd(d("1")))],
         };
         run_periodic_transaction(true, &pt, span)
+            .unwrap()
             .iter()
             .map(|t| show_transaction(t, PostingLayout::default(), false))
             .collect()

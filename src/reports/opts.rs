@@ -428,13 +428,16 @@ impl ReportSpec {
     /// being at least the day after the latest P directive not after
     /// today), enlarged to whole report intervals; and the report periods,
     /// if any (reportSpan).
-    pub fn report_span(&self, j: &Journal) -> (DateSpan, Option<DayPartition>) {
+    pub fn report_span(&self, j: &Journal) -> Result<(DateSpan, Option<DayPartition>), String> {
         self.report_span_helper(false, j)
     }
 
     /// Like [`report_span`](ReportSpec::report_span), with both primary
     /// and secondary dates (reportSpanBothDates).
-    pub fn report_span_both_dates(&self, j: &Journal) -> (DateSpan, Option<DayPartition>) {
+    pub fn report_span_both_dates(
+        &self,
+        j: &Journal,
+    ) -> Result<(DateSpan, Option<DayPartition>), String> {
         self.report_span_helper(true, j)
     }
 
@@ -442,14 +445,14 @@ impl ReportSpec {
         &self,
         both_dates: bool,
         j: &Journal,
-    ) -> (DateSpan, Option<DayPartition>) {
+    ) -> Result<(DateSpan, Option<DayPartition>), String> {
         let (span, adjust) = self.report_span_and_adjust(both_dates, j);
-        let periods = split_span(adjust, &self.opts.interval, span);
+        let periods = split_span(adjust, &self.opts.interval, span)?;
         let enlarged = periods.as_ref().map_or(DateSpan::default(), |p| {
             let (s, e) = p.start_end();
             DateSpan::exact(Some(s), Some(e.add_days(1)))
         });
-        (enlarged, periods)
+        Ok((enlarged, periods))
     }
 
     /// The requested span with its open ends filled from the journal, and
@@ -555,8 +558,8 @@ impl ReportSpec {
         let ropts = &self.opts;
         let gain = ropts.balance_calc == BalanceCalculation::Gain;
         let periods = match (&ropts.value, &ropts.interval) {
-            (Some(ValuationType::AtEnd(_)), Interval::NoInterval) => self.report_span(&j).1,
-            (Some(ValuationType::AtEnd(_)), _) => self.report_span_both_dates(&j).1,
+            (Some(ValuationType::AtEnd(_)), Interval::NoInterval) => self.report_span(&j)?.1,
+            (Some(ValuationType::AtEnd(_)), _) => self.report_span_both_dates(&j)?.1,
             _ => None,
         };
         let styles = j.commodity_styles();

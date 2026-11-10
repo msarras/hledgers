@@ -1986,9 +1986,12 @@ pub fn maybe_day_partition_to_date_spans(p: Option<&DayPartition>) -> Vec<DateSp
 /// `adjust`, a week, month, quarter, year or nth-weekday interval starts at
 /// the boundary of its kind on or before the span's start; the last period
 /// always runs to the boundary on or after the span's end.
-pub fn split_span(adjust: bool, i: &Interval, ds: DateSpan) -> Option<DayPartition> {
-    let (e, bs) = split_span_boundaries(adjust, i, ds)?;
-    spans_from_boundaries(e, bs)
+pub fn split_span(
+    adjust: bool,
+    i: &Interval,
+    ds: DateSpan,
+) -> Result<Option<DayPartition>, String> {
+    Ok(split_span_boundaries(adjust, i, ds)?.and_then(|(e, bs)| spans_from_boundaries(e, bs)))
 }
 
 /// The partition made by these boundaries up to the first one not before
@@ -2005,8 +2008,8 @@ pub fn split_span_to_date_spans(
     adjust: bool,
     i: &Interval,
     ds: DateSpan,
-) -> impl Iterator<Item = DateSpan> {
-    let bounds: Box<dyn Iterator<Item = Day>> = match split_span_boundaries(adjust, i, ds) {
+) -> Result<impl Iterator<Item = DateSpan>, String> {
+    let bounds: Box<dyn Iterator<Item = Day>> = match split_span_boundaries(adjust, i, ds)? {
         Some((e, mut bs)) => match bs.next() {
             Some(b) if b < e => Box::new(until(e, std::iter::once(b).chain(bs))),
             _ => Box::new(std::iter::empty()),
@@ -2014,27 +2017,36 @@ pub fn split_span_to_date_spans(
         None => Box::new(std::iter::empty()),
     };
     let mut prev = None;
-    bounds.filter_map(move |b| {
+    Ok(bounds.filter_map(move |b| {
         let span = prev.map(|p| DateSpan::exact(Some(p), Some(b)));
         prev = Some(b);
         span
-    })
+    }))
 }
 
 /// The start and exclusive end of the periods [`split_span`] would make
 /// (splitSpanStartEnd).
-pub fn split_span_start_end(adjust: bool, i: &Interval, ds: DateSpan) -> Option<(Day, Day)> {
-    let (e, mut bs) = split_span_boundaries(adjust, i, ds)?;
-    let b = bs.next().filter(|b| *b < e)?;
+pub fn split_span_start_end(
+    adjust: bool,
+    i: &Interval,
+    ds: DateSpan,
+) -> Result<Option<(Day, Day)>, String> {
+    let Some((e, mut bs)) = split_span_boundaries(adjust, i, ds)? else {
+        return Ok(None);
+    };
+    let Some(b) = bs.next().filter(|b| *b < e) else {
+        return Ok(None);
+    };
     let last = until(e, std::iter::once(b).chain(bs)).last();
-    Some((b, last.unwrap_or(b)))
+    Ok(Some((b, last.unwrap_or(b))))
 }
 
 /// The start of the period of this interval that contains the date, for
 /// the intervals with natural boundaries; otherwise the date
 /// (intervalBoundaryBefore).
-pub fn interval_boundary_before(i: &Interval, d: Day) -> Day {
-    split_span(true, i, DateSpan::exact(Some(d), Some(nextday(d)))).map_or(d, |p| p.start_end().0)
+pub fn interval_boundary_before(i: &Interval, d: Day) -> Result<Day, String> {
+    let periods = split_span(true, i, DateSpan::exact(Some(d), Some(nextday(d))))?;
+    Ok(periods.map_or(d, |p| p.start_end().0))
 }
 
 /// Boundaries before `end`, then the first one not before it
@@ -2057,12 +2069,40 @@ type Boundaries = Box<dyn Iterator<Item = Day>>;
 
 /// The day the periods must reach, and the dates the periods of an
 /// interval covering a span start on, the first on or before the span's
-/// start (splitSpanBoundaries).
-fn split_span_boundaries(adjust: bool, i: &Interval, ds: DateSpan) -> Option<(Day, Boundaries)> {
-    use Interval::*;
+/// start (splitSpanBoundaries). A day of month or month that does not
+/// exist is an error, as upstream's when it computes the first boundary
+/// (the guards of nextnthdayofmonth and nextmonthandday).
+fn split_span_boundaries(
+    adjust: bool,
+    i: &Interval,
+    ds: DateSpan,
+) -> Result<Option<(Day, Boundaries)>, String> {
     if ds == DateSpan::default() || ds.is_empty() {
-        return None;
+        return Ok(None);
     }
+    match *i {
+        Interval::MonthDay(n) if !valid_day(n) => {
+            return Err(format!("nextnthdayofmonth: day should be 1..31, not {n}"));
+        }
+        Interval::MonthAndDay(m, _) if !valid_month(m) => {
+            return Err(format!("nextmonthandday: month should be 1..12, not {m}"));
+        }
+        Interval::MonthAndDay(_, n) if !valid_day(n) => {
+            return Err(format!("nextmonthandday: day should be 1..31, not {n}"));
+        }
+        _ => {}
+    }
+    Ok(valid_split_span_boundaries(adjust, i, ds))
+}
+
+/// The boundaries of a valid interval over a span that is not all time or
+/// empty.
+fn valid_split_span_boundaries(
+    adjust: bool,
+    i: &Interval,
+    ds: DateSpan,
+) -> Option<(Day, Boundaries)> {
+    use Interval::*;
     let same = |d: Day| d;
     let adjusted = |f: fn(Day) -> Day| if adjust { f } else { same };
     match *i {
@@ -3342,16 +3382,20 @@ pub(crate) mod tests {
         );
         assert!(empty_date_span().is_empty());
         assert_eq!(
-            interval_boundary_before(&Interval::Months(1), today),
+            interval_boundary_before(&Interval::Months(1), today).unwrap(),
             day(2024, 5, 1)
         );
-        assert_eq!(interval_boundary_before(&Interval::Days(1), today), today);
+        assert_eq!(
+            interval_boundary_before(&Interval::Days(1), today).unwrap(),
+            today
+        );
         assert_eq!(
             split_span(
                 true,
                 &Interval::Days(0),
                 DateSpan(ex(2024, 1, 1), ex(2024, 1, 5))
             )
+            .unwrap()
             .map(|p| p.start_end()),
             Some((day(2024, 1, 1), day(2024, 1, 1)))
         );
@@ -3436,7 +3480,41 @@ pub(crate) mod tests {
         b: Option<EfDay>,
         e: Option<EfDay>,
     ) -> Option<Vec<(Day, Day)>> {
-        split_span(adjust, &i, DateSpan(b, e)).map(|p| p.periods().collect())
+        split_span(adjust, &i, DateSpan(b, e))
+            .unwrap()
+            .map(|p| p.periods().collect())
+    }
+
+    // A day of month or month that does not exist is an error when a span
+    // is split, as upstream's, but not for all time, which is never split.
+    #[test]
+    fn invalid_interval_days() {
+        let year = DateSpan(
+            Day::from_ymd(2024, 1, 1).map(EfDay::flex),
+            Day::from_ymd(2024, 12, 31).map(EfDay::flex),
+        );
+        let err = "nextnthdayofmonth: day should be 1..31, not 32";
+        assert_eq!(
+            split_span(true, &Interval::MonthDay(32), year).unwrap_err(),
+            err
+        );
+        assert_eq!(
+            split_span_start_end(true, &Interval::MonthDay(32), year).unwrap_err(),
+            err
+        );
+        assert!(split_span_to_date_spans(true, &Interval::MonthDay(32), year).is_err());
+        assert_eq!(
+            split_span(true, &Interval::MonthDay(32), DateSpan::default()),
+            Ok(None)
+        );
+        assert_eq!(
+            split_span(true, &Interval::MonthAndDay(13, 1), year),
+            Err("nextmonthandday: month should be 1..12, not 13".to_string())
+        );
+        assert_eq!(
+            split_span(true, &Interval::MonthAndDay(12, 0), year),
+            Err("nextmonthandday: day should be 1..31, not 0".to_string())
+        );
     }
 
     // The doctests of splitSpan and splitSpanToDateSpans.
@@ -3458,7 +3536,10 @@ pub(crate) mod tests {
                 (d(2008, 10, 1), d(2008, 12, 31))
             ])
         );
-        assert_eq!(split_span(true, &Quarters(1), DateSpan::default()), None);
+        assert_eq!(
+            split_span(true, &Quarters(1), DateSpan::default()).unwrap(),
+            None
+        );
         assert_eq!(t(Days(1), fl(2008, 1, 1), fl(2008, 1, 1)), None);
         assert_eq!(t(Quarters(1), fl(2008, 1, 1), fl(2008, 1, 1)), None);
         assert_eq!(
@@ -3521,6 +3602,7 @@ pub(crate) mod tests {
         );
         let spans = |i, b, e| {
             split_span_to_date_spans(true, &i, DateSpan(b, e))
+                .unwrap()
                 .map(|s| format!("{s:?}"))
                 .collect::<Vec<_>>()
         };
@@ -3594,7 +3676,7 @@ pub(crate) mod tests {
         ] {
             for n in 1..=7 {
                 assert_eq!(
-                    split_span(false, &Interval::DaysOfWeek(vec![n]), ds),
+                    split_span(false, &Interval::DaysOfWeek(vec![n]), ds).unwrap(),
                     dayofweek(n, ds),
                     "{ds:?} {n}"
                 );
@@ -3639,16 +3721,18 @@ pub(crate) mod tests {
         for adjust in [false, true] {
             for i in &intervals {
                 for ds in spans {
-                    let partition = split_span(adjust, i, ds);
+                    let partition = split_span(adjust, i, ds).unwrap();
                     assert_eq!(
-                        split_span_to_date_spans(adjust, i, ds).collect::<Vec<_>>(),
+                        split_span_to_date_spans(adjust, i, ds)
+                            .unwrap()
+                            .collect::<Vec<_>>(),
                         partition
                             .as_ref()
                             .map_or(vec![], DayPartition::to_date_spans),
                         "{adjust} {i:?} {ds:?}"
                     );
                     assert_eq!(
-                        split_span_start_end(adjust, i, ds),
+                        split_span_start_end(adjust, i, ds).unwrap(),
                         partition.map(|p| {
                             let (s, e) = p.start_end();
                             (s, nextday(e))

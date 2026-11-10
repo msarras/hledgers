@@ -54,9 +54,10 @@ pub fn budget_report(
         account_list_mode: AccountListMode::Tree,
         ..spec.opts.clone()
     };
-    let budgeted: Vec<Transaction> = (j.periodic_txns.iter())
-        .flat_map(|pt| run_periodic_transaction(false, pt, report_span))
-        .collect();
+    let mut budgeted: Vec<Transaction> = Vec::new();
+    for pt in &j.periodic_txns {
+        budgeted.extend(run_periodic_transaction(false, pt, report_span)?);
+    }
     let budgeted: HashSet<&str> = (budgeted.iter())
         .flat_map(|t| t.postings.iter().map(|p| &*p.account))
         .flat_map(expand_account_name)
@@ -68,8 +69,8 @@ pub fn budget_report(
         query: budget_goal_query(&spec.query),
         ..spec.clone()
     };
-    let (_, actual_spans) = spec.report_span(&actualj);
-    let (_, budget_spans) = budget_spec.report_span(&budgetj);
+    let (_, actual_spans) = spec.report_span(&actualj)?;
+    let (_, budget_spans) = budget_spec.report_span(&budgetj)?;
     let all_spans = match (&ropts.interval, &budget_spans) {
         // without an interval, the goals' span may be shorter than the
         // actual changes', and can be replaced by it
@@ -194,11 +195,13 @@ fn journal_add_budget_goal_transactions(
     let pts: Vec<_> = (j.periodic_txns.iter())
         .filter(|pt| pt.description.to_lowercase().contains(&pattern))
         .collect();
-    let start = [j.date_span(false).start(), report_span.start()]
+    let start = match [j.date_span(false).start(), report_span.start()]
         .into_iter()
         .flatten()
         .min()
-        .map(|d| {
+    {
+        None => None,
+        Some(d) => {
             // the interval and dates of the periodic transaction with the
             // longest interval, the last of those if several
             let (interval, span) = (pts.iter())
@@ -206,20 +209,25 @@ fn journal_add_budget_goal_transactions(
                 .map_or((Interval::Days(1), DateSpan::default()), |pt| {
                     (pt.interval.clone(), pt.span)
                 });
-            let interval_start = interval_boundary_before(&interval, d);
-            d.min(
-                span.start()
-                    .map_or(interval_start, |s| s.max(interval_start)),
+            let interval_start = interval_boundary_before(&interval, d)?;
+            Some(
+                d.min(
+                    span.start()
+                        .map_or(interval_start, |s| s.max(interval_start)),
+                ),
             )
-        });
+        }
+    };
     let budget_span = DateSpan::exact(start, report_span.end());
-    let txns = (pts.iter())
-        .flat_map(|pt| run_periodic_transaction(false, pt, budget_span))
-        .map(|t| Transaction {
-            description: "Budget transaction".to_string(),
-            ..t
-        })
-        .collect();
+    let mut txns = Vec::new();
+    for pt in &pts {
+        for t in run_periodic_transaction(false, pt, budget_span)? {
+            txns.push(Transaction {
+                description: "Budget transaction".to_string(),
+                ..t
+            });
+        }
+    }
     let mut budgetj = Journal { txns, ..j.clone() };
     journal_number_and_tie_transactions(&mut budgetj);
     journal_style_amounts(&mut budgetj)?;
