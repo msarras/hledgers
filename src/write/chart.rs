@@ -1,8 +1,9 @@
 //! A renderer-independent description of a chart, made from a report
 //! (Hledger.Write.Chart), with its colours (Hledger.Write.Chart.Palette)
 //! and its data as CSV records. Each chart-capable report has an adapter
-//! (cli::chart) making its default chart, and the text and svg renderers
-//! (write::chart_text, write::chart_svg) draw one.
+//! (in cli::chart, or with the holdings command) making its default chart,
+//! and the text and svg renderers (write::chart_text, write::chart_svg)
+//! draw one.
 //!
 //! The model carries the report's display information (period headings,
 //! account display names, commodity display styles, the title), so that a

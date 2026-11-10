@@ -1,5 +1,8 @@
-//! Reading journals (Hledger.Read and its submodules): the input options,
-//! and the parsers for amounts and journal files.
+//! Reading journals (Hledger.Read and its submodules): the input options;
+//! the readers of journal, timeclock, timedot and CSV files, with the CSV
+//! rules and the .latest files; and the stages that finalise a journal
+//! (costs, transaction modifiers, balancing and checks), with their error
+//! excerpts.
 
 pub mod amount;
 pub mod balancing;

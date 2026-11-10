@@ -1,7 +1,7 @@
-//! Turning reports into charts, and the --chart option (Hledger.Cli.Chart).
-//! Each adapter chooses a useful default chart for its report, so that
-//! charts work without configuration. The register and aregister adapters
-//! live with those commands.
+//! Turning reports into charts, and the --chart option and its flags
+//! (Hledger.Cli.Chart). Each adapter chooses a useful default chart for its
+//! report, so that charts work without configuration. The holdings adapter
+//! lives with that command.
 
 use std::collections::{BTreeMap, BTreeSet};
 
