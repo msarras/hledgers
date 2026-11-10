@@ -583,7 +583,11 @@ fn elision(max: Option<isize>, sep: usize, n: usize, last_total: isize) -> Optio
     let full_len = (sep + 7 + n.to_string().len()) as isize;
     let (s, len) = match max {
         Some(m) if full_len > m => {
-            let kept: String = full.chars().take((m - 2).max(0) as usize).collect();
+            // a width from --format can be anything; Haskell's Int wraps
+            let kept: String = full
+                .chars()
+                .take(m.wrapping_sub(2).max(0) as usize)
+                .collect();
             (kept + "..", m.min(full_len).max(2))
         }
         Some(m) => (full, m.min(full_len).max(2)),
