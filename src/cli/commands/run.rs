@@ -3,7 +3,7 @@
 //! an interactive prompt, reading each journal once.
 
 use std::cell::{OnceCell, RefCell};
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{IsTerminal, Write};
 use std::time::SystemTime;
 
 use crate::cli::args::{self, Arity, Flag, Mode};
@@ -674,11 +674,12 @@ impl<'a> Session<'a> {
             }
         };
         if !interactive {
+            // standard input is locked only while a line is read, so that a
+            // command run from it can read standard input too
             let stdin = std::io::stdin();
-            let mut lines = stdin.lock();
             loop {
                 let mut line = String::new();
-                match lines.read_line(&mut line) {
+                match stdin.read_line(&mut line) {
                     Ok(0) | Err(_) => return Ok(()),
                     Ok(_) => {}
                 }
