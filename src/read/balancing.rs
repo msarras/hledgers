@@ -142,8 +142,14 @@ fn posting_balancing_amount(set_aside: bool, p: &Posting) -> MixedAmount {
 /// balanced virtual postings, the amounts at cost must sum to zero, or to
 /// something that looks zero at the entry's own precisions, or with
 /// `--txn-tolerance=display`, at the display precisions. When two or more
-/// look non-zero but have the same sign, that is reported instead.
-pub fn transaction_check_balanced(bopts: &BalancingOpts, t: &Transaction) -> Vec<String> {
+/// look non-zero but have the same sign, that is reported instead. The
+/// real or balanced virtual postings `zeroed` says had an amount just
+/// inferred from the others sum to exactly zero, and are not summed again.
+pub fn transaction_check_balanced(
+    bopts: &BalancingOpts,
+    t: &Transaction,
+    zeroed: [bool; 2],
+) -> Vec<String> {
     let set_aside = set_aside_test(t);
     let of =
         |r: Realness| -> Vec<&Posting> { t.postings.iter().filter(|p| p.realness == r).collect() };
@@ -252,8 +258,10 @@ pub fn transaction_check_balanced(bopts: &BalancingOpts, t: &Transaction) -> Vec
         }
         msg
     };
-    [message(&rps, true), message(&bvps, false)]
+    [(zeroed[0], &rps, true), (zeroed[1], &bvps, false)]
         .into_iter()
+        .filter(|&(zeroed, ..)| !zeroed)
+        .map(|(_, ps, real)| message(ps, real))
         .filter(|m| !m.is_empty())
         .collect()
 }
@@ -383,8 +391,8 @@ pub fn balance_transaction(
     } else {
         t
     };
-    let (mut t, inferred) = infer_balancing_amount(&bopts.inferred_amount_styles, t)?;
-    let errs = transaction_check_balanced(bopts, &t);
+    let (mut t, inferred, zeroed) = infer_balancing_amount(&bopts.inferred_amount_styles, t)?;
+    let errs = transaction_check_balanced(bopts, &t, zeroed);
     if !errs.is_empty() {
         let mut all = Vec::new();
         if transaction_commodities(&t).len() > 1 && !bopts.infer_balancing_costs {
@@ -433,14 +441,16 @@ pub fn transaction_balance_error(t: &Transaction, errs: &[String]) -> String {
 /// the one balanced virtual posting, from the others' amounts at cost; a
 /// virtual posting with no amount gets zero. Inferred amounts get these
 /// styles, which have no rounding, so they keep their precision. Returns
-/// the transaction and the accounts and amounts inferred, in order
-/// (transactionInferBalancingAmount).
+/// the transaction, the accounts and amounts inferred, in order, and
+/// whether the real and the balanced virtual postings had one inferred,
+/// which makes them sum to exactly zero (transactionInferBalancingAmount).
+#[allow(clippy::type_complexity)]
 fn infer_balancing_amount(
     styles: &CommodityStyles,
     mut t: Transaction,
-) -> Result<(Transaction, Vec<(AccountName, MixedAmount)>), String> {
+) -> Result<(Transaction, Vec<(AccountName, MixedAmount)>, [bool; 2]), String> {
     if t.postings.iter().all(Posting::has_amount) {
-        return Ok((t, Vec::new()));
+        return Ok((t, Vec::new(), [false; 2]));
     }
     let set_aside = set_aside_test(&t);
     let mut sums = [MixedAmount::null(), MixedAmount::null()];
@@ -475,14 +485,21 @@ fn infer_balancing_amount(
     }
     let flags: Vec<bool> = t.postings.iter().map(&set_aside).collect();
     let mut inferred = Vec::new();
+    let mut zeroed = [false; 2];
     for (p, set_aside) in t.postings.iter_mut().zip(flags) {
         if set_aside || p.has_amount() {
             continue;
         }
         let a = match p.realness {
             // at most one posting of each kind has no amount
-            Realness::Real => std::mem::take(&mut sums[0]),
-            Realness::BalancedVirtual => std::mem::take(&mut sums[1]),
+            Realness::Real => {
+                zeroed[0] = true;
+                std::mem::take(&mut sums[0])
+            }
+            Realness::BalancedVirtual => {
+                zeroed[1] = true;
+                std::mem::take(&mut sums[1])
+            }
             Realness::Virtual => MixedAmount::from_amount(Amount::null()),
         };
         let a = (-a).to_cost();
@@ -496,7 +513,7 @@ fn infer_balancing_amount(
         p.amount = a.clone();
         inferred.push((p.account.clone(), a));
     }
-    Ok((t, inferred))
+    Ok((t, inferred, zeroed))
 }
 
 /// The amounts of some postings.
@@ -1192,7 +1209,7 @@ pub(crate) mod tests {
     }
 
     fn balanced(postings: Vec<Posting>) -> bool {
-        transaction_check_balanced(&BalancingOpts::default(), &txn(postings)).is_empty()
+        transaction_check_balanced(&BalancingOpts::default(), &txn(postings), [false; 2]).is_empty()
     }
 
     // tests_Balancing "transactionInferBalancingAmount".
