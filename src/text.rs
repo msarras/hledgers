@@ -251,6 +251,16 @@ pub fn quote_if_needed(s: &str) -> String {
     }
 }
 
+/// Like [`quote_if_needed`], but also for text containing the redirection
+/// characters `<` and `>` (Hledger.Utils.String's quoteIfNeeded).
+pub fn quote_if_needed_or_redirect(s: &str) -> String {
+    if s.contains(['\'', '"', ' ', '\t', '\n', '\r', '<', '>']) {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
 /// Like [`quote_if_needed`], but only for text containing white space and
 /// not already enclosed in single or double quotes (quoteIfSpaced).
 pub fn quote_if_spaced(s: &str) -> String {

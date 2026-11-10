@@ -1,6 +1,7 @@
-//! What differs between unix and Windows: the home directory, which files
-//! are programs, how a shell command line is run, and the signal that ended
-//! a child. Everything else in hledgers is plain std and builds anywhere.
+//! What differs between unix and Windows: the home and config directories,
+//! which files are programs and which are in PATH, how a shell command line
+//! is run, and the signal that ended a child. Everything else in hledgers
+//! is plain std and builds anywhere.
 
 /// The user's home directory (getHomeDirectory): HOME, or USERPROFILE on
 /// Windows when HOME is unset.
@@ -14,6 +15,34 @@ pub fn home_dir() -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// hledger's directory in the user's XDG config directory:
+/// $XDG_CONFIG_HOME/hledger, or ~/.config/hledger (getXdgDirectory
+/// XdgConfig "hledger").
+pub fn config_dir() -> String {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|d| d.starts_with('/'))
+        .unwrap_or_else(|| format!("{}/.config", home_dir()));
+    format!("{base}/hledger")
+}
+
+/// The executables of this name in PATH, in order (findExecutables).
+pub fn find_executables(name: &str) -> Vec<String> {
+    if name.contains(std::path::is_separator) {
+        return if is_executable(std::path::Path::new(name)) {
+            vec![name.to_string()]
+        } else {
+            Vec::new()
+        };
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|d| d.join(name))
+        .filter(|f| is_executable(f))
+        .map(|f| f.display().to_string())
+        .collect()
 }
 
 /// Whether a path is a program that can be run (executable): on unix a

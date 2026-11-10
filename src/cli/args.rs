@@ -2,7 +2,7 @@
 //! Hledger.Cli.CliOptions).
 
 use crate::reports::opts::RawOpts;
-use crate::text::hs_lines;
+use crate::text::{hs_lines, quote_if_needed_or_redirect};
 use std::collections::HashSet;
 
 /// Whether a flag takes a value.
@@ -461,7 +461,10 @@ pub fn cmdargs_parse_with(
 ) -> Result<RawOpts, String> {
     check_req_val_flag_args_have_values(req_val_flag_args, args)?;
     process_main(addons, &ensure_debug_flag_has_value(args)).map_err(|e| {
-        let shown: Vec<String> = args.iter().map(|a| quote_if_needed(a)).collect();
+        let shown: Vec<String> = args
+            .iter()
+            .map(|a| quote_if_needed_or_redirect(a))
+            .collect();
         format!(
             "{e}\n* while parsing the following args, {desc}:\n*  {}",
             shown.join(" ")
@@ -478,22 +481,15 @@ pub fn cmdargs_parse_mode(
 ) -> Result<RawOpts, String> {
     check_req_val_flag_args_have_values(&flag_args().req_val, args)?;
     process(mode, &ensure_debug_flag_has_value(args)).map_err(|e| {
-        let shown: Vec<String> = args.iter().map(|a| quote_if_needed(a)).collect();
+        let shown: Vec<String> = args
+            .iter()
+            .map(|a| quote_if_needed_or_redirect(a))
+            .collect();
         format!(
             "{e}\n* while parsing the following args, {desc}:\n*  {}",
             shown.join(" ")
         )
     })
-}
-
-/// The string in double quotes, with its double quotes escaped, if it has
-/// quotes, white space or redirection characters (quoteIfNeeded).
-fn quote_if_needed(s: &str) -> String {
-    if s.contains(['\'', '"', ' ', '\t', '\n', '\r', '<', '>']) {
-        format!("\"{}\"", s.replace('"', "\\\""))
-    } else {
-        s.to_string()
-    }
 }
 
 /// A --debug without a numeric value after it made --debug=1; the first

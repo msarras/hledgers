@@ -270,6 +270,13 @@ pub fn take_directory(p: &str) -> String {
     }
 }
 
+/// A path's file name without its last extension, which starts at its
+/// last dot, even a leading one (takeBaseName).
+pub fn take_base_name(p: &str) -> &str {
+    let name = p.rsplit('/').next().unwrap_or(p);
+    name.rfind('.').map_or(name, |i| &name[..i])
+}
+
 /// A path joined to a directory, unless it is absolute (`</>`).
 pub fn path_join(dir: &str, p: &str) -> String {
     if p.starts_with('/') || dir.is_empty() {

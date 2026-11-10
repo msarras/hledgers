@@ -6,6 +6,7 @@
 use std::io::Write;
 
 use super::opts::CliOpts;
+use crate::platform::find_executables;
 
 /// Write a command's output to standard output, or to the -o file, or with
 /// --view to the view file, then open it (writeOutput).
@@ -125,19 +126,8 @@ fn pager_for(opts: &CliOpts, text: &str) -> Option<String> {
     let env_pager = std::env::var("PAGER").ok();
     (env_pager.iter().map(String::as_str))
         .chain(["less", "more"])
-        .find(|p| find_executable(p))
+        .find(|p| !find_executables(p).is_empty())
         .map(str::to_string)
-}
-
-/// Whether a program can be run: a path to an executable file, or a name
-/// found in PATH (findExecutable).
-fn find_executable(p: &str) -> bool {
-    use crate::platform::is_executable;
-    if p.contains(std::path::is_separator) {
-        return is_executable(std::path::Path::new(p));
-    }
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path).any(|d| is_executable(&d.join(p)))
 }
 
 /// The LESS value to run less with (lessVarValue): HLEDGER_LESS if set,

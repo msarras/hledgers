@@ -40,6 +40,7 @@ enum Ynu {
     N,
     U,
 }
+use crate::platform::find_executables;
 use Ynu::{N, U, Y};
 
 /// A check's description, padded to a fixed width (pdesc).
@@ -562,24 +563,6 @@ fn journal_filesystem_can_append(f: &str) {
         Ok(false) => p(N, "add/import won't work; use a reliable filesystem"),
         Err(e) => i(U, &format!("unknown; {e}")),
     }
-}
-
-/// The executables of this name in PATH, in order (findExecutables).
-fn find_executables(name: &str) -> Vec<String> {
-    use crate::platform::is_executable;
-    if name.contains(std::path::is_separator) {
-        return if is_executable(std::path::Path::new(name)) {
-            vec![name.to_string()]
-        } else {
-            Vec::new()
-        };
-    }
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .map(|d| d.join(name))
-        .filter(|f| is_executable(f))
-        .map(|f| f.display().to_string())
-        .collect()
 }
 
 /// The output of the first of these sets of arguments that the hledger in

@@ -1323,7 +1323,8 @@ fn read_integer(digits: &str) -> i64 {
     })
 }
 
-fn is_date_sep_char(c: char) -> bool {
+/// Whether a character can separate a date's parts (isDateSepChar).
+pub fn is_date_sep_char(c: char) -> bool {
     matches!(c, '-' | '/' | '.')
 }
 

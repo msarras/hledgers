@@ -21,6 +21,7 @@ use crate::decimal::Decimal;
 use crate::lots::{lot_subaccount_name, parse_lot_name, show_lot_name};
 use crate::model::{BalanceAssertion, Journal, Posting, SourcePos, Transaction};
 use crate::query::Query;
+use crate::read::rules::take_base_name;
 use crate::reports::opts::{AccountListMode, BalanceAccumulation, ReportOpts, ReportSpec};
 use crate::reports::periodic::balance_report;
 use crate::valuation::ConversionOp;
@@ -475,12 +476,6 @@ fn increment_digits(digits: &str) -> String {
         }
     }
     String::from_utf8(ds).unwrap_or_default()
-}
-
-/// The file name without its directory and last extension (takeBaseName).
-fn take_base_name(path: &str) -> &str {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.rfind('.').map_or(name, |i| &name[..i])
 }
 
 #[cfg(test)]

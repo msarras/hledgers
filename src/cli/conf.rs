@@ -2,7 +2,7 @@
 //! command aliases, read from a hledger.conf file (Hledger.Cli.Conf).
 
 use crate::parse::{Item, ParseError};
-use crate::platform::home_dir;
+use crate::platform::{config_dir, home_dir};
 
 /// Config file sections: each name with its argument lines and their line
 /// numbers.
@@ -231,15 +231,6 @@ fn file_exists(f: &str) -> bool {
     p.exists() && !p.is_dir()
 }
 
-/// The user's XDG config directory for hledger (getXdgDirectory XdgConfig).
-fn xdg_config_dir() -> String {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|d| d.starts_with('/'))
-        .unwrap_or_else(|| format!("{}/.config", home_dir()));
-    format!("{base}/hledger")
-}
-
 /// The config file in a directory: .hledger.conf in the home directory,
 /// hledger.conf elsewhere.
 fn conf_file_in(dir: &str, home: &str) -> String {
@@ -260,7 +251,7 @@ fn conf_file_in(dir: &str, home: &str) -> String {
 /// (confFiles, possibleConfFiles, possibleConfDirs).
 pub fn conf_files() -> Vec<String> {
     let home = home_dir();
-    let xdg = xdg_config_dir();
+    let xdg = config_dir();
     let mut dirs = Vec::new();
     let mut d = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
@@ -290,7 +281,7 @@ pub fn conf_files() -> Vec<String> {
 /// (userConfFiles).
 pub fn user_conf_files() -> Vec<String> {
     let home = home_dir();
-    [home.clone(), xdg_config_dir()]
+    [home.clone(), config_dir()]
         .iter()
         .map(|d| conf_file_in(d, &home))
         .filter(|f| file_exists(f))

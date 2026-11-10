@@ -12,7 +12,7 @@ use super::common::{posting_commentp, statusp, transaction_commentp};
 use super::rules::{
     CsvRules, FieldAssignment, MAX_POSTINGS, Scope, is_amount_expression,
     parse_balance_assertion_type, path_join, read_int, record_as_approximate_text, simplify_sign,
-    split_row_suffix, take_directory, with_rules_pos,
+    split_row_suffix, take_base_name, take_directory, with_rules_pos,
 };
 use crate::account::{
     AccountAlias, Realness, account_name_apply_aliases, account_name_posting_type,
@@ -353,13 +353,6 @@ fn save_to_archive(
     let path = path_join(archive_dir, &name);
     eprintln!("archiving {path}");
     std::fs::write(&path, data).map_err(|e| io_error(&path, "withFile", e))
-}
-
-/// A path's file name without its last extension, which starts at its
-/// last dot, even a leading one (takeBaseName).
-fn take_base_name(p: &str) -> &str {
-    let name = p.rsplit('/').next().unwrap_or(p);
-    name.rfind('.').map_or(name, |i| &name[..i])
 }
 
 /// A path's last extension with its dot, or nothing (takeExtension).

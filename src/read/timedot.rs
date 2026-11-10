@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 use super::InputOpts;
 use super::amount::numberp;
-use super::common::{datep, digit_hint, is_date_sep_char, noncomment_textp, transaction_commentp};
+use super::common::{datep, digit_hint, noncomment_textp, transaction_commentp};
 use super::journal::{Failure, ParseState, R, modified_account_namep};
 use crate::account::Realness;
 use crate::amount::{Amount, AmountStyle, MixedAmount, Precision, Sym};
-use crate::dates::Day;
+use crate::dates::{Day, is_date_sep_char};
 use crate::decimal::Decimal;
 use crate::model::{
     Journal, Posting, SourcePos, Status, Tag, Transaction, comment_add_tag_unspaced,

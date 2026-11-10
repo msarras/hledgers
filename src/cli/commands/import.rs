@@ -12,6 +12,7 @@ use crate::model::{Journal, Transaction};
 use crate::read::latest::save_latest_dates_for_files;
 use crate::read::rules::{path_join, take_directory};
 use crate::read::{BalancingOpts, InputOpts};
+use crate::text::quote_if_needed_or_redirect;
 use crate::write::journal::show_transaction;
 
 const NONE: Arity = Arity::None;
@@ -99,7 +100,7 @@ pub fn import(opts: &CliOpts, j: Journal) -> Result<(), String> {
     }
     let names: Vec<String> = files
         .iter()
-        .map(|f| quote_if_needed(f.rsplit('/').next().unwrap_or(f)))
+        .map(|f| quote_if_needed_or_redirect(f.rsplit('/').next().unwrap_or(f)))
         .collect();
     let names = names.join(", ");
     let (newj, latest) = crate::read::read_journal_files_and_latest_dates(&iopts, &files)?;
@@ -170,16 +171,6 @@ fn discover_rules_files(dir: &str) -> Vec<String> {
         .collect();
     names.sort();
     names.into_iter().map(|n| path_join(dir, &n)).collect()
-}
-
-/// The text in double quotes, its double quotes backslash-escaped, if it
-/// contains a quote, white space, `<` or `>` (quoteIfNeeded).
-fn quote_if_needed(s: &str) -> String {
-    if s.contains(['\'', '"', ' ', '\t', '\n', '\r', '<', '>']) {
-        format!("\"{}\"", s.replace('"', "\\\""))
-    } else {
-        s.to_string()
-    }
 }
 
 /// Append a transaction's text to the journal file, after a blank line and

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::account::AccountAlias;
 use crate::amount::AmountStyle;
-use crate::dates::Day;
+use crate::dates::{Day, is_date_sep_char};
 use crate::model::{Status, Tag};
 use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space};
 use crate::regex::to_regex_ci;
@@ -50,11 +50,6 @@ impl Interned {
             }
         }
     }
-}
-
-/// Whether a character can separate a date's parts (isDateSepChar).
-pub fn is_date_sep_char(c: char) -> bool {
-    matches!(c, '-' | '/' | '.')
 }
 
 /// A run of digits as a number, saturating rather than overflowing.
