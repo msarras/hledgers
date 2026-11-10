@@ -11,7 +11,7 @@
 //! failing.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::parse::{Alts, PResult, Parser, choice, choice_try, is_non_newline_space, or};
@@ -396,8 +396,9 @@ pub fn add_gregorian_months_to_monthday(dom: i64, n: i64, d: Day) -> Day {
 
 /// A date that is either exact or flexible (EFDay). A flexible date, which
 /// comes from a partial date such as a month, may be moved to an interval
-/// boundary. Two dates order by their days alone, but as upstream's are,
-/// are equal only if equally exact.
+/// boundary. Two are equal only if equally exact, as upstream's are;
+/// upstream orders them by their days alone, which here is done where
+/// they are compared, so that no order disagrees with equality.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct EfDay {
     pub day: Day,
@@ -422,16 +423,9 @@ impl EfDay {
     }
 }
 
-impl Ord for EfDay {
-    fn cmp(&self, other: &EfDay) -> Ordering {
-        self.day.cmp(&other.day)
-    }
-}
-
-impl PartialOrd for EfDay {
-    fn partial_cmp(&self, other: &EfDay) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+/// An end's day, to order ends by: an open one first.
+fn end_day(e: &Option<EfDay>) -> Option<Day> {
+    e.map(|e| e.day)
 }
 
 /// The date (showEFDate).
@@ -452,7 +446,7 @@ impl fmt::Debug for EfDay {
 /// A span of time from a start date (inclusive) to an end date
 /// (exclusive), either of which may be open (DateSpan). The default is the
 /// span of all time (nulldatespan).
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct DateSpan(pub Option<EfDay>, pub Option<EfDay>);
 
 impl DateSpan {
@@ -497,7 +491,7 @@ impl DateSpan {
 
     /// Whether it has both ends, and no days between them (isEmptySpan).
     pub fn is_empty(&self) -> bool {
-        matches!(self, DateSpan(Some(s), Some(e)) if e <= s)
+        matches!(self, DateSpan(Some(s), Some(e)) if e.day <= s.day)
     }
 
     /// Whether it includes the date (spanContainsDate).
@@ -524,7 +518,7 @@ impl DateSpan {
     /// that would end before it starts (spanValidDefaultsFrom).
     pub fn valid_defaults_from(self, other: DateSpan) -> DateSpan {
         match self.defaults_from(other) {
-            DateSpan(b, e) if b >= e => self,
+            DateSpan(b, e) if end_day(&b) >= end_day(&e) => self,
             s => s,
         }
     }
@@ -532,10 +526,10 @@ impl DateSpan {
     /// The span enclosing both, open if either is (spanUnion).
     pub fn union(self, other: DateSpan) -> DateSpan {
         let later = match (self.1, other.1) {
-            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), Some(b)) => Some(std::cmp::max_by_key(a, b, |e| e.day)),
             _ => None,
         };
-        DateSpan(self.0.min(other.0), later)
+        DateSpan(std::cmp::min_by_key(self.0, other.0, end_day), later)
     }
 
     /// This span extended to include the other's given ends, its open ends
@@ -619,7 +613,7 @@ fn later_definite(a: Option<EfDay>, b: Option<EfDay>) -> Option<EfDay> {
     match (a, b) {
         (a, None) => a,
         (None, b) => b,
-        (a, b) => a.max(b),
+        (a, b) => std::cmp::max_by_key(a, b, end_day),
     }
 }
 
@@ -629,7 +623,7 @@ fn earlier_definite(a: Option<EfDay>, b: Option<EfDay>) -> Option<EfDay> {
     match (a, b) {
         (a, None) => a,
         (None, b) => b,
-        (a, b) => a.min(b),
+        (a, b) => std::cmp::min_by_key(a, b, end_day),
     }
 }
 
@@ -681,16 +675,17 @@ pub fn days_span(days: impl IntoIterator<Item = Day>) -> DateSpan {
 /// starting latest (and then ending latest) if several do; empty spans are
 /// ignored (latestSpanContaining).
 pub fn latest_span_containing(spans: &[DateSpan]) -> impl Fn(Day) -> Option<DateSpan> {
-    let mut set = BTreeSet::new();
+    let mut by_days = BTreeMap::new();
     for s in spans.iter().filter(|s| !s.is_empty()) {
-        set.replace(*s);
+        by_days.insert((s.start(), s.end()), *s);
     }
     move |d| {
-        let sup = DateSpan::exact(Some(nextday(d)), None);
-        set.range(..sup)
+        let sup = (Some(nextday(d)), None);
+        by_days
+            .range(..sup)
             .next_back()
+            .map(|(_, s)| *s)
             .filter(|s| s.contains(d))
-            .copied()
     }
 }
 

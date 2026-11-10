@@ -535,7 +535,7 @@ impl ReportSpec {
                     .filter(|d| *d <= self.today)
                     .max()
                     .map(|d| EfDay::exact(d.add_days(1)));
-                last.max(latest_price)
+                std::cmp::max_by_key(last, latest_price, |e| e.map(|e| e.day))
             }
             _ => last,
         };
