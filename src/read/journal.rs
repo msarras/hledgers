@@ -85,9 +85,6 @@ pub fn parse_journal(
     };
     let mut j = Journal::default();
     let mut stack = vec![(file.to_string(), canonical_path(&absolute_path(file)))];
-    if let Some(parsed) = parse_in_parts(iopts, &st, &stack, file, text) {
-        return Ok(parsed);
-    }
     match parse_file(iopts, &mut st, &mut stack, &mut j, file, text) {
         Ok(()) => Ok((j, st)),
         Err(Failure::Here(e)) => Err(e.pretty(file, text)),
@@ -95,24 +92,20 @@ pub fn parse_journal(
     }
 }
 
+/// A part of a file to read on its own: its offset, end and line number.
+type Part = (usize, usize, usize);
+
 /// The smallest text worth parsing in parts.
 const PARTS_MIN_SIZE: usize = 1 << 18;
 
-/// A large file parsed in parts, if it can be: its directives and the
-/// items among them first, then the rest, transactions, price directives
-/// and comment lines only, which no directive comes between to change how
-/// they read, in parts starting at a transaction after an empty line, the
-/// parts read with `par` (on all cores with the parallel feature) and
-/// joined in order. None if the file is small, has a multi-line comment,
-/// or a part has an error, which the whole file is then parsed again to
-/// report as usual.
-fn parse_in_parts(
-    iopts: &InputOpts,
-    st: &ParseState,
-    stack: &[(String, PathBuf)],
-    file: &str,
-    text: &str,
-) -> Option<(Journal, ParseState)> {
+/// Where a large file's items can be read in parts: the offset after its
+/// last directive and the items among them, and the parts of the rest,
+/// transactions, price directives and comment lines only, which no
+/// directive comes between to change how they read, each starting at a
+/// transaction after an empty line (as offset, end and line number); with
+/// the file's number of lines. None if the file is small or has a
+/// multi-line comment.
+fn file_parts(text: &str) -> Option<(usize, Vec<Part>, usize)> {
     const PARTS: usize = 64;
     if text.len() < PARTS_MIN_SIZE {
         return None;
@@ -134,7 +127,7 @@ fn parse_in_parts(
     }
     let &(header_end, _) = starts.first()?;
     let step = (text.len() - header_end).div_ceil(PARTS);
-    let mut parts: Vec<(usize, usize, usize)> = Vec::new();
+    let mut parts: Vec<Part> = Vec::new();
     for &(start, line) in &starts {
         if parts.last().is_none_or(|&(s, _, _)| start >= s + step) {
             if let Some(last) = parts.last_mut() {
@@ -143,48 +136,7 @@ fn parse_in_parts(
             parts.push((start, text.len(), line));
         }
     }
-    let (mut st, mut stack) = (st.clone(), stack.to_vec());
-    let mut j = Journal::default();
-    parse_file(
-        iopts,
-        &mut st,
-        &mut stack,
-        &mut j,
-        file,
-        &text[..header_end],
-    )
-    .ok()?;
-    let file: Arc<str> = Arc::from(file);
-    let declared = &j.declared_commodities;
-    let parsed = crate::par::map_owned(line, parts, |(start, end, line)| {
-        let (mut st, mut stack) = (st.clone(), stack.clone());
-        let mut part = Journal {
-            declared_commodities: declared.clone(),
-            ..Journal::default()
-        };
-        let mut p = JournalParser {
-            c: Cursor {
-                src: &text[..end],
-                pos: start,
-            },
-            file: file.clone(),
-            st: &mut st,
-            stack: &mut stack,
-            j: &mut part,
-            iopts,
-            anchor: (start, line, start),
-            interned: RefCell::default(),
-        };
-        p.journalp().ok()?;
-        Some((part.items, part.txns, part.price_directives))
-    });
-    for part in parsed {
-        let (items, txns, prices) = part?;
-        j.items.extend(items);
-        j.txns.extend(txns);
-        j.price_directives.extend(prices);
-    }
-    Some((j, st))
+    Some((header_end, parts, line))
 }
 
 /// An auto posting rule's posting written alone, `ACCOUNT  AMOUNT` or
@@ -280,7 +232,7 @@ fn parse_file(
         anchor: (0, 1, 0),
         interned: RefCell::default(),
     };
-    match p.journalp() {
+    match p.file_itemsp() {
         Err(Failure::Here(e)) => Err(Failure::Included(e.pretty(file, text))),
         Err(Failure::Included(msg)) => Err(Failure::Included(format!(
             "in file included from {file},\n{msg}"
@@ -353,6 +305,63 @@ impl<'a> JournalParser<'a, '_> {
             self.itemp()?;
         }
         Ok(())
+    }
+
+    /// The items of a file. In a large one, after the items up to its last
+    /// directive, the rest is read in parts with `par` (on all cores with
+    /// the parallel feature) and joined in order, as if read in one go;
+    /// unless a part has an error, when the rest is read in one go after
+    /// all, to report it as usual.
+    fn file_itemsp(&mut self) -> R<()> {
+        if let Some((header_end, parts, lines)) = file_parts(self.c.src) {
+            while self.c.pos < header_end {
+                self.itemp()?;
+            }
+            if self.c.pos == header_end
+                && let Some(parsed) = self.parts(parts, lines)
+            {
+                for part in parsed {
+                    self.j.items.extend(part.items);
+                    self.j.txns.extend(part.txns);
+                    self.j.price_directives.extend(part.price_directives);
+                }
+                return Ok(());
+            }
+        }
+        self.journalp()
+    }
+
+    /// Each part of the input read with the parse state here, its items,
+    /// transactions and price directives in a journal of its own, if none
+    /// has an error.
+    fn parts(&self, parts: Vec<Part>, lines: usize) -> Option<Vec<Journal>> {
+        let (text, file, iopts) = (self.c.src, &self.file, self.iopts);
+        let (st, stack) = (&*self.st, &*self.stack);
+        let declared = &self.j.declared_commodities;
+        crate::par::map_owned(lines, parts, |(start, end, line)| {
+            let (mut st, mut stack) = (st.clone(), stack.clone());
+            let mut part = Journal {
+                declared_commodities: declared.clone(),
+                ..Journal::default()
+            };
+            let mut p = JournalParser {
+                c: Cursor {
+                    src: &text[..end],
+                    pos: start,
+                },
+                file: file.clone(),
+                st: &mut st,
+                stack: &mut stack,
+                j: &mut part,
+                iopts,
+                anchor: (start, line, start),
+                interned: RefCell::default(),
+            };
+            p.journalp().ok()?;
+            Some(part)
+        })
+        .into_iter()
+        .collect()
     }
 
     /// Record an item with the text from `start` to here.
