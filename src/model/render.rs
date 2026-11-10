@@ -3,6 +3,8 @@
 //! Hledger.Data.Posting): what the readers' error excerpts, the print
 //! command and the journal writer show.
 
+use std::borrow::Cow;
+
 use dashu_int::IBig;
 
 use crate::account::Realness;
@@ -496,7 +498,7 @@ fn amount_integer_width(fmt: &AmountFormat, a: &Amount) -> usize {
         let comm = if fmt.quotes {
             quote_commodity_symbol_if_needed(&a.commodity)
         } else {
-            a.commodity.to_string()
+            Cow::Borrowed(&*a.commodity)
         };
         display_width(&comm) + usize::from(!comm.is_empty() && a.style.spaced)
     } else {

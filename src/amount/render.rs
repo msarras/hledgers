@@ -5,7 +5,7 @@
 use super::{Amount, AmountCost, CostBasis, DigitGroups, MixedAmount, Precision, Side, Sym};
 use std::borrow::Cow;
 
-use crate::text::Wide;
+use crate::text::{Wide, display_width};
 
 /// Options for rendering amounts, which can override their styles. The
 /// presets are upstream's defaultFmt, fullZeroFmt, noCostFmt, oneLineFmt,
@@ -93,11 +93,11 @@ impl Default for AmountFormat {
 /// A commodity symbol in double quotes if it contains a character that
 /// would end an unquoted symbol, or begins with `(` or `/`, which would read
 /// as an amount expression (quoteCommoditySymbolIfNeeded).
-pub fn quote_commodity_symbol_if_needed(s: &str) -> String {
+pub fn quote_commodity_symbol_if_needed(s: &str) -> Cow<'_, str> {
     if s.chars().any(super::is_nonsimple_commodity_char) || s.starts_with(['(', '/']) {
-        format!("\"{s}\"")
+        Cow::Owned(format!("\"{s}\""))
     } else {
-        s.to_string()
+        Cow::Borrowed(s)
     }
 }
 
@@ -113,36 +113,46 @@ pub fn show_amount_b(fmt: &AmountFormat, a: &Amount) -> Wide {
     if a.is_missing() {
         return Wide::default();
     }
-    let (quantity, commodity) = if a.looks_zero() && !fmt.zero_commodity {
-        (Wide::new("0"), String::new())
+    let zero = a.looks_zero() && !fmt.zero_commodity;
+    let commodity = if zero {
+        Cow::Borrowed("")
+    } else if fmt.quotes {
+        quote_commodity_symbol_if_needed(&a.commodity)
     } else {
-        let commodity = if fmt.quotes {
-            quote_commodity_symbol_if_needed(&a.commodity)
-        } else {
-            a.commodity.to_string()
-        };
-        let groups = a.style.digit_groups.filter(|_| fmt.digit_groups);
-        (quantity_b(fmt.force_decimal_mark, a, groups), commodity)
+        Cow::Borrowed(&*a.commodity)
     };
     let space = !commodity.is_empty() && a.style.spaced;
-    let mut out = Wide::default();
+    let quantity = |out: &mut Wide| {
+        if zero {
+            out.push_str("0", 1);
+        } else {
+            let groups = a.style.digit_groups.filter(|_| fmt.digit_groups);
+            push_quantity(out, fmt.force_decimal_mark, a, groups);
+        }
+    };
+    // room for the commodity and the quantity of most amounts, so that the
+    // text is allocated once
+    let mut out = Wide {
+        s: String::with_capacity(commodity.len() + 24),
+        width: 0,
+    };
     match a.style.side {
         Side::L => {
             if fmt.commodity {
-                out.push(&Wide::new(&commodity));
+                out.push_str(&commodity, display_width(&commodity));
                 if space {
                     out.push_str(" ", 1);
                 }
             }
-            out.push(&quantity);
+            quantity(&mut out);
         }
         Side::R => {
-            out.push(&quantity);
+            quantity(&mut out);
             if fmt.commodity {
                 if space {
                     out.push_str(" ", 1);
                 }
-                out.push(&Wide::new(&commodity));
+                out.push_str(&commodity, display_width(&commodity));
             }
         }
     }
@@ -168,67 +178,64 @@ pub fn show_amount_b(fmt: &AmountFormat, a: &Amount) -> Wide {
 /// digit group marks and no decimals gets a trailing decimal mark
 /// (showAmountQuantity).
 pub fn show_amount_quantity(disambiguate: bool, a: &Amount) -> Wide {
-    quantity_b(disambiguate, a, a.style.digit_groups)
+    let mut out = Wide::default();
+    push_quantity(&mut out, disambiguate, a, a.style.digit_groups);
+    out
 }
 
-fn quantity_b(disambiguate: bool, a: &Amount, groups: Option<&DigitGroups>) -> Wide {
+/// [`show_amount_quantity`], with these digit groups, added to `out`.
+fn push_quantity(out: &mut Wide, disambiguate: bool, a: &Amount, groups: Option<&DigitGroups>) {
     let q = a.rounded_quantity();
     let places = usize::from(q.places());
     let digits = q.abs().mantissa().to_string();
-    let int_len = digits.len().saturating_sub(places).max(1);
-    let zeros = "0".repeat((places + 1).saturating_sub(digits.len()));
-    let padded = zeros + &digits;
-    let (int_part, frac_part) = padded.split_at(int_len);
-    let mut out = Wide::default();
+    // the digits after as many zeros as make one digit before the places
+    let zeros = (places + 1).saturating_sub(digits.len());
+    let int_len = digits.len() + zeros - places;
+    let (int_part, frac_digits) = if zeros > 0 {
+        ("0", digits.as_str())
+    } else {
+        digits.split_at(int_len)
+    };
     if q.is_negative() {
         out.push_str("-", 1);
     }
-    out.push(&with_digit_groups(groups, int_part));
+    push_digit_groups(out, groups, int_part);
     let shows_group_mark = match groups {
         Some(DigitGroups { sizes, .. }) => sizes.first().is_some_and(|&g| int_len > usize::from(g)),
         None => false,
     };
     if places > 0 || (shows_group_mark && disambiguate) {
-        let mark = a.style.decimal_mark.unwrap_or('.');
-        out.push_str(&format!("{mark}{frac_part}"), 1 + places);
+        out.s.push(a.style.decimal_mark.unwrap_or('.'));
+        out.s
+            .extend(std::iter::repeat_n('0', zeros.saturating_sub(1)));
+        out.push_str(frac_digits, 1 + places);
     }
-    out
 }
 
-/// Integer digits with digit group marks between the groups, sized from the
-/// right, the last size repeating; each mark counts one column
-/// (applyDigitGroupStyle).
-fn with_digit_groups(groups: Option<&DigitGroups>, digits: &str) -> Wide {
-    let mut out = Wide {
-        s: digits.to_string(),
-        width: digits.len(),
+/// Integer digits added to `out` with digit group marks between the groups,
+/// sized from the right, the last size repeating; each mark counts one
+/// column (applyDigitGroupStyle).
+fn push_digit_groups(out: &mut Wide, groups: Option<&DigitGroups>, digits: &str) {
+    let Some(DigitGroups { sep, sizes }) = groups.filter(|g| !g.sizes.is_empty()) else {
+        out.push_str(digits, digits.len());
+        return;
     };
-    let Some(DigitGroups { sep, sizes }) = groups else {
-        return out;
-    };
-    let Some(&last) = sizes.last() else {
-        return out;
-    };
-    let mut rest = digits;
-    let mut tails = Vec::new();
-    for size in sizes.iter().chain(std::iter::repeat(&last)) {
-        let size = usize::from(*size);
-        if rest.len() <= size {
-            break;
-        }
-        let (head, tail) = rest.split_at(rest.len() - size);
-        tails.push(tail);
-        rest = head;
+    let last = sizes[sizes.len() - 1];
+    let size = |k: usize| usize::from(sizes.get(k).copied().unwrap_or(last));
+    // the number of groups after the first, and their digits
+    let (mut n, mut grouped) = (0, 0);
+    while digits.len() - grouped > size(n) {
+        grouped += size(n);
+        n += 1;
     }
-    out = Wide {
-        s: rest.to_string(),
-        width: rest.len(),
-    };
-    for tail in tails.iter().rev() {
+    let (first, mut rest) = digits.split_at(digits.len() - grouped);
+    out.push_str(first, first.len());
+    for k in (0..n).rev() {
+        let (group, tail) = rest.split_at(size(k));
         out.s.push(*sep);
-        out.push_str(tail, tail.len() + 1);
+        out.push_str(group, group.len() + 1);
+        rest = tail;
     }
-    out
 }
 
 /// An amount's cost as ` @ UNITCOST` or ` @@ TOTALCOST`, the total cost
