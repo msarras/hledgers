@@ -823,6 +823,20 @@ fn sum_similar(a: &Amount, b: &Amount) -> Amount {
     Amount { cost, ..a + b }
 }
 
+/// [`sum_similar`] in place in the first amount.
+fn add_similar(a: &mut Amount, b: &Amount) {
+    if let (Some(AmountCost::Total(ac)), Some(AmountCost::Total(bc))) = (&mut a.cost, &b.cost) {
+        ac.quantity = &ac.quantity + &bc.quantity;
+    }
+    a.commodity = b.commodity;
+    a.quantity = &a.quantity + &b.quantity;
+    a.style = AmountStyle {
+        precision: a.style.precision.max(b.style.precision),
+        ..b.style
+    };
+    a.cost_basis = None;
+}
+
 impl MixedAmount {
     /// No amounts: zero (nullmixedamt).
     pub fn null() -> MixedAmount {
@@ -1038,7 +1052,7 @@ impl MixedAmount {
         let mut total = MixedAmount::null();
         for m in amounts {
             count += 1;
-            total = &total + m;
+            total = total + m;
         }
         let average = total.clone().divide(&Decimal::from_i64(count));
         (total, average)
@@ -1237,7 +1251,7 @@ impl Add<&MixedAmount> for MixedAmount {
 
     fn add(self, rhs: &MixedAmount) -> MixedAmount {
         match rhs.0.as_slice() {
-            [b] if self.0.len() >= LONG => self.with_amount_on_right(b.clone()),
+            [b] => self.with_amount_on_right(b),
             _ => merged(self.0.into_iter(), rhs.0.iter().cloned()),
         }
     }
@@ -1259,9 +1273,8 @@ impl Add<MixedAmount> for &MixedAmount {
 impl Add for MixedAmount {
     type Output = MixedAmount;
 
-    fn add(mut self, mut rhs: MixedAmount) -> MixedAmount {
-        if rhs.0.len() == 1 && self.0.len() >= LONG {
-            let b = rhs.0.pop().expect("one amount");
+    fn add(mut self, rhs: MixedAmount) -> MixedAmount {
+        if let [b] = rhs.0.as_slice() {
             self.with_amount_on_right(b)
         } else if self.0.len() == 1 && rhs.0.len() >= LONG {
             let a = self.0.pop().expect("one amount");
@@ -1272,19 +1285,27 @@ impl Add for MixedAmount {
     }
 }
 
-/// The length from which one amount is added to a sum in place, rather
-/// than by merging the two into a new one; shorter sums are merged, which
-/// allocates no more than they need.
+/// The length from which a sum given one more amount in place grows as a
+/// vector does, rather than by just that amount, so that short sums, the
+/// most common, take no more memory than they need; and from which one
+/// amount on its left is added in place, rather than by merging the two
+/// into a new sum.
 const LONG: usize = 8;
 
 impl MixedAmount {
     /// This sum plus one amount on its right, as `merged` would add them,
-    /// in place: a long sum plus a posting's amount costs no more than
-    /// finding its place.
-    fn with_amount_on_right(mut self, b: Amount) -> MixedAmount {
-        match self.0.binary_search_by(|x| key_cmp(x, &b)) {
-            Ok(i) => self.0[i] = sum_similar(&self.0[i], &b),
-            Err(i) => self.0.insert(i, b),
+    /// in place: a sum plus a posting's amount costs no more than finding
+    /// its place, the amount copied only if it is the sum's first in its
+    /// commodity and cost.
+    fn with_amount_on_right(mut self, b: &Amount) -> MixedAmount {
+        match self.0.binary_search_by(|x| key_cmp(x, b)) {
+            Ok(i) => add_similar(&mut self.0[i], b),
+            Err(i) => {
+                if self.0.len() < LONG {
+                    self.0.reserve_exact(1);
+                }
+                self.0.insert(i, b.clone());
+            }
         }
         self
     }
@@ -1915,6 +1936,56 @@ pub(crate) mod tests {
                 .cost_basis
                 .is_none()
         );
+    }
+
+    #[test]
+    fn adding_one_amount_in_place_as_merging_does() {
+        // a sum plus one amount, added in place, shows as merging the two
+        // into a new sum does: for zeros of different places, precisions,
+        // styles, unit and total costs, cost bases, a new commodity, and a
+        // long sum
+        let usd_of = |q: &str| Amount {
+            quantity: d(q),
+            ..usd(d("0"))
+        };
+        let amounts = [
+            usd(d("1")),
+            usd(d("-1")),
+            usd(d("0")),
+            usd_of("0"),
+            usd_of("0.5"),
+            usd(d("3")).with_precision(Fixed(4)),
+            Amount {
+                style: hrs(d("0")).style,
+                ..usd(d("2"))
+            },
+            usd(d("1")).at(eur(d("2"))),
+            usd(d("1")).at(eur(d("2")).with_precision(Fixed(4))),
+            usd(d("2")).at_total(eur(d("7"))),
+            usd(d("-2")).at_total(eur(d("-7")).with_precision(Fixed(4))),
+            Amount {
+                cost_basis: Some(Box::default()),
+                ..usd(d("5"))
+            },
+            eur(d("1")),
+        ];
+        let long = MixedAmount::from_amounts(
+            (0..LONG).map(|i| num(d("1")).with_commodity(sym(&format!("C{i}")))),
+        );
+        let sums = [MixedAmount::null(), long]
+            .into_iter()
+            .chain(amounts.iter().cloned().map(MixedAmount::from_amount));
+        let shown = |m: MixedAmount| format!("{:?}", m.amounts_raw());
+        for m in sums {
+            for a in &amounts {
+                let b = MixedAmount::from_amount(a.clone());
+                let merged = shown(&m + &b);
+                assert_eq!(shown(m.clone() + &b), merged);
+                assert_eq!(shown(m.clone() + b.clone()), merged);
+                assert_eq!(shown([m.clone(), b.clone()].iter().sum()), merged);
+                assert_eq!(shown([m.clone(), b].into_iter().sum()), merged);
+            }
+        }
     }
 
     #[test]
