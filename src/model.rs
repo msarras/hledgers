@@ -707,10 +707,12 @@ pub struct Journal {
     pub txn_modifiers: Vec<TransactionModifier>,
     pub periodic_txns: Vec<PeriodicTransaction>,
     pub txns: Vec<Transaction>,
-    pub items: Vec<JournalItem>,
+    /// The items as read, shared by the journals derived from this one.
+    pub items: Arc<Vec<JournalItem>>,
     /// The files read, with their text, the main file first, then the
-    /// included files, each before the files it includes.
-    pub files: Vec<(String, String)>,
+    /// included files, each before the files it includes; shared by the
+    /// journals derived from this one.
+    pub files: Arc<Vec<(String, String)>>,
     /// The default commodity and style of the D directive in effect at the
     /// end of parsing (jparsedefaultcommodity), whose style counts as a
     /// declared one.

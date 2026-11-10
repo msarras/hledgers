@@ -304,7 +304,7 @@ pub fn read_possible_journal_files(iopts: &InputOpts, files: &[String]) -> Resul
         read_journal_file(&deferred, first)?
     } else {
         Journal {
-            files: vec![(f.to_string(), String::new())],
+            files: vec![(f.to_string(), String::new())].into(),
             ..Journal::default()
         }
     };

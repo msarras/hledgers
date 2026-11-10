@@ -321,7 +321,7 @@ impl<'a> JournalParser<'a, '_> {
                 && let Some(parsed) = self.parts(parts, lines)
             {
                 for part in parsed {
-                    self.j.items.extend(part.items);
+                    Arc::make_mut(&mut self.j.items).extend(Arc::unwrap_or_clone(part.items));
                     self.j.txns.extend(part.txns);
                     self.j.price_directives.extend(part.price_directives);
                 }
@@ -375,7 +375,7 @@ impl<'a> JournalParser<'a, '_> {
         if item == JournalItem::Blank && self.j.items.last() == Some(&JournalItem::Blank) {
             return;
         }
-        self.j.items.push(item);
+        Arc::make_mut(&mut self.j.items).push(item);
     }
 
     /// Any journal item (addJournalItemP), dispatched on its first character.
@@ -431,8 +431,9 @@ impl<'a> JournalParser<'a, '_> {
             .count();
         let mut t = t;
         if n > 0 {
-            let at = self.j.items.len() - n;
-            for i in self.j.items.drain(at..) {
+            let items = Arc::make_mut(&mut self.j.items);
+            let at = items.len() - n;
+            for i in items.drain(at..) {
                 if let JournalItem::Comment(c) = i {
                     t.preceding_comment.push_str(&c);
                 }
@@ -750,7 +751,7 @@ impl<'a> JournalParser<'a, '_> {
             let msg = format!("failed to read a file:\n{e}");
             Failure::Here(ParseError::fail_at(self.c.src, off, msg))
         })?;
-        self.j.files.push((file.to_string(), text.clone()));
+        Arc::make_mut(&mut self.j.files).push((file.to_string(), text.clone()));
         if let Some(f @ ("timeclock" | "timedot")) = format {
             // its transactions, made with the parse state in effect here
             let txns = if f == "timeclock" {
@@ -792,7 +793,7 @@ impl<'a> JournalParser<'a, '_> {
         let aliases: Vec<AccountAlias> =
             self.st.aliases.iter().chain(opt_aliases).cloned().collect();
         let cj = super::csv::journal_apply_aliases(&aliases, cj).map_err(Failure::Included)?;
-        self.j.files.push((file.to_string(), String::new()));
+        Arc::make_mut(&mut self.j.files).push((file.to_string(), String::new()));
         self.j.txns.extend(cj.txns);
         Ok(())
     }

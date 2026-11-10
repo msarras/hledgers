@@ -7,6 +7,7 @@
 //! lots, and the lot checks only when lots are not ignored.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use super::InputOpts;
 use super::journal::ParseState;
@@ -112,7 +113,7 @@ fn journal_set_last_read_time(j: &mut Journal) {
 /// Record the main file and its text, before the files it included
 /// (journalAddFile).
 fn journal_add_file(j: &mut Journal, file: &str, text: &str) {
-    j.files.insert(0, (file.to_string(), text.to_string()));
+    Arc::make_mut(&mut j.files).insert(0, (file.to_string(), text.to_string()));
 }
 
 /// Find the type of every account, declared or used: its own declared
@@ -777,8 +778,8 @@ pub fn journal_concat(mut j1: Journal, j2: Journal) -> Journal {
     j1.txn_modifiers.extend(j2.txn_modifiers);
     j1.periodic_txns.extend(j2.periodic_txns);
     j1.txns.extend(j2.txns);
-    j1.items.extend(j2.items);
-    j1.files.extend(j2.files);
+    Arc::make_mut(&mut j1.items).extend(Arc::unwrap_or_clone(j2.items));
+    Arc::make_mut(&mut j1.files).extend(Arc::unwrap_or_clone(j2.files));
     j1.default_commodity = j2.default_commodity;
     j1.parse_decimal_mark = j2.parse_decimal_mark;
     j1.parse_year = j2.parse_year;

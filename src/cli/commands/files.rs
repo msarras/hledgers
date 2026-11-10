@@ -20,7 +20,7 @@ pub static MODE: Mode = Mode {
 pub fn files(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let re = opts.raw.args().next().map(to_regex).transpose()?;
     let mut out = String::new();
-    for (f, _) in &j.files {
+    for (f, _) in j.files.iter() {
         if re.as_ref().is_none_or(|r| r.is_match(f)) {
             out.push_str(f);
             out.push('\n');

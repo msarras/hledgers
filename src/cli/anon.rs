@@ -27,7 +27,7 @@ pub fn anon_journal(j: &mut Journal) {
     for t in &mut j.txns {
         anon_transaction(t);
     }
-    j.items.clear();
+    j.items = Default::default();
     for (a, _) in &mut j.declared_accounts {
         *a = anon(a).into();
     }
