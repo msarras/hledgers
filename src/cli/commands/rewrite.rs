@@ -18,6 +18,7 @@ use crate::model::{
 use crate::query::Query;
 use crate::read::journal::parse_tm_posting_rule;
 use crate::read::modifiers::modify_transactions;
+use crate::text::hs_lines;
 use crate::write::journal::{PostingLayout, show_transaction};
 
 pub static MODE: Mode = Mode {
@@ -133,7 +134,7 @@ fn diff_output(layout: PostingLayout, j: &Journal, new: &[Transaction]) -> Resul
         } else if end.line > start.line {
             let t2 = transaction_with_mostly_original_postings(false, t2.clone());
             let shown = show_transaction(&t2, layout, false);
-            let mut lines: Vec<String> = text_lines(&shown).into_iter().map(String::from).collect();
+            let mut lines: Vec<String> = hs_lines(&shown).map(String::from).collect();
             while lines.last().is_some_and(|l| l.is_empty()) {
                 lines.pop();
             }
@@ -164,22 +165,12 @@ fn diff_output(layout: PostingLayout, j: &Journal, new: &[Transaction]) -> Resul
             continue;
         };
         es.sort_by_key(|e| e.0);
-        let old = text_lines(text);
+        let old: Vec<&str> = hs_lines(text).collect();
         let new = apply_edits(&es, &old);
         let new: Vec<&str> = new.iter().map(String::as_str).collect();
         out.push_str(&unified_diff(file, &old, &new));
     }
     Ok(out)
-}
-
-/// The lines of a text, without their newlines; a final newline ends the
-/// last line rather than starting another (Data.Text's lines).
-fn text_lines(s: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = s.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop();
-    }
-    lines
 }
 
 /// Lines with some line ranges, `[start, end)` numbered from 1, replaced;

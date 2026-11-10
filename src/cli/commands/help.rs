@@ -5,6 +5,7 @@ use crate::cli::args::{Arity, Flag, General, Mode};
 use crate::cli::docs::{self, TopicResolution};
 use crate::cli::io::run_pager;
 use crate::cli::opts::CliOpts;
+use crate::text::hs_lines;
 
 const NONE: Arity = Arity::None;
 
@@ -329,11 +330,7 @@ fn commands(opts: &CliOpts, aliases: &[(String, String)]) -> Result<(), String> 
             .filter(|i| !known_addons.contains(&i.as_str()))
             .cloned()
             .collect();
-        out.extend(
-            hs_lines(&multicol(79, &others))
-                .into_iter()
-                .map(|l| format!(" {l}")),
-        );
+        out.extend(hs_lines(&multicol(79, &others)).map(|l| format!(" {l}")));
     }
     if show_aliases && !aliases.is_empty() {
         // each alias's last definition, in the order of their last definitions
@@ -399,13 +396,4 @@ fn multicol(width: usize, strs: &[String]) -> String {
         out.push('\n');
     }
     out
-}
-
-/// The lines of a text, as Haskell's `lines` splits them.
-fn hs_lines(s: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = s.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop();
-    }
-    lines
 }

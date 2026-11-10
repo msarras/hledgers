@@ -217,6 +217,14 @@ pub fn chomp(s: &str) -> &str {
     s.trim_end_matches(['\r', '\n'])
 }
 
+/// The lines of a text as Haskell's `lines` splits them: a final newline
+/// ends the last line rather than starting another, an empty text has no
+/// lines, and, unlike `str::lines`, a carriage return stays in its line.
+pub fn hs_lines(s: &str) -> impl Iterator<Item = &str> {
+    let body = (!s.is_empty()).then(|| s.strip_suffix('\n').unwrap_or(s));
+    body.into_iter().flat_map(|b| b.split('\n'))
+}
+
 /// A string quoted for a POSIX shell command line if it needs that: in
 /// single quotes (an apostrophe written `'\''`) if it has quotes, white
 /// space or shell characters, `''` if it is empty (quoteForCommandLine).
@@ -433,6 +441,17 @@ pub fn words_quoted(s: &str) -> Option<Vec<String>> {
 
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn haskell_lines() {
+        let lines = |s| hs_lines(s).collect::<Vec<_>>();
+        assert_eq!(lines(""), Vec::<&str>::new());
+        assert_eq!(lines("\n"), [""]);
+        assert_eq!(lines("a"), ["a"]);
+        assert_eq!(lines("a\n"), ["a"]);
+        assert_eq!(lines("a\n\n"), ["a", ""]);
+        assert_eq!(lines("a\r\nb"), ["a\r", "b"]);
+    }
 
     // Values and results from GHC 9.10's Text.Printf.
     #[test]

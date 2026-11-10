@@ -2,6 +2,7 @@
 //! Hledger.Cli.CliOptions).
 
 use crate::reports::opts::RawOpts;
+use crate::text::hs_lines;
 use std::collections::HashSet;
 
 /// Whether a flag takes a value.
@@ -946,7 +947,7 @@ pub fn mode_usage(mode: &Mode, progname: &str) -> String {
 /// abbreviation in parentheses if any, the preamble, a `Flags:` block ending
 /// at a blank line, and the postamble.
 fn parse_command_help(doc: &str) -> (String, Vec<&str>) {
-    let lines = hs_lines(doc);
+    let lines: Vec<&str> = hs_lines(doc).collect();
     if lines.len() < 3 {
         return (String::new(), Vec::new());
     }
@@ -1107,20 +1108,10 @@ fn wrap(width: isize, x: &str) -> Vec<String> {
     out
 }
 
-/// The lines of a text, as Haskell's `lines` splits them: at each newline,
-/// with no empty last line for a final newline.
-fn hs_lines(s: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = s.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop();
-    }
-    lines
-}
-
 /// Help made bold on its first line and its headings (highlightHelp).
 pub fn highlight_help(help: &str) -> String {
     let mut out = String::with_capacity(help.len() + 200);
-    for (i, l) in hs_lines(help).into_iter().enumerate() {
+    for (i, l) in hs_lines(help).enumerate() {
         let heading = l.chars().next().is_some_and(char::is_alphanumeric) && l.ends_with(':');
         if i == 0 || heading {
             out.push_str(&format!("\x1b[1m{l}\x1b[22m\n"));
@@ -1325,7 +1316,7 @@ Spagetti Bolognaise  An Italian delight.
     #[test]
     fn command_names_are_those_in_their_help_files() {
         for m in crate::cli::commands::BUILTIN_COMMANDS {
-            let lines = hs_lines(m.doc);
+            let lines: Vec<&str> = hs_lines(m.doc).collect();
             assert_eq!(lines[0], m.name);
             let l3 = lines[2].trim_end();
             let alias = l3.strip_prefix('(').and_then(|a| a.strip_suffix(')'));

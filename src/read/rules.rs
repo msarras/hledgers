@@ -23,7 +23,7 @@ use crate::amount::{Amount, AmountStyle, Precision};
 use crate::decimal::Decimal;
 use crate::parse::{Alts, Item, PResult, ParseError, Parser, choice_try, is_non_newline_space, or};
 use crate::regex::{Regexp, to_regex_ci};
-use crate::text::{is_space, quote_if_needed, strip};
+use crate::text::{hs_lines, is_space, quote_if_needed, strip};
 
 /// Where a rule was written: its rules file and line, if known.
 pub type RulesPos = Option<(Arc<str>, usize)>;
@@ -260,12 +260,6 @@ pub fn read_rules(f: &str) -> Result<(CsvRules, Vec<String>), String> {
     Ok((rules, files))
 }
 
-/// The lines of a text, as Data.Text's lines splits them.
-fn text_lines(s: &str) -> impl Iterator<Item = &str> {
-    let s = s.strip_suffix('\n').unwrap_or(s);
-    s.split('\n').filter(move |_| !s.is_empty())
-}
-
 /// The directory part of a path, `.` if it has none (takeDirectory).
 pub fn take_directory(p: &str) -> String {
     match p.trim_end_matches('/').rfind('/') {
@@ -315,7 +309,7 @@ fn expand_lines(
     sources: &mut LineSources,
 ) -> Result<(), String> {
     let file_arc: Arc<str> = Arc::from(file);
-    for (i, line) in text_lines(text).enumerate() {
+    for (i, line) in hs_lines(text).enumerate() {
         let lnum = i + 1;
         let Some(path) = line.strip_prefix("include ") else {
             out.push_str(line);

@@ -3,6 +3,7 @@
 //! hledger-web as plain text, man and info source, their headings as help
 //! topics, the tldr example pages, and each builtin command's help text.
 
+use crate::text::hs_lines;
 use std::process::Command;
 
 /// A manual's file in the reference source's embeddedfiles directory.
@@ -112,7 +113,7 @@ fn manual_headings(tool: &str) -> Vec<(String, usize)> {
     let all_caps =
         |s: &str| s.chars().any(char::is_uppercase) && !s.chars().any(char::is_lowercase);
     let txt = manual(tool, 1);
-    let sections = hs_lines(&txt).into_iter().filter_map(|l| {
+    let sections = hs_lines(&txt).filter_map(|l| {
         let rest = l.trim_start_matches(' ');
         let (h, level) = match l.len() - rest.len() {
             0 => {
@@ -226,7 +227,7 @@ pub fn manual_topics_matching(topic: &str) -> Vec<(String, usize)> {
 /// the rest (printHelpForTopic).
 pub fn print_help_for_topic(tool: &str, topic: Option<&str>) -> Result<(), String> {
     let manual = manual(tool, 1);
-    let lines = hs_lines(&manual);
+    let lines: Vec<&str> = hs_lines(&manual).collect();
     let is_top_heading = |l: &str| {
         l.chars().next().is_some_and(char::is_uppercase) && !l.chars().any(char::is_lowercase)
     };
@@ -418,15 +419,6 @@ fn single_quote_if_needed(s: &str) -> String {
     } else {
         s.to_string()
     }
-}
-
-/// The lines of a text, as Haskell's `lines` splits them.
-fn hs_lines(s: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = s.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop();
-    }
-    lines
 }
 
 #[cfg(test)]

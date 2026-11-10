@@ -23,7 +23,7 @@ use crate::amount::{AmountStyle, MixedAmount, Sym};
 use crate::dates::{Day, parse_date_with_format, parse_time_zone};
 use crate::model::{BalanceAssertion, Journal, Posting, SourcePos, Status, Tag, Transaction};
 use crate::parse::{Cursor, Item, ParseError};
-use crate::text::{is_space, show_string, strip};
+use crate::text::{hs_lines, is_space, show_string, strip};
 
 /// A CSV record: its field values.
 pub type CsvRecord = Vec<String>;
@@ -764,12 +764,6 @@ impl CsvContext {
     }
 }
 
-/// The lines of a text, as Data.Text's lines splits them.
-fn text_lines(s: &str) -> impl Iterator<Item = &str> {
-    let s = s.strip_suffix('\n').unwrap_or(s);
-    s.split('\n').filter(move |_| !s.is_empty())
-}
-
 /// CSV data converted by rules to transactions, as an unfinalised journal,
 /// with what errors about them need (readJournalFromCsv). Blank lines are
 /// ignored and a top-level skip rule skips lines; skip, end, merge and pair
@@ -783,7 +777,7 @@ pub fn read_journal_from_csv(
     text: &str,
     sep: Option<char>,
 ) -> Result<(Journal, CsvContext), String> {
-    let lines: Vec<(usize, &str)> = text_lines(text)
+    let lines: Vec<(usize, &str)> = hs_lines(text)
         .enumerate()
         .map(|(i, l)| (i + 1, l))
         .filter(|(_, l)| !strip(l).is_empty())
@@ -1601,7 +1595,7 @@ fn parse_status(s: &str) -> Result<Status, String> {
 /// Text on one line: its lines stripped, the empty ones dropped, joined by
 /// spaces.
 fn single_line(s: &str) -> String {
-    text_lines(s)
+    hs_lines(s)
         .map(strip)
         .filter(|l| !l.is_empty())
         .collect::<Vec<_>>()
@@ -1616,7 +1610,7 @@ fn unescape_newlines(s: &str) -> String {
 /// Comment text as a following comment, each line after ` ;`, for parsing
 /// its tags (textToFollowingComment).
 fn to_following_comment(c: &str) -> String {
-    let s: String = text_lines(c).map(|l| format!(" ;{l}\n")).collect();
+    let s: String = hs_lines(c).map(|l| format!(" ;{l}\n")).collect();
     s.trim_start_matches(is_space).to_string()
 }
 
