@@ -611,8 +611,15 @@ fn cost_inferrer_for(
         .iter()
         .filter(|p| p.realness == realness && !set_aside(p))
         .collect();
-    // no postings sum to nothing, which needs no cost
-    if ps.is_empty() {
+    // a missing amount, or amounts in at most one commodity, sum to at most
+    // one amount to show, or to two of one commodity, one of them with a
+    // cost: no cost is inferred, and the sum need not be made to see that
+    let mut amounts = posting_amounts(&ps);
+    if ps.iter().any(|p| p.amount.is_missing())
+        || amounts
+            .next()
+            .is_none_or(|x| amounts.all(|y| y.commodity == x.commodity))
+    {
         return None;
     }
     let sum = sum_postings(&ps).amounts();
