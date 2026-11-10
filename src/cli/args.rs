@@ -162,20 +162,6 @@ impl Mode {
     }
 }
 
-/// The text file of a builtin command's help, embedded from the reference
-/// source.
-#[macro_export]
-macro_rules! command_doc {
-    ($name:literal) => {
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/hledger/hledger/Hledger/Cli/Commands/",
-            $name,
-            ".txt"
-        ))
-    };
-}
-
 /// Which general flags a command accepts, shown in its help as named groups
 /// after its own flags: one of upstream's group lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 //! hledger's embedded documentation and the viewers that show it
 //! (Hledger.Cli.DocFiles): the manuals of hledger, hledger-ui and
 //! hledger-web as plain text, man and info source, their headings as help
-//! topics, and the tldr example pages.
+//! topics, the tldr example pages, and each builtin command's help text.
 
 use std::process::Command;
 
@@ -12,6 +12,20 @@ macro_rules! embedded {
             env!("CARGO_MANIFEST_DIR"),
             "/hledger/hledger/embeddedfiles/",
             $name
+        ))
+    };
+}
+
+/// The text file of a builtin command's help, embedded from the reference
+/// source.
+#[macro_export]
+macro_rules! command_doc {
+    ($name:literal) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/hledger/hledger/Hledger/Cli/Commands/",
+            $name,
+            ".txt"
         ))
     };
 }
