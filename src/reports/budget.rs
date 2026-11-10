@@ -265,7 +265,7 @@ fn journal_with_budget_account_names(
             } else {
                 UNBUDGETED_ACCOUNT_NAME.to_string()
             };
-            p.original = Some(Box::new(p.original().clone()));
+            p.keep_original();
             p.account = AccountName::from(remapped);
         }
     }

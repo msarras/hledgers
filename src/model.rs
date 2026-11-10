@@ -189,6 +189,14 @@ impl Posting {
         self.original.as_deref().unwrap_or(self)
     }
 
+    /// Remember the posting as it is now as its original, unless one is
+    /// remembered already: called before the first change to a posting.
+    pub fn keep_original(&mut self) {
+        if self.original.is_none() {
+            self.original = Some(Box::new(self.clone()));
+        }
+    }
+
     pub fn is_real(&self) -> bool {
         self.realness == Realness::Real
     }
@@ -948,7 +956,7 @@ impl Journal {
                 })
                 .collect();
             for (p, a) in t.postings.iter_mut().zip(accounts) {
-                p.original = Some(Box::new(p.original().clone()));
+                p.keep_original();
                 p.account = a.into();
             }
         }

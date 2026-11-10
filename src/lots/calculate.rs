@@ -1775,7 +1775,7 @@ impl Gains<'_> {
         let mut t2 = t.clone();
         for p in &mut t2.postings {
             if self.is_gain(p) && !p.has_amount() {
-                p.original = Some(Box::new(p.original().clone()));
+                p.keep_original();
                 p.amount = amt.clone();
             }
         }
@@ -1830,7 +1830,7 @@ impl Gains<'_> {
             };
             if let Some(k) = ps.iter().rposition(target) {
                 let q = &mut ps[k];
-                q.original = Some(Box::new(q.original().clone()));
+                q.keep_original();
                 q.amount =
                     set_local_gain_precision(t, &q.amount + &-MixedAmount::from_amount(a.clone()));
             }

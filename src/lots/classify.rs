@@ -855,7 +855,7 @@ pub fn journal_infer_postings_transacted_cost(mut j: Journal) -> Journal {
             .collect();
         for (p, m) in t.postings.iter_mut().zip(new) {
             if let Some(m) = m {
-                p.original = Some(Box::new(p.original().clone()));
+                p.keep_original();
                 p.amount = m;
             }
         }

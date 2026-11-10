@@ -491,7 +491,7 @@ fn infer_balancing_amount(
             a
         };
         let a = a.styled(styles);
-        p.original = Some(Box::new(p.original().clone()));
+        p.keep_original();
         p.amount = a.clone();
         inferred.push((p.account.clone(), a));
     }
@@ -593,7 +593,7 @@ impl CostInferrer {
             cost: Some(self.cost.clone()),
             ..a.clone()
         };
-        p.original = Some(Box::new(p.original().clone()));
+        p.keep_original();
         p.amount = MixedAmount::from_amount(priced);
     }
 }
@@ -974,7 +974,7 @@ impl Balancer {
             } else {
                 self.set(&p.account, new.clone())
             };
-            p.original = Some(Box::new(p.original().clone()));
+            p.keep_original();
             p.amount = diff.filter(|a| !a.is_zero());
             self.check_or_defer(t, &p, new)?;
         }

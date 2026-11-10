@@ -449,7 +449,7 @@ impl AliasConverter<'_> {
         {
             return;
         }
-        p.original = Some(Box::new(p.original().clone()));
+        p.keep_original();
         p.amount = p.amount.map(|a| self.amount(a));
         if let Some(ba) = &mut p.assertion {
             ba.amount = self.exact(&ba.amount);
