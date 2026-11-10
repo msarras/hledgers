@@ -56,7 +56,7 @@ const TESTS: &[(&[&str], &str, Test)] = {
     use crate::write::chart_text::tests as chart_text;
     use crate::write::html::tests as html;
     use crate::write::journal::tests as write_journal;
-    use crate::write::string_format::tests as string_format;
+    use crate::reports::string_format::tests as string_format;
     &[
         (&["Hledger", DATA, "Account"], "accountFromPostings", tree::account_from_no_postings),
         (&["Hledger", DATA, "AccountName"], "expandAccountNames", account::expand_names),

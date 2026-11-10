@@ -12,5 +12,4 @@ pub mod journal;
 pub mod json;
 pub mod ledger;
 pub mod spreadsheet;
-pub mod string_format;
 pub mod table;

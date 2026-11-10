@@ -11,12 +11,12 @@ use crate::dates::{
 };
 use crate::model::{Journal, Posting, PostingRef, Status, Transaction};
 use crate::query::{Query, QueryOpt, parse_depth_spec, parse_query_list};
+use crate::reports::string_format::{StringFormat, parse_string_format};
 use crate::text::strip_quotes;
 use crate::valuation::{
     ConversionOp, PriceOracle, ValuationType, journal_to_cost, mixed_amount_apply_gain,
     mixed_amount_apply_valuation, mixed_amount_gain_at_date, mixed_amount_value_at_date,
 };
-use crate::write::string_format::{StringFormat, parse_string_format};
 
 /// What to calculate in each balance report cell (BalanceCalculation).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

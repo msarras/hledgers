@@ -41,6 +41,7 @@ use crate::reports::periodic::{
     BalanceReport, DisplayName, MultiBalanceReport, PeriodicReportRow, balance_report,
     balance_report_styles, multi_balance_report,
 };
+use crate::reports::string_format::{Component, Field, StringFormat};
 use crate::text::{Wide, format_text};
 use crate::valuation::{ConversionOp, ValuationType};
 use crate::write::csv::{print_csv, print_tsv};
@@ -52,7 +53,6 @@ use crate::write::spreadsheet::{
     cell_from_amount, cell_from_mixed_amount, cells_from_mixed_amount, horizontal_span,
     raw_table_content,
 };
-use crate::write::string_format::{Component, Field, StringFormat};
 use crate::write::table::{
     Align, Cell, Header, Line, Table, TableOpts, concat_tables, render_columns, render_row,
     render_table, render_table_by_rows,
