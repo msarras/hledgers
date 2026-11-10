@@ -326,10 +326,10 @@ impl Amount {
     /// Whether it would look zero with these styles: what
     /// `styled(styles).looks_zero()` says, without the styled copy.
     pub fn looks_zero_styled(&self, styles: &CommodityStyles) -> bool {
-        let main = self.quantity_looks_zero_at(restyled_precision(styles, false, self));
+        let main = self.quantity_looks_zero_at(restyle(styles, false, self).precision);
         match &self.cost {
             Some(AmountCost::Total(c)) => {
-                main && c.quantity_looks_zero_at(restyled_precision(styles, true, c))
+                main && c.quantity_looks_zero_at(restyle(styles, true, c).precision)
             }
             _ => main,
         }
@@ -548,17 +548,14 @@ fn restyle(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> AmountStyle {
     match styles.get(&a.commodity) {
         None => a.style,
         Some(new) => AmountStyle {
-            precision: restyled_precision(styles, is_cost, a),
+            precision: restyled_precision(new, is_cost, a),
             ..*new
         },
     }
 }
 
-/// The precision of an amount's new style (see [`restyle`]).
-fn restyled_precision(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Precision {
-    let Some(new) = styles.get(&a.commodity) else {
-        return a.style.precision;
-    };
+/// The precision of an amount given this new style (see [`restyle`]).
+fn restyled_precision(new: &AmountStyle, is_cost: bool, a: &Amount) -> Precision {
     let old = a.style.precision;
     match new.rounding {
         Rounding::No => old,
