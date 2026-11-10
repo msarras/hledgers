@@ -17,15 +17,15 @@ use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space};
 use crate::regex::to_regex_ci;
 use crate::text::is_space;
 
-/// The account names and commodity symbols read so far, each kept once: a
-/// journal repeats a few of each many times.
+/// The account names read so far, each kept once: a journal repeats a few
+/// of them many times.
 #[derive(Debug, Default)]
 pub struct Interned {
     names: HashSet<Arc<str>>,
 }
 
 impl Interned {
-    /// The shared copy of an account name or commodity symbol.
+    /// The shared copy of an account name.
     pub fn name(&mut self, s: &str) -> Arc<str> {
         match self.names.get(s) {
             Some(name) => name.clone(),

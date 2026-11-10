@@ -535,7 +535,7 @@ fn ordered_amounts(fmt: &AmountFormat, m: &MixedAmount) -> Vec<Amount> {
                 let found = amounts.iter().find(|a| &a.commodity == c);
                 found
                     .cloned()
-                    .unwrap_or_else(|| Amount::null().with_commodity(c.clone()))
+                    .unwrap_or_else(|| Amount::null().with_commodity(*c))
             })
             .collect(),
     }

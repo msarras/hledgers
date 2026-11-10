@@ -542,7 +542,7 @@ fn lot_mismatch_commodities(lotful: &BTreeSet<Sym>, ps: &[&Posting]) -> Vec<Sym>
                         && !posting_amounts(ps)
                             .any(|y| y.commodity == x.commodity && y.quantity == x.quantity)
                 })
-                .map(|x| x.commodity.clone())
+                .map(|x| x.commodity)
                 .collect()
         }
         _ => Vec::new(),

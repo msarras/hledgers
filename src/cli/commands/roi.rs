@@ -178,7 +178,7 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
             for a in p.amount.amounts() {
                 if let Some(pd) = amount_price_directive_from_cost(d, &a) {
                     trade_prices
-                        .entry(pd.commodity.clone())
+                        .entry(pd.commodity)
                         .or_default()
                         .insert(d, pd.amount);
                 }
@@ -192,7 +192,7 @@ pub fn roi(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     }
     r.costed = (changes.values().flat_map(|m| m.amounts_raw()))
         .filter(|a| a.cost.is_some() || a.cost_basis.is_some())
-        .map(|a| a.commodity.clone())
+        .map(|a| a.commodity)
         .collect();
     r.changes = changes;
     r.trade_prices = trade_prices;
@@ -324,7 +324,7 @@ fn un_mix(m: &MixedAmount) -> Result<Decimal, String> {
 fn drop_closed_positions(m: &MixedAmount) -> MixedAmount {
     let mut sums: BTreeMap<Sym, Decimal> = BTreeMap::new();
     for a in m.amounts() {
-        let s = sums.entry(a.commodity.clone()).or_insert(Decimal::ZERO);
+        let s = sums.entry(a.commodity).or_insert(Decimal::ZERO);
         *s = &a.quantity + s;
     }
     let closed: BTreeSet<Sym> = (sums.into_iter())
@@ -652,7 +652,7 @@ impl Roi<'_> {
         // a quantity of the period's commodity, styled
         let show_quantity = |q: &Decimal| {
             self.show(&MixedAmount::from_amount(Amount {
-                commodity: commodity.clone(),
+                commodity,
                 quantity: q.clone(),
                 ..Amount::null()
             }))

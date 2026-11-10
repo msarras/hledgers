@@ -852,7 +852,7 @@ pub fn journal_average_pool_totals(
             quantity: cost,
             ..(*ub1).clone()
         };
-        totals.insert((AccountName::from(base), c.clone()), (units, total));
+        totals.insert((AccountName::from(base), *c), (units, total));
     }
     totals
 }

@@ -105,7 +105,7 @@ fn tm_posting_rule_posting(
                 multiplied
             } else {
                 multiplied.map(|a| Amount {
-                    commodity: m.commodity.clone(),
+                    commodity: m.commodity,
                     style: m.style,
                     cost: m.cost.clone(),
                     ..a.clone()

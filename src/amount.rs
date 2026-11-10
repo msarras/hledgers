@@ -6,11 +6,13 @@
 pub mod currency;
 pub mod render;
 
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt;
 use std::iter::Sum;
-use std::ops::{Add, Mul, Neg, Sub};
+use std::ops::{Add, Deref, Mul, Neg, Sub};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use dashu_int::IBig;
@@ -18,8 +20,70 @@ use dashu_int::IBig;
 use crate::dates::Day;
 use crate::decimal::Decimal;
 
-/// A commodity symbol, shared by the amounts that use it.
-pub type Sym = Arc<str>;
+/// A commodity symbol: its text, kept once until the program ends, so that
+/// amounts copy a symbol without touching memory other threads write.
+/// Symbols compare, order and hash as their text.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Sym(&'static str);
+
+/// The symbol with this text. A thread looks in the symbols shared by all
+/// threads only for one it has not seen.
+impl From<&str> for Sym {
+    fn from(s: &str) -> Sym {
+        thread_local! {
+            static SEEN: RefCell<HashSet<&'static str>> = RefCell::default();
+        }
+        static ALL: LazyLock<Mutex<HashSet<&'static str>>> = LazyLock::new(Default::default);
+        SEEN.with_borrow_mut(|seen| {
+            if let Some(&k) = seen.get(s) {
+                return Sym(k);
+            }
+            let mut all = ALL.lock().unwrap();
+            let k = match all.get(s) {
+                Some(&k) => k,
+                None => {
+                    let k: &'static str = Box::leak(Box::from(s));
+                    all.insert(k);
+                    k
+                }
+            };
+            seen.insert(k);
+            Sym(k)
+        })
+    }
+}
+
+impl From<String> for Sym {
+    fn from(s: String) -> Sym {
+        Sym::from(s.as_str())
+    }
+}
+
+impl Deref for Sym {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.0
+    }
+}
+
+impl Borrow<str> for Sym {
+    fn borrow(&self) -> &str {
+        self.0
+    }
+}
+
+impl fmt::Display for Sym {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self.0, f)
+    }
+}
+
+impl fmt::Debug for Sym {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self.0, f)
+    }
+}
 
 /// The display style to use for each commodity.
 pub type CommodityStyles = BTreeMap<Sym, AmountStyle>;
@@ -148,13 +212,11 @@ pub struct Amount {
 /// of divisions that do not terminate.
 pub const DEFAULT_MAX_DISPLAY_PRECISION: u8 = 8;
 
-static NO_SYMBOL: LazyLock<Sym> = LazyLock::new(|| Sym::from(""));
-
 impl Amount {
     /// Zero with no commodity, no cost, and the default style (nullamt).
     pub fn null() -> Amount {
         Amount {
-            commodity: NO_SYMBOL.clone(),
+            commodity: Sym(""),
             quantity: Decimal::ZERO,
             style: AmountStyle::default(),
             cost: None,
@@ -165,7 +227,7 @@ impl Amount {
     /// The marker for an amount not written, to be inferred (missingamt).
     pub fn missing() -> Amount {
         Amount {
-            commodity: Sym::from("AUTO"),
+            commodity: Sym("AUTO"),
             ..Amount::null()
         }
     }
@@ -516,7 +578,7 @@ fn restyled_precision(styles: &CommodityStyles, is_cost: bool, a: &Amount) -> Pr
 pub fn styles_with_rounding(rounding: Rounding, styles: &CommodityStyles) -> CommodityStyles {
     styles
         .iter()
-        .map(|(c, s)| (c.clone(), AmountStyle { rounding, ..*s }))
+        .map(|(c, s)| (*c, AmountStyle { rounding, ..*s }))
         .collect()
 }
 
@@ -558,12 +620,12 @@ pub fn add_amount_style_as(
 ) {
     match styles.get(commodity) {
         None => {
-            styles.insert(a.commodity.clone(), *style);
+            styles.insert(a.commodity, *style);
         }
         Some(old) => {
             let new = canonical_style(style, old);
             if new != *old {
-                styles.insert(a.commodity.clone(), new);
+                styles.insert(a.commodity, new);
             }
         }
     }
@@ -597,7 +659,7 @@ fn similar_amounts_op(
     op: impl Fn(&Decimal, &Decimal) -> Decimal,
 ) -> Amount {
     Amount {
-        commodity: b.commodity.clone(),
+        commodity: b.commodity,
         quantity: op(&a.quantity, &b.quantity),
         style: AmountStyle {
             precision: a.style.precision.max(b.style.precision),
@@ -864,7 +926,7 @@ impl MixedAmount {
             .collect();
         if amounts.is_empty() {
             MixedAmount::from_amount(Amount {
-                commodity: commodity.clone(),
+                commodity: *commodity,
                 ..Amount::null()
             })
         } else {

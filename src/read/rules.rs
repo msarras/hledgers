@@ -1959,7 +1959,7 @@ impl CsvRules {
             ..Amount::null()
         };
         let part = Amount {
-            commodity: amount.commodity.clone(),
+            commodity: amount.commodity,
             ..part
         };
         Ok(crate::amount::render::show_amount_b(&AmountFormat::DEFAULT, &part).s)

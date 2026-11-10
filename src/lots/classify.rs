@@ -225,7 +225,7 @@ fn add_to_sum(
             }
         }
         None => {
-            m.insert(c.clone(), (q, vec![acct.clone()]));
+            m.insert(*c, (q, vec![acct.clone()]));
         }
     }
 }
@@ -298,12 +298,10 @@ impl<'a> Classifier<'a> {
             for a in p.amount.amounts_raw().iter().filter(|a| a.cost.is_none()) {
                 let q = &a.quantity;
                 if q.is_negative() {
-                    let e = grouped.entry((acct, a.commodity.clone(), -q)).or_default();
+                    let e = grouped.entry((acct, a.commodity, -q)).or_default();
                     e.0.insert(0, i);
                 } else if *q > Decimal::ZERO {
-                    let e = grouped
-                        .entry((acct, a.commodity.clone(), q.clone()))
-                        .or_default();
+                    let e = grouped.entry((acct, a.commodity, q.clone())).or_default();
                     e.1.insert(0, i);
                 }
             }
@@ -333,7 +331,7 @@ impl<'a> Classifier<'a> {
             let amts = p.amount.amounts_raw();
             let is_neg = any_negative(amts);
             let has_cb = has_cost_basis(p);
-            let key = |a: &Amount| (a.commodity.clone(), a.quantity.abs());
+            let key = |a: &Amount| (a.commodity, a.quantity.abs());
             let cb_keys = amts.iter().filter(|a| a.cost_basis.is_some()).map(key);
             if is_neg && (has_cb || (self.lotful(amts) && is_asset)) {
                 let keys: Vec<_> = if has_cb {
@@ -392,7 +390,7 @@ impl<'a> Classifier<'a> {
         c: &Sym,
         q: &Decimal,
     ) -> bool {
-        m.get(&(c.clone(), q.abs()))
+        m.get(&(*c, q.abs()))
             .is_some_and(|accts| accts.iter().any(|a| &**a != acct))
     }
 

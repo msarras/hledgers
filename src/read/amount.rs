@@ -5,13 +5,12 @@
 //! Like the other parsers here, these work on a [`Cursor`], and one that fails
 //! without consuming input leaves the cursor where it started.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dashu_int::IBig;
 
-use super::common::{Interned, datep};
+use super::common::datep;
 use crate::amount::{
     Amount, AmountCost, AmountStyle, CostBasis, DigitGroups, Precision, Side, Sym,
     is_nonsimple_commodity_char,
@@ -50,19 +49,9 @@ pub struct AmountCtx<'s> {
     pub commodities: Option<&'s BTreeMap<Sym, Commodity>>,
     /// The default year, for lot dates without one (jparsedefaultyear).
     pub year: Option<i64>,
-    /// Where to keep the symbols read, if they are to be shared.
-    pub interned: Option<&'s RefCell<Interned>>,
 }
 
 impl AmountCtx<'_> {
-    /// A commodity symbol, shared if symbols are kept.
-    fn symbol(&self, s: &str) -> Sym {
-        match self.interned {
-            Some(i) => i.borrow_mut().name(s),
-            None => Sym::from(s),
-        }
-    }
-
     /// The style declared for this commodity by its commodity directive, or
     /// else by the D directive (journalAmountStyleFor).
     fn style_for(&self, commodity: &str) -> Option<&AmountStyle> {
@@ -530,7 +519,7 @@ fn left_symbol_amountp(c: &mut Cursor, ctx: &AmountCtx, kind: AmountKind) -> PRe
     let negative = signp(c);
     let (q, precision, mark, groups) = numberp_in_amount(c, ctx, kind, hint)?;
     Ok(Amount {
-        commodity: ctx.symbol(commodity),
+        commodity: Sym::from(commodity),
         quantity: if negative { -q } else { q },
         style: AmountStyle {
             side: Side::L,
@@ -592,7 +581,7 @@ fn right_or_no_symbol_amountp(
         Some((spaced, commodity)) => {
             let (q, precision, mark, groups) = interpret(c, ctx.number_hint(commodity))?;
             Ok(Amount {
-                commodity: ctx.symbol(commodity),
+                commodity: Sym::from(commodity),
                 quantity: q,
                 style: AmountStyle {
                     side: Side::R,
@@ -653,7 +642,7 @@ fn numberp_in_amount(
 fn with_default_commodity(ctx: &AmountCtx, a: Amount) -> Amount {
     match ctx.default_commodity {
         Some((commodity, style)) => Amount {
-            commodity: commodity.clone(),
+            commodity: *commodity,
             style: AmountStyle {
                 precision: style.precision.max(a.style.precision),
                 decimal_mark: style.decimal_mark.or(a.style.decimal_mark),

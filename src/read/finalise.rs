@@ -204,7 +204,7 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
         }
     }
     let default_amount = j.default_commodity.as_ref().map(|(c, s)| Amount {
-        commodity: c.clone(),
+        commodity: *c,
         style: *s,
         ..Amount::null()
     });
@@ -299,7 +299,7 @@ fn journal_apply_commodity_aliases(mut j: Journal) -> Result<Journal, String> {
         match aliases.get(&pd.commodity) {
             None => pd.amount = conv.exact(&pd.amount),
             Some((c, q, _)) => {
-                pd.commodity = c.clone();
+                pd.commodity = *c;
                 pd.amount = scale_by(q, conv.exact(&pd.amount));
             }
         }
@@ -323,14 +323,14 @@ pub fn convert_alias_amount(aliases: &CommodityAliases, a: &Amount) -> (Amount, 
             ..s
         });
         let a = Amount {
-            commodity: c.clone(),
+            commodity: *c,
             style,
             ..a.clone()
         };
         return (a, one);
     }
     let converted = Amount {
-        commodity: c.clone(),
+        commodity: *c,
         quantity: &a.quantity / q,
         ..a.clone()
     };

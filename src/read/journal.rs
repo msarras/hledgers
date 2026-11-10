@@ -299,22 +299,17 @@ struct JournalParser<'a, 's> {
     iopts: &'s InputOpts,
     /// A known position: offset, line, and the offset of that line's start.
     anchor: (usize, usize, usize),
-    /// The account names and commodity symbols read so far.
+    /// The account names read so far.
     interned: RefCell<Interned>,
 }
 
 /// The amount parsers' view of the parse state.
-fn amount_ctx<'s>(
-    st: &'s ParseState,
-    j: &'s Journal,
-    interned: &'s RefCell<Interned>,
-) -> AmountCtx<'s> {
+fn amount_ctx<'s>(st: &'s ParseState, j: &'s Journal) -> AmountCtx<'s> {
     AmountCtx {
         decimal_mark: st.decimal_mark,
         default_commodity: st.default_commodity.as_ref(),
         commodities: Some(&j.declared_commodities),
         year: st.year,
-        interned: Some(interned),
     }
 }
 
@@ -904,7 +899,7 @@ impl<'a> JournalParser<'a, '_> {
         let pos = self.pos();
         if self.c.skip_spaces() {
             let off = self.c.pos;
-            let ctx = amount_ctx(self.st, self.j, &self.interned);
+            let ctx = amount_ctx(self.st, self.j);
             if let Ok(a) = amountp(&mut self.c, &ctx, AmountKind::Style) {
                 self.c.skip_spaces();
                 let comment_off = self.c.pos;
@@ -914,7 +909,7 @@ impl<'a> JournalParser<'a, '_> {
                     return Err(please_include_decimal_point(&self.c, off));
                 }
                 self.add_commodity(Commodity {
-                    symbol: a.commodity.clone(),
+                    symbol: a.commodity,
                     format: Some(a.style),
                     comment,
                     tags,
@@ -961,7 +956,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.eat_str("format");
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j, &self.interned);
+        let ctx = amount_ctx(self.st, self.j);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style).map_err(|e| {
             if self.c.pos == off {
                 self.c.unexpected(&[Item::label("amount")])
@@ -992,7 +987,7 @@ impl<'a> JournalParser<'a, '_> {
             let existing = self
                 .j
                 .declared_commodity_tags
-                .entry(new.symbol.clone())
+                .entry(new.symbol)
                 .or_default();
             let earlier = std::mem::replace(existing, new.tags.clone());
             for t in earlier {
@@ -1001,7 +996,7 @@ impl<'a> JournalParser<'a, '_> {
                 }
             }
         }
-        let sym = new.symbol.clone();
+        let sym = new.symbol;
         let combined = match self.j.declared_commodities.remove(&sym) {
             None => new,
             Some(old) => {
@@ -1136,7 +1131,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.bump();
         self.spaces1(&[])?;
         let off = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j, &self.interned);
+        let ctx = amount_ctx(self.st, self.j);
         let a = amountp(&mut self.c, &ctx, AmountKind::Style)?;
         rest_of_line(&mut self.c);
         if a.style.decimal_mark.is_none() {
@@ -1269,7 +1264,7 @@ impl<'a> JournalParser<'a, '_> {
     fn commodity_conversion_directivep(&mut self) -> R<()> {
         self.c.bump();
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j, &self.interned);
+        let ctx = amount_ctx(self.st, self.j);
         amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         self.c.skip_spaces();
         if !self.c.eat('=') {
@@ -1324,9 +1319,9 @@ impl<'a> JournalParser<'a, '_> {
                 self.c = save;
             }
         }
-        let symbol = (self.interned.borrow_mut()).name(commodity_symbolp(&mut self.c)?);
+        let symbol = Sym::from(commodity_symbolp(&mut self.c)?);
         self.spaces1(&[])?;
-        let ctx = amount_ctx(self.st, self.j, &self.interned);
+        let ctx = amount_ctx(self.st, self.j);
         let amount = amountp(&mut self.c, &ctx, AmountKind::Ordinary)?;
         rest_of_line(&mut self.c);
         Ok(PriceDirective {
@@ -1498,7 +1493,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.skip_spaces();
         let multiplier = is_rule && self.c.eat('*');
         let amount_start = self.c.pos;
-        let ctx = amount_ctx(self.st, self.j, &self.interned);
+        let ctx = amount_ctx(self.st, self.j);
         let amount = if multiplier {
             amountp(&mut self.c, &ctx, AmountKind::Multiplier)
         } else {
@@ -1514,7 +1509,7 @@ impl<'a> JournalParser<'a, '_> {
         self.c.skip_spaces();
         let assertion = if self.c.peek() == Some('=') {
             let pos = self.pos();
-            let ctx = amount_ctx(self.st, self.j, &self.interned);
+            let ctx = amount_ctx(self.st, self.j);
             Some(Box::new(balance_assertionp(&mut self.c, &ctx, pos)?))
         } else {
             None

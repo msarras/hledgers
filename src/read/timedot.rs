@@ -199,7 +199,7 @@ impl TimedotParser<'_, '_> {
         let (comment, tags) = transaction_commentp(&mut self.c, &hints)?;
         let (commodity, style) = match &self.st.default_commodity {
             Some((c, s)) => (
-                c.clone(),
+                *c,
                 AmountStyle {
                     precision: s.precision.max(Precision::Fixed(2)),
                     ..*s
@@ -227,7 +227,7 @@ impl TimedotParser<'_, '_> {
                 Posting {
                     account: account.as_str().into(),
                     amount: MixedAmount::from_amount(Amount {
-                        commodity: commodity.clone(),
+                        commodity,
                         quantity: hours,
                         style,
                         ..Amount::null()

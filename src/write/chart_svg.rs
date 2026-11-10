@@ -1903,7 +1903,7 @@ fn tick_label(unit: &Amount, decimals: usize, ticks: &[f64], t: f64) -> String {
     };
     let u = Amount {
         commodity: if unittick == Some(t) {
-            unit.commodity.clone()
+            unit.commodity
         } else {
             Sym::from("")
         },

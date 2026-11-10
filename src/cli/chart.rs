@@ -59,9 +59,9 @@ pub fn parse_chart_arg(
     let commodities: BTreeMap<Sym, Commodity> = (styles.iter())
         .map(|(c, st)| {
             (
-                c.clone(),
+                *c,
                 Commodity {
-                    symbol: c.clone(),
+                    symbol: *c,
                     format: Some(*st),
                     comment: String::new(),
                     tags: Vec::new(),
@@ -182,7 +182,7 @@ pub fn render_chart(
     report_html: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
     let styles: BTreeMap<Sym, AmountStyle> = (chart.panels.iter())
-        .map(|p| (p.unit.commodity.clone(), p.unit.style))
+        .map(|p| (p.unit.commodity, p.unit.style))
         .collect();
     let (kind, scales) = (opts.raw.string("chart"))
         .and_then(|s| parse_chart_arg(&styles, s).ok())
@@ -1025,7 +1025,7 @@ fn unit_amount(c: &Sym, amounts: &[&Amount]) -> Amount {
             ..(*a).clone()
         },
         None => Amount {
-            commodity: c.clone(),
+            commodity: *c,
             ..Amount::null()
         },
     }

@@ -198,7 +198,7 @@ fn parse_prices(text: &str) -> Result<Vec<PriceDirective>, String> {
 
 /// What two price directives are the same price for (priceKey).
 fn price_key(pd: &PriceDirective) -> (Day, Sym, Sym) {
-    (pd.date, pd.commodity.clone(), pd.amount.commodity.clone())
+    (pd.date, pd.commodity, pd.amount.commodity)
 }
 
 /// Merge new prices into a prices file, made if need be: the file's prices

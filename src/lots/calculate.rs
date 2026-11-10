@@ -127,7 +127,7 @@ pub fn journal_check_lots_method_coherence(j: &Journal) -> Result<(), String> {
                 || (commodity_uses_lots(j, &a.commodity) && !account_uses_no_lots(j, acct))
             {
                 holdings
-                    .entry((a.commodity.clone(), lot_direction_or_long(j, acct)))
+                    .entry((a.commodity, lot_direction_or_long(j, acct)))
                     .or_default()
                     .insert(acct);
             }
@@ -263,7 +263,7 @@ fn validate_user_labels(txns: &[Transaction]) -> Result<(), String> {
             for a in p.amount.amounts_raw() {
                 let Some(cb) = &a.cost_basis else { continue };
                 let Some(l) = &cb.label else { continue };
-                let key = (a.commodity.clone(), cb.date.unwrap_or(t.date), l.clone());
+                let key = (a.commodity, cb.date.unwrap_or(t.date), l.clone());
                 by_key.entry(key).or_default().insert(0, t);
             }
         }
@@ -294,7 +294,7 @@ fn find_dates_needing_labels(txns: &[Transaction]) -> BTreeSet<(Sym, Day)> {
                     .as_ref()
                     .and_then(|cb| cb.date)
                     .unwrap_or(t.date);
-                *counts.entry((a.commodity.clone(), date)).or_default() += 1;
+                *counts.entry((a.commodity, date)).or_default() += 1;
             }
         }
     }
@@ -323,7 +323,7 @@ fn generate_label(lots: Option<&CommodityLots>, date: Day) -> std::sync::Arc<str
 /// Add an amount to a lot's balance in an account, adding to any there
 /// (addLotState).
 fn add_lot_state(c: &Sym, id: LotId, acct: &str, amt: Amount, ls: &mut LotState) {
-    let accts = ls.entry(c.clone()).or_default().entry(id).or_default();
+    let accts = ls.entry(*c).or_default().entry(id).or_default();
     match accts.get_mut(acct) {
         Some(old) => {
             let quantity = &amt.quantity + &old.quantity;
@@ -647,7 +647,7 @@ fn update_pool_on_acquire(
     acq_cost: &Amount,
     ls: &mut LotState,
 ) -> Result<Amount, String> {
-    let lots = ls.entry(c.clone()).or_default();
+    let lots = ls.entry(*c).or_default();
     let existing: Vec<(&Decimal, &Amount)> = lots
         .values()
         .flat_map(|accts| accts.iter().filter(|(a, _)| in_pool(a)))
@@ -1019,7 +1019,7 @@ impl Calc<'_> {
             }
         };
         let inferred = cb.cost.is_none();
-        let needs_label = self.needs_labels.contains(&(c.clone(), date));
+        let needs_label = self.needs_labels.contains(&(*c, date));
         let label = cb
             .label
             .clone()
@@ -1563,8 +1563,8 @@ fn group_indexed_transfer_postings(
             .map(|a| &a.commodity)
             .collect();
         match (with_basis.as_slice(), amts) {
-            ([c], _) => Ok((*c).clone()),
-            (_, [a]) => Ok(a.commodity.clone()),
+            ([c], _) => Ok(**c),
+            (_, [a]) => Ok(a.commodity),
             _ => Err(format!(
                 "{}This {label} posting has amounts in several commodities ({}).\n\
                  In a lot transfer, each posting should have just one commodity;\n\
@@ -1595,9 +1595,7 @@ fn group_indexed_transfer_postings(
             [cb] => (
                 cb.date,
                 cb.label.clone(),
-                cb.cost
-                    .as_ref()
-                    .map(|a| (a.commodity.clone(), a.quantity.clone())),
+                cb.cost.as_ref().map(|a| (a.commodity, a.quantity.clone())),
             ),
             _ => (None, None, None),
         }
@@ -1646,7 +1644,7 @@ fn group_indexed_transfer_postings(
         let (mut fs, mut ts) = (fs.clone(), ts.clone());
         fs.sort_by_key(sort_key);
         ts.sort_by_key(sort_key);
-        groups.push((comm.clone(), fs, ts));
+        groups.push((*comm, fs, ts));
     }
     Ok(groups)
 }

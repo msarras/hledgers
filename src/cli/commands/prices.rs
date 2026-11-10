@@ -115,14 +115,14 @@ pub fn prices(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     } else {
         j.price_directives.clone()
     };
-    let pair = |pd: &PriceDirective| (pd.commodity.clone(), pd.amount.commodity.clone());
+    let pair = |pd: &PriceDirective| (pd.commodity, pd.amount.commodity);
     let alias_prices: Vec<PriceDirective> = if raw.bool("show-aliases") {
         let market_pairs: BTreeSet<(Sym, Sym)> = market.iter().map(pair).collect();
         journal_alias_price_directives(j)
             .into_iter()
             .filter(|pd| {
                 let (f, t) = pair(pd);
-                !market_pairs.contains(&(f.clone(), t.clone())) && !market_pairs.contains(&(t, f))
+                !market_pairs.contains(&(f, t)) && !market_pairs.contains(&(t, f))
             })
             .collect()
     } else {
@@ -132,7 +132,7 @@ pub fn prices(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     // an alias rate, or its reverse
     let is_alias_rate = |pd: &PriceDirective| {
         let (f, t) = pair(pd);
-        alias_pairs.contains(&(f.clone(), t.clone())) || alias_pairs.contains(&(t, f))
+        alias_pairs.contains(&(f, t)) || alias_pairs.contains(&(t, f))
     };
     let mut forward = market;
     forward.extend(alias_prices);
@@ -178,7 +178,7 @@ fn merge_price_directives(
     mut pds1: Vec<PriceDirective>,
     pds2: impl IntoIterator<Item = PriceDirective>,
 ) -> Vec<PriceDirective> {
-    let id = |pd: &PriceDirective| (pd.date, pd.commodity.clone(), pd.amount.commodity.clone());
+    let id = |pd: &PriceDirective| (pd.date, pd.commodity, pd.amount.commodity);
     let ids: BTreeSet<(Day, Sym, Sym)> = pds1.iter().map(id).collect();
     pds1.extend(pds2.into_iter().filter(|pd| !ids.contains(&id(pd))));
     pds1
@@ -192,13 +192,13 @@ fn reverse_price_directive(pd: &PriceDirective) -> Option<PriceDirective> {
         return None;
     }
     let amount = Amount {
-        commodity: pd.commodity.clone(),
+        commodity: pd.commodity,
         ..pd.amount.clone()
     }
     .invert()
     .with_full_precision_up_to(Some(DEFAULT_MAX_DISPLAY_PRECISION));
     Some(PriceDirective {
-        commodity: pd.amount.commodity.clone(),
+        commodity: pd.amount.commodity,
         amount,
         ..pd.clone()
     })

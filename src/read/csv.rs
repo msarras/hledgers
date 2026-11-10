@@ -1531,7 +1531,7 @@ pub fn parse_currency(currency: &str, decimal_mark: Option<char>) -> Option<(Sym
             ..AmountCtx::default()
         };
         match run_parser(t, |c| amountp(c, &ctx, AmountKind::Style)) {
-            Ok(a) if !a.commodity.is_empty() => Some((a.commodity.clone(), a.style)),
+            Ok(a) if !a.commodity.is_empty() => Some((a.commodity, a.style)),
             _ => None,
         }
     };

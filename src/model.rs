@@ -310,7 +310,7 @@ impl Posting {
             .amounts_raw()
             .iter()
             .filter(|a| !a.is_missing())
-            .map(|a| a.commodity.clone())
+            .map(|a| a.commodity)
             .collect()
     }
 }
@@ -773,7 +773,7 @@ impl Journal {
             txns,
             items: items.clone(),
             files: files.clone(),
-            default_commodity: default_commodity.clone(),
+            default_commodity: *default_commodity,
             parse_decimal_mark: *parse_decimal_mark,
             parse_year: *parse_year,
             last_read_time: *last_read_time,
@@ -796,11 +796,11 @@ impl Journal {
         let mut explicit = self.global_commodity_styles.clone();
         for (sym, c) in &self.declared_commodities {
             if let Some(s) = c.format {
-                explicit.entry(sym.clone()).or_insert(s);
+                explicit.entry(*sym).or_insert(s);
             }
         }
         if let Some((sym, s)) = &self.default_commodity {
-            explicit.entry(sym.clone()).or_insert(*s);
+            explicit.entry(*sym).or_insert(*s);
         }
         let inferred = &self.inferred_commodity_styles;
         let mut styles = explicit.clone();
@@ -810,7 +810,7 @@ impl Journal {
             };
             for (a, _) in &c.aliases {
                 let pst = inferred.get(&a.commodity).unwrap_or(cst);
-                styles.entry(a.commodity.clone()).or_insert(AmountStyle {
+                styles.entry(a.commodity).or_insert(AmountStyle {
                     side: pst.side,
                     spaced: pst.spaced,
                     ..*cst
@@ -818,7 +818,7 @@ impl Journal {
             }
         }
         for (k, v) in inferred {
-            styles.entry(k.clone()).or_insert(*v);
+            styles.entry(*k).or_insert(*v);
         }
         styles
     }
@@ -876,7 +876,7 @@ impl Journal {
     pub fn commodities_from_price_directives(&self) -> BTreeSet<Sym> {
         self.price_directives
             .iter()
-            .flat_map(|pd| [pd.commodity.clone(), pd.amount.commodity.clone()])
+            .flat_map(|pd| [pd.commodity, pd.amount.commodity])
             .collect()
     }
 
@@ -884,7 +884,7 @@ impl Journal {
     /// (journalCommoditiesFromTransactions).
     pub fn commodities_from_transactions(&self) -> BTreeSet<Sym> {
         self.posting_and_cost_amounts()
-            .map(|a| a.commodity.clone())
+            .map(|a| a.commodity)
             .collect()
     }
 
@@ -892,7 +892,7 @@ impl Journal {
     /// posting and cost amounts (journalCommoditiesUsed).
     pub fn commodities_used(&self) -> BTreeSet<Sym> {
         let mut cs = self.commodities_from_price_directives();
-        cs.extend(self.default_commodity.iter().map(|(c, _)| c.clone()));
+        cs.extend(self.default_commodity.iter().map(|(c, _)| *c));
         cs.extend(self.commodities_from_transactions());
         cs
     }
@@ -1034,10 +1034,7 @@ impl Journal {
         for c in self.declared_commodities.values() {
             for (a, _) in &c.aliases {
                 let style = styles.get(&c.symbol).cloned();
-                aliases.insert(
-                    a.commodity.clone(),
-                    (c.symbol.clone(), a.quantity.clone(), style),
-                );
+                aliases.insert(a.commodity, (c.symbol, a.quantity.clone(), style));
             }
         }
         aliases
@@ -1048,7 +1045,7 @@ impl Journal {
         self.declared_commodity_tags
             .iter()
             .filter(|(_, tags)| tags.iter().any(|(n, _)| n.to_lowercase() == "lots"))
-            .map(|(c, _)| c.clone())
+            .map(|(c, _)| *c)
             .collect()
     }
 

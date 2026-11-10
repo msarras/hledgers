@@ -252,7 +252,7 @@ fn under_ix<V: Clone>(m: &BTreeMap<(AccountName, Sym), V>) -> Ix<V> {
         for a in std::iter::once(&**sub).chain(parent_account_names(sub)) {
             ix.entry(AccountName::from(a))
                 .or_default()
-                .push((c.clone(), v.clone()));
+                .push((*c, v.clone()));
         }
     }
     ix
@@ -269,7 +269,7 @@ fn own_ix<V: Clone>(m: &BTreeMap<(AccountName, Sym), V>, rows: &BTreeSet<Account
         if let Some(owner) = owner {
             ix.entry(AccountName::from(owner))
                 .or_default()
-                .push((c.clone(), v.clone()));
+                .push((*c, v.clone()));
         }
     }
     ix
@@ -321,15 +321,15 @@ impl Flat {
     /// requested commodity or else its cost's (lotValuation).
     fn lot_valuation(&self, (a, cb): &Lot) -> Option<(Amount, Amount)> {
         let to = if self.valuing {
-            self.target.clone()
+            self.target
         } else {
             cb.as_ref()
                 .and_then(|cb| cb.cost.as_ref())
-                .map(|c| c.commodity.clone())
+                .map(|c| c.commodity)
         };
         let (pc, rate) = self.price(&a.commodity, to.as_ref())?;
         let value = &rate * &a.quantity;
-        Some((self.mkamt(pc.clone(), rate), self.mkamt(pc, value)))
+        Some((self.mkamt(pc, rate), self.mkamt(pc, value)))
     }
 
     /// The lots' distinct unit prices and their total value per value
@@ -386,7 +386,7 @@ impl Flat {
     /// The value commodity of an account's lots, when single.
     fn value_commodity(value: &Option<Vec<Amount>>) -> Option<Sym> {
         match value.as_deref() {
-            Some([v]) => Some(v.commodity.clone()),
+            Some([v]) => Some(v.commodity),
             _ => None,
         }
     }
@@ -463,7 +463,7 @@ impl Flat {
         (!vs.is_empty() && same).then(|| {
             vs.iter()
                 .zip(&cs)
-                .map(|(v, c)| self.mkamt(v.commodity.clone(), &v.quantity - &c.quantity))
+                .map(|(v, c)| self.mkamt(v.commodity, &v.quantity - &c.quantity))
                 .collect()
         })
     }
@@ -543,7 +543,7 @@ impl Flat {
             for c in rgain_comms {
                 if !held.iter().any(|a| &a.commodity == c) {
                     amts.push(Amount {
-                        commodity: c.clone(),
+                        commodity: *c,
                         ..Amount::null()
                     });
                 }
@@ -555,7 +555,7 @@ impl Flat {
     }
 
     fn holding(&self, acct: &AccountName, lots: &[&Lot], qa: Amount) -> Holding {
-        let c = qa.commodity.clone();
+        let c = qa.commodity;
         let clots: Vec<&Lot> = lots
             .iter()
             .filter(|(a, _)| a.commodity == c)
@@ -655,7 +655,7 @@ fn flat_report(
         }
         let disposal = crate::lots::is_dispose_posting(r.p);
         for a in r.p.amount.amounts_raw() {
-            let k = (r.p.account.clone(), a.commodity.clone());
+            let k = (r.p.account.clone(), a.commodity);
             let units = a.clone().strip_cost();
             match lotmap.get_mut(&k) {
                 Some(old) => *old = &units + old,
@@ -707,22 +707,19 @@ fn flat_report(
                     let cost = match cb.cost {
                         Some(c) => Some(Box::new(c.styled(&styles))),
                         None => pool_avg
-                            .get(&(
-                                AccountName::from(lot_base_account(sub)),
-                                a.commodity.clone(),
-                            ))
+                            .get(&(AccountName::from(lot_base_account(sub)), a.commodity))
                             .map(|c| Box::new(c.clone())),
                     };
                     CostBasis { cost, ..cb }
                 });
-            ((sub.clone(), c.clone()), (a.clone(), cb))
+            ((sub.clone(), *c), (a.clone(), cb))
         })
         .collect();
     let (valuation_date, target) = match &ropts.value {
         None => (report_date, None),
-        Some(ValuationType::AtEnd(mc) | ValuationType::AtThen(mc)) => (report_date, mc.clone()),
-        Some(ValuationType::AtNow(mc)) => (spec.today, mc.clone()),
-        Some(ValuationType::AtDate(d, mc)) => (*d, mc.clone()),
+        Some(ValuationType::AtEnd(mc) | ValuationType::AtThen(mc)) => (report_date, *mc),
+        Some(ValuationType::AtNow(mc)) => (spec.today, *mc),
+        Some(ValuationType::AtDate(d, mc)) => (*d, *mc),
     };
     let mut flat = Flat {
         report_date,
@@ -989,10 +986,7 @@ fn tree_lines(
     let mut lots_by_pos: BTreeMap<(AccountName, Sym), Vec<&Holding>> = BTreeMap::new();
     for h in lots.iter().flat_map(|l| &l.rows) {
         if lot_subaccount_name(&h.account).is_some() {
-            let k = (
-                AccountName::from(lot_base_account(&h.account)),
-                h.commodity.clone(),
-            );
+            let k = (AccountName::from(lot_base_account(&h.account)), h.commodity);
             lots_by_pos.entry(k).or_default().push(h);
         }
     }
@@ -1015,7 +1009,7 @@ fn tree_lines(
     let kids_of = |a: &str| kids.get(a).cloned().unwrap_or_default();
     let lot_lines = |d: usize, acct: &str, h: &Holding| -> Vec<HLine> {
         lots_by_pos
-            .get(&(AccountName::from(acct), h.commodity.clone()))
+            .get(&(AccountName::from(acct), h.commodity))
             .into_iter()
             .flatten()
             .map(|lh| HLine::Position {
@@ -1532,7 +1526,7 @@ fn holdings_bars_chart(
                 ..(*a).clone()
             })
             .unwrap_or_else(|| Amount {
-                commodity: c.clone(),
+                commodity: *c,
                 ..Amount::null()
             });
         Panel {

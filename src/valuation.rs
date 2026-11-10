@@ -54,8 +54,8 @@ impl ValuationType {
 pub fn price_directive_to_market_price(pd: &PriceDirective) -> MarketPrice {
     MarketPrice {
         date: pd.date,
-        from: pd.commodity.clone(),
-        to: pd.amount.commodity.clone(),
+        from: pd.commodity,
+        to: pd.amount.commodity,
         rate: pd.amount.quantity.clone(),
     }
 }
@@ -76,7 +76,7 @@ pub fn amount_price_directive_from_cost(date: Day, a: &Amount) -> Option<PriceDi
     Some(PriceDirective {
         pos: SourcePos::null(),
         date,
-        commodity: a.commodity.clone(),
+        commodity: a.commodity,
         amount: price,
     })
 }
@@ -86,8 +86,8 @@ pub fn amount_price_directive_from_cost(date: Day, a: &Amount) -> Option<PriceDi
 pub fn market_price_reverse(p: &MarketPrice) -> MarketPrice {
     MarketPrice {
         date: p.date,
-        from: p.to.clone(),
-        to: p.from.clone(),
+        from: p.to,
+        to: p.from,
         rate: if p.rate.is_zero() {
             Decimal::ZERO
         } else {
@@ -107,7 +107,7 @@ pub fn journal_alias_price_directives(j: &Journal) -> Vec<PriceDirective> {
             c.aliases.iter().map(|(a, pos)| PriceDirective {
                 pos: pos.clone(),
                 date: null_date(),
-                commodity: c.symbol.clone(),
+                commodity: c.symbol,
                 amount: a.clone(),
             })
         })
@@ -127,7 +127,7 @@ fn build_price_index(declared: &[MarketPrice], inferred: &[MarketPrice]) -> Pric
     let mut index = PriceIndex::new();
     for p in inferred.iter().chain(declared) {
         index
-            .entry((p.from.clone(), p.to.clone()))
+            .entry((p.from, p.to))
             .or_default()
             .insert(p.date, p.clone());
     }
@@ -137,10 +137,7 @@ fn build_price_index(declared: &[MarketPrice], inferred: &[MarketPrice]) -> Pric
 fn build_default_valuation_index(prices: &[MarketPrice]) -> DefaultValuationIndex {
     let mut index = DefaultValuationIndex::new();
     for p in prices {
-        index
-            .entry(p.from.clone())
-            .or_default()
-            .insert(p.date, p.to.clone());
+        index.entry(p.from).or_default().insert(p.date, p.to);
     }
     index
 }
@@ -216,7 +213,7 @@ impl PriceOracle {
         let mut by_alias: BTreeMap<Sym, Vec<PriceDirective>> = BTreeMap::new();
         for pd in &alias_pds {
             by_alias
-                .entry(pd.amount.commodity.clone())
+                .entry(pd.amount.commodity)
                 .or_default()
                 .push(pd.clone());
         }
@@ -267,7 +264,7 @@ impl PriceOracle {
     /// or from an alias which file trees declared differently, when market
     /// prices can not do it, is an error.
     pub fn lookup(&self, d: Day, from: &Sym, to: Option<&Sym>) -> Lookup {
-        let key = (d, from.clone(), to.cloned());
+        let key = (d, *from, to.cloned());
         if let Some(found) = self.lookups.borrow().get(&key) {
             return found.clone();
         }
@@ -296,10 +293,7 @@ impl PriceOracle {
         // at --debug=2 or more, show when alias rates are tried, and where
         // they were declared
         if let Some(rates) = &self.debug_alias_rates
-            && self
-                .alias_tries
-                .borrow_mut()
-                .insert((d, from.clone(), to.clone()))
+            && self.alias_tries.borrow_mut().insert((d, *from, *to))
         {
             let rates: Vec<String> = (rates.iter())
                 .map(|pd| {
@@ -336,7 +330,7 @@ impl PriceOracle {
             index
                 .get(from)
                 .and_then(|m| m.range(..=d).next_back())
-                .map(|(_, to)| to.clone())
+                .map(|(_, to)| *to)
         };
         let PriceIndexes {
             declared_default,
@@ -352,7 +346,7 @@ impl PriceOracle {
             declared_default
                 .get(from)
                 .and_then(|m| m.last_key_value())
-                .map(|(_, to)| to.clone())
+                .map(|(_, to)| *to)
         } else {
             on_or_before(inferred_default)
         }
@@ -364,10 +358,8 @@ impl PriceOracle {
 fn with_alias_prices(forward: &PriceIndex, aliases: &[MarketPrice]) -> PriceIndex {
     let mut index = forward.clone();
     for p in aliases {
-        let (f, t) = (p.from.clone(), p.to.clone());
-        if !forward.contains_key(&(f.clone(), t.clone()))
-            && !forward.contains_key(&(t.clone(), f.clone()))
-        {
+        let (f, t) = (p.from, p.to);
+        if !forward.contains_key(&(f, t)) && !forward.contains_key(&(t, f)) {
             index.insert((f, t), BTreeMap::from([(p.date, p.clone())]));
         }
     }
@@ -432,7 +424,7 @@ fn price_lookup(index: &PriceIndex, d: Day, from: &Sym, to: &Sym) -> Option<(Sym
                 .collect()
         }
     };
-    let last = path.last()?.to.clone();
+    let last = path.last()?.to;
     let rate = path
         .iter()
         .fold(Decimal::from_i64(1), |product, p| &product * &p.rate);
@@ -642,9 +634,9 @@ pub(crate) mod tests {
                 .map(|p| PriceDirective {
                     pos: SourcePos::null(),
                     date: p.date,
-                    commodity: p.from.clone(),
+                    commodity: p.from,
                     amount: Amount {
-                        commodity: p.to.clone(),
+                        commodity: p.to,
                         quantity: p.rate.clone(),
                         ..Amount::null()
                     },
