@@ -232,13 +232,13 @@ Commit both files, then tag the commit and push the tag:
     git tag v0.2.0
     git push origin v0.2.0
 
-The release workflow runs the CI checks (below), builds the binary for each
+The release workflow runs the CI checks, builds the binary for each
 platform, runs it on `hledger/examples/sample.journal`, and creates the
 GitHub release with the archives, `SHA256SUMS` and generated release notes.
 Started by hand from the Actions tab (Run workflow), it does all of that but
 publishes nothing, which checks the platforms before a release. The CI
 checks are `cargo fmt --check`, `cargo clippy` and `cargo test` on Linux;
-the `ci` workflow also runs them on every push and pull request. The Linux
+the `ci` workflow also runs them on every branch push and pull request. The Linux
 arm64 build uses GitHub's `ubuntu-24.04-arm` runner, which is free for
 public repositories only.
 
