@@ -12,6 +12,7 @@ use super::print::{
 use crate::amount::CommodityStyles;
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::opts::CliOpts;
+use crate::model::render::{PostingLayout, show_transaction};
 use crate::model::{
     GENERATED_TRANSACTION_TAG, Journal, SourcePos, Transaction, TransactionModifier,
 };
@@ -19,7 +20,6 @@ use crate::query::Query;
 use crate::read::journal::parse_tm_posting_rule;
 use crate::read::modifiers::modify_transactions;
 use crate::text::hs_lines;
-use crate::write::journal::{PostingLayout, show_transaction};
 
 pub static MODE: Mode = Mode {
     name: "rewrite",

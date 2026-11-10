@@ -6,8 +6,8 @@ use crate::cli::commands::print::journal_apply_match_opt;
 use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::model::Journal;
+use crate::model::render::transaction_first_line;
 use crate::reports::entries::entries_report;
-use crate::write::journal::transaction_first_line;
 
 pub static MODE: Mode = Mode {
     name: "transactions",

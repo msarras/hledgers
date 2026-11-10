@@ -4,8 +4,8 @@
 
 use crate::amount::render::AmountFormat;
 use crate::model::Transaction;
+use crate::model::render::{PostingLayout, show_transaction_with};
 use crate::text::is_space;
-use crate::write::journal::{PostingLayout, show_transaction_with};
 
 /// A transaction as journal text with lot cost bases in Ledger's syntax,
 /// `{COST} [DATE] (LABEL)` (showTransactionLedger).

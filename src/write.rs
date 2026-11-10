@@ -1,5 +1,4 @@
-//! Writing journals and reports (Hledger.Write.*, and the rendering parts of
-//! Hledger.Data.Transaction and Hledger.Data.Posting).
+//! Writing journals and reports (Hledger.Write.*).
 
 pub mod beancount;
 pub mod chart;

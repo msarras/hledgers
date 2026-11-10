@@ -5,10 +5,10 @@ use crate::cli::args::{General, Hidden, Mode};
 use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::decimal::Decimal;
+use crate::model::render::{PostingLayout, show_transaction};
 use crate::model::{Journal, Posting, Transaction};
 use crate::query::Query;
 use crate::read::{InputOpts, read_journal_file};
-use crate::write::journal::{PostingLayout, show_transaction};
 
 pub static MODE: Mode = Mode {
     name: "diff",

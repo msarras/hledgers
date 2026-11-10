@@ -5,9 +5,9 @@
 //! regenerated, not the original.
 
 use crate::amount::render::{AmountFormat, quote_commodity_symbol_if_needed, show_amount_b};
+use crate::model::render::{PostingLayout, show_transaction};
 use crate::model::{AccountDeclarationInfo, Commodity, Posting, PriceDirective, Transaction};
 use crate::text::chomp;
-use crate::write::journal::{PostingLayout, show_transaction};
 
 /// The first and (if known) last column to mark.
 pub type Columns = Option<(usize, Option<usize>)>;

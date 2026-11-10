@@ -17,13 +17,13 @@ use crate::amount::{
     styles_with_rounding,
 };
 use crate::decimal::Decimal;
+use crate::model::render::{PostingLayout, show_transaction};
 use crate::model::{
     COST_POSTING_TAG, CommodityAliases, GENERATED_POSTING_TAG, IMBALANCE_POSTING_TAG, Journal,
     Posting, Transaction, source_pos_pair_pretty,
 };
 use crate::regex::regex_escape;
 use crate::text::quote_for_command_line;
-use crate::write::journal::{PostingLayout, show_transaction};
 
 /// The internal tag of postings whose amount was calculated with `*` or `/`
 /// and changed by rounding; the balancer removes it (roundedPostingTagName).
@@ -414,7 +414,7 @@ fn transaction_commodities(t: &Transaction) -> BTreeSet<Sym> {
 /// An unbalanced transaction error: the transaction as an excerpt, then
 /// these explanations (transactionBalanceError).
 pub fn transaction_balance_error(t: &Transaction, errs: &[String]) -> String {
-    let (_, _, ex) = super::errors::transaction_error_excerpt(t, None);
+    let (_, _, ex) = crate::model::errors::transaction_error_excerpt(t, None);
     let multi = if transaction_commodities(t).len() > 1 {
         "multi-commodity "
     } else {
@@ -1059,7 +1059,7 @@ impl Balancer {
         if asserted.quantity == actual.quantity {
             return Ok(());
         }
-        let (_, _, ex) = super::errors::balance_assertion_error_excerpt(t, p);
+        let (_, _, ex) = crate::model::errors::balance_assertion_error_excerpt(t, p);
         let fmt = AmountFormat {
             zero_commodity: true,
             ..AmountFormat::ONE_LINE

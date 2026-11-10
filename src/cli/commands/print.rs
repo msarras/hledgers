@@ -10,6 +10,7 @@ use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::{unsupported_output_format_error, with_title};
 use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
 use crate::dates::Day;
+use crate::model::render::{PostingLayout, show_account_name, show_transaction};
 use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
@@ -23,9 +24,7 @@ use crate::write::beancount::{
 use crate::write::csv::{print_csv, print_tsv};
 use crate::write::fods::{locale_encoding_name, print_fods};
 use crate::write::html::titled_table_html;
-use crate::write::journal::{
-    ItemRenderer, PostingLayout, journal_items_as_text, show_account_name, show_transaction,
-};
+use crate::write::journal::{ItemRenderer, journal_items_as_text};
 use crate::write::json::to_json_text;
 use crate::write::ledger::{ledger_directive, show_transaction_ledger};
 use crate::write::spreadsheet::{

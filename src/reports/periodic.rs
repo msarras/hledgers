@@ -8,7 +8,6 @@ use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashSet};
 
-use crate::account::tree::{Account, AccountTree, BalanceData, PeriodData, ROOT};
 use crate::account::{
     AccountName, AccountType, DepthSpec, account_leaf_name, account_name_clipped_depth,
     account_name_drop, account_name_level, clip_or_ellipsify_account_name,
@@ -16,12 +15,14 @@ use crate::account::{
 use crate::amount::{
     CommodityStyles, MixedAmount, Precision, Rounding, num, per, styles_with_rounding,
 };
+use crate::dates::PeriodData;
 use crate::dates::{
     DateSpan, Day, DayPartition, empty_date_span, maybe_day_partition_to_date_spans, null_date,
 };
 use crate::decimal::Decimal;
 use crate::model::{Journal, Posting, PostingRef};
 use crate::query::Query;
+use crate::reports::account_tree::{Account, AccountTree, BalanceData, ROOT};
 use crate::reports::opts::{
     AccountListMode, BalanceAccumulation, BalanceCalculation, Layout, NormalSign, ReportOpts,
     ReportSpec, mixed_amount_apply_valuation_after_sum,

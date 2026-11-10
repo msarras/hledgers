@@ -26,11 +26,11 @@ use crate::amount::render::{AmountFormat, show_amount_b, show_mixed_amount_one_l
 use crate::amount::{Amount, CostBasis, MixedAmount, Precision, Sym};
 use crate::dates::Day;
 use crate::decimal::Decimal;
+use crate::model::errors::{posting_error_excerpt_by_index, transaction_error_excerpt};
 use crate::model::{
     GENERATED_POSTING_TAG, Journal, LOT_PARENT_ASSERTION_TAG, LOTSPLIT_POSTING_TAG, Posting,
     Transaction,
 };
-use crate::read::errors::{posting_error_excerpt_by_index, transaction_error_excerpt};
 
 /// Which way lots flow in a lot-tracking account: in a Long account
 /// (assets) a positive posting opens a lot and a negative one closes it; in

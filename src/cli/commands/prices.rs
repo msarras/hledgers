@@ -10,10 +10,10 @@ use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::dates::Day;
+use crate::model::render::show_price_directive;
 use crate::model::{Journal, PriceDirective};
 use crate::query::Query;
 use crate::valuation::{amount_price_directive_from_cost, journal_alias_price_directives};
-use crate::write::journal::show_price_directive;
 
 const NONE: Arity = Arity::None;
 

@@ -245,7 +245,7 @@ fn merge_and_write_prices(outfile: &str, new: &str) -> Result<String, String> {
     merged.extend(added);
     merged.sort_by_key(price_key);
     let text: String = (merged.iter())
-        .map(|pd| crate::write::journal::show_price_directive(pd) + "\n")
+        .map(|pd| crate::model::render::show_price_directive(pd) + "\n")
         .collect();
     create_dir(&take_directory(outfile))?;
     std::fs::write(outfile, text)

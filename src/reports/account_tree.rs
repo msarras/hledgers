@@ -12,9 +12,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Add, AddAssign};
 
-use super::AccountName;
+use crate::account::AccountName;
 use crate::amount::MixedAmount;
-use crate::dates::Day;
+use crate::dates::{Day, PeriodData};
 use crate::model::Journal;
 
 /// What balance reports need of an account in a period: its balance
@@ -99,87 +99,6 @@ impl AddAssign<&BalanceData> for BalanceData {
             incl: this.incl + &other.incl,
             postings: this.postings + other.postings,
         };
-    }
-}
-
-/// A value for each of some contiguous report periods, known by their
-/// start dates, and one for the time before them (PeriodData).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PeriodData<T> {
-    pub pre: T,
-    pub periods: BTreeMap<Day, T>,
-}
-
-impl<T> PeriodData<T> {
-    /// The value before the periods, and the periods' start dates with
-    /// their values (periodDataFromList).
-    pub fn from_list(pre: T, periods: impl IntoIterator<Item = (Day, T)>) -> PeriodData<T> {
-        PeriodData {
-            pre,
-            periods: periods.into_iter().collect(),
-        }
-    }
-
-    /// Each value transformed (fmap).
-    pub fn map<U>(&self, mut f: impl FnMut(&T) -> U) -> PeriodData<U> {
-        PeriodData {
-            pre: f(&self.pre),
-            periods: self.periods.iter().map(|(d, v)| (*d, f(v))).collect(),
-        }
-    }
-
-    /// The values of the periods both have, combined (opPeriodData).
-    pub fn op<U, V>(&self, other: &PeriodData<U>, f: impl Fn(&T, &U) -> V) -> PeriodData<V> {
-        PeriodData {
-            pre: f(&self.pre, &other.pre),
-            periods: (self.periods.iter())
-                .filter_map(|(d, a)| other.periods.get(d).map(|b| (*d, f(a, b))))
-                .collect(),
-        }
-    }
-
-    /// The values of the periods either has: those only in this one, only in
-    /// the other, or in both, combined by the three functions
-    /// (mergePeriodData).
-    pub fn merge<U, V>(
-        self,
-        other: PeriodData<U>,
-        only1: impl Fn(T) -> V,
-        only2: impl Fn(U) -> V,
-        both: impl Fn(T, U) -> V,
-    ) -> PeriodData<V> {
-        let mut periods = BTreeMap::new();
-        let mut others = other.periods;
-        for (d, a) in self.periods {
-            let v = match others.remove(&d) {
-                Some(b) => both(a, b),
-                None => only1(a),
-            };
-            periods.insert(d, v);
-        }
-        for (d, b) in others {
-            periods.insert(d, only2(b));
-        }
-        PeriodData {
-            pre: both(self.pre, other.pre),
-            periods,
-        }
-    }
-
-    /// With `x` for each period of `pad` this has no value for
-    /// (padPeriodData).
-    pub fn pad<U>(&mut self, x: &T, pad: &PeriodData<U>)
-    where
-        T: Clone,
-    {
-        for d in pad.periods.keys() {
-            self.periods.entry(*d).or_insert_with(|| x.clone());
-        }
-    }
-
-    /// The value of the last period, if any.
-    pub fn last(&self) -> Option<&T> {
-        self.periods.values().next_back()
     }
 }
 
@@ -289,7 +208,7 @@ impl<T> AccountTree<T> {
     ) -> AccountTree<T> {
         let mut all: Vec<&str> = names
             .into_iter()
-            .flat_map(super::expand_account_name)
+            .flat_map(crate::account::expand_account_name)
             .collect();
         all.sort_unstable();
         all.dedup();
@@ -300,7 +219,7 @@ impl<T> AccountTree<T> {
         let mut index: HashMap<&str, usize> = HashMap::with_capacity(all.len());
         for name in all {
             let parent = name
-                .rfind(super::ACCT_SEP)
+                .rfind(crate::account::ACCT_SEP)
                 .and_then(|i| index.get(&name[..i]).copied())
                 .unwrap_or(ROOT);
             let i = tree.accounts.len();

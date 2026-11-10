@@ -35,12 +35,12 @@ use crate::amount::{
 };
 use crate::dates::Day;
 use crate::decimal::Decimal;
+use crate::model::errors::{
+    account_tag_error_excerpt, commodity_tag_error_excerpt, transaction_error_excerpt,
+};
 use crate::model::{
     BalanceAssertion, FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal,
     LOT_PARENT_ASSERTION_TAG, LOTSPLIT_POSTING_TAG, Posting, Tag, Transaction,
-};
-use crate::read::errors::{
-    account_tag_error_excerpt, commodity_tag_error_excerpt, transaction_error_excerpt,
 };
 
 const METHODS: &str = "FIFO, LIFO, HIFO, AVERAGE, SPECID, FIFOALL, LIFOALL, HIFOALL, AVERAGEALL";
@@ -169,7 +169,7 @@ pub fn journal_check_lots_method_coherence(j: &Journal) -> Result<(), String> {
 /// The declaration giving an account its method for a commodity, as an
 /// excerpt: the nearest account declaration with a method-valued lots:
 /// tag, or else the commodity's declaration.
-fn method_declaration(j: &Journal, acct: &str, c: &Sym) -> Option<crate::read::errors::Excerpt> {
+fn method_declaration(j: &Journal, acct: &str, c: &Sym) -> Option<crate::model::errors::Excerpt> {
     let is_method_tag =
         |(k, v): &Tag| k.to_lowercase() == "lots" && ReductionMethod::parse(v).is_some();
     let declared = std::iter::once(acct)

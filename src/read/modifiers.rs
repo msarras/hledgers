@@ -198,7 +198,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::amount::{MixedAmount, num, usd};
     use crate::model::TransactionModifier;
-    use crate::write::journal::{PostingLayout, show_transaction};
+    use crate::model::render::{PostingLayout, show_transaction};
 
     fn rule(account: &str, amount: Amount, is_multiplier: bool) -> TmPostingRule {
         TmPostingRule {

@@ -8,12 +8,12 @@ use std::io::Write;
 use super::print::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::opts::CliOpts;
+use crate::model::render::show_transaction;
 use crate::model::{Journal, Transaction};
 use crate::read::latest::save_latest_dates_for_files;
 use crate::read::rules::{path_join, take_directory};
 use crate::read::{BalancingOpts, InputOpts};
 use crate::text::quote_if_needed_or_redirect;
-use crate::write::journal::show_transaction;
 
 const NONE: Arity = Arity::None;
 

@@ -8,11 +8,11 @@
 use crate::account::AccountName;
 use crate::amount::render::AmountFormat;
 use crate::amount::{Amount, AmountCost, MixedAmount, Precision};
+use crate::model::render::{PostingLayout, postings_as_lines};
 use crate::model::{
     CONVERSION_POSTING_TAG, COST_POSTING_TAG, GENERATED_POSTING_TAG, IMBALANCE_POSTING_TAG,
     Journal, LOTSPLIT_POSTING_TAG, MarketPrice, Posting, Transaction,
 };
-use crate::write::journal::{PostingLayout, postings_as_lines};
 
 /// Tag equity conversion postings and the postings whose costs they
 /// duplicate, and with `add_costs`, add the costs that conversion postings
@@ -71,7 +71,7 @@ pub fn transaction_tag_costs_and_equity_and_maybe_infer_costs(
     for pair in pairs {
         let change =
             tag_and_maybe_add_costs(verbose_tags, add_costs, pair, &mut costful, &mut costless)
-                .map_err(|e| super::errors::annotate_error_with_transaction(&t, &e))?;
+                .map_err(|e| crate::model::errors::annotate_error_with_transaction(&t, &e))?;
         changes.extend(change);
     }
     let postings = numbered

@@ -24,7 +24,7 @@ const UTILS: &str = "Utils";
 #[rustfmt::skip]
 const TESTS: &[(&[&str], &str, Test)] = {
     use crate::account::tests as account;
-    use crate::account::tree::tests as tree;
+    use crate::reports::account_tree::tests as tree;
     use crate::amount::currency::tests as currency;
     use crate::amount::render::tests as render;
     use crate::amount::tests as amount;
@@ -55,7 +55,7 @@ const TESTS: &[(&[&str], &str, Test)] = {
     use crate::write::chart_svg::tests as chart_svg;
     use crate::write::chart_text::tests as chart_text;
     use crate::write::html::tests as html;
-    use crate::write::journal::tests as write_journal;
+    use crate::model::render::tests as write_journal;
     use crate::reports::string_format::tests as string_format;
     &[
         (&["Hledger", DATA, "Account"], "accountFromPostings", tree::account_from_no_postings),

@@ -79,7 +79,7 @@ impl Conf {
     /// line as written, and the explanation (confErrorAt).
     fn error_at(&self, lnum: usize, fallback: &str, explanation: &str) -> String {
         let line = self.text.lines().nth(lnum - 1).unwrap_or(fallback);
-        let excerpt = crate::read::errors::decorate_excerpt(lnum, None, &format!("{line}\n"));
+        let excerpt = crate::model::errors::decorate_excerpt(lnum, None, &format!("{line}\n"));
         format!("{}:{lnum}:\n{excerpt}{explanation}", self.file)
     }
 }

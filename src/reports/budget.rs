@@ -4,9 +4,9 @@
 
 use std::collections::HashSet;
 
-use crate::account::tree::{AccountTree, BalanceData, PeriodData};
 use crate::account::{ACCT_SEP, AccountName, UNBUDGETED_ACCOUNT_NAME, expand_account_name};
 use crate::amount::{CommodityStyles, MixedAmount};
+use crate::dates::PeriodData;
 use crate::dates::{DateSpan, Interval, interval_boundary_before};
 use crate::model::{Journal, PostingRef, Transaction};
 use crate::query::Query;
@@ -14,6 +14,7 @@ use crate::read::BalancingOpts;
 use crate::read::balancing::journal_balance_transactions;
 use crate::read::finalise::{journal_number_and_tie_transactions, journal_style_amounts};
 use crate::read::modifiers::run_periodic_transaction;
+use crate::reports::account_tree::{AccountTree, BalanceData};
 use crate::reports::opts::{AccountListMode, BalanceAccumulation, ReportOpts, ReportSpec};
 use crate::reports::periodic::{
     Balance, DisplayName, PeriodicReport, PeriodicReportRow, generate_multi_balance_account,

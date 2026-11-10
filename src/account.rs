@@ -1,12 +1,10 @@
 //! Account names and account types (Hledger.Data.AccountName,
 //! Hledger.Data.AccountType, and their types in Hledger.Data.Types); account
-//! trees are in [`tree`].
+//! trees are in [`crate::reports::account_tree`].
 //!
 //! An account name is a string like `assets:cash:petty`, its components
 //! separated by colons. A posting's account name may be wrapped in
 //! parentheses or brackets to mark the posting virtual or balanced virtual.
-
-pub mod tree;
 
 use std::fmt;
 use std::sync::Arc;
@@ -413,17 +411,17 @@ pub fn account_name_drop(n: usize, a: &str) -> String {
 }
 
 /// These account names without duplicates, in tree order: each after its
-/// parent, siblings in the order of their account directives, then the
+/// parent, siblings in the `declared` order of their account directives, then the
 /// undeclared ones by name; with `keep_parents`, their missing parents are
 /// added (sortAccountNamesByDeclaration).
-pub fn sort_account_names_by_declaration<'a>(
-    j: &crate::model::Journal,
+pub fn sort_account_names_by_declaration<'a, 'd>(
+    declared: impl IntoIterator<Item = (&'d str, usize)>,
     keep_parents: bool,
     names: impl IntoIterator<Item = &'a str>,
 ) -> Vec<&'a str> {
     let mut order: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for (a, info) in &j.declared_accounts {
-        order.entry(a).or_insert(info.order);
+    for (a, n) in declared {
+        order.entry(a).or_insert(n);
     }
     let names: std::collections::BTreeSet<&str> = if keep_parents {
         names.into_iter().flat_map(expand_account_name).collect()

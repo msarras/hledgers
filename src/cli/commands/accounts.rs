@@ -143,7 +143,8 @@ pub fn accounts(opts: &CliOpts, j: &Journal) -> Result<String, String> {
 
     // 2. sorted by declaration order within each group of siblings, with
     // the parents in tree mode
-    let sorted = sort_account_names_by_declaration(j, tree, accts);
+    let declared = (j.declared_accounts.iter()).map(|(a, info)| (&**a, info.order));
+    let sorted = sort_account_names_by_declaration(declared, tree, accts);
 
     // 3. clipped to the depth limit, keeping (in flat mode) those still
     // matched by the acct: terms

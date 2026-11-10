@@ -12,12 +12,12 @@ use crate::cli::args::{Arity, Flag, General, Hidden, Mode};
 use crate::cli::commands::print::{LAYOUT_FLAG, journal_similar_transaction, layout_from_raw_opts};
 use crate::cli::opts::CliOpts;
 use crate::dates::{Day, fix_smart_date, smartdate};
+use crate::model::render::{PostingLayout, show_account_name, show_transaction};
 use crate::model::{BalanceAssertion, Journal, Posting, Status, Tag, Transaction};
 use crate::parse::{Cursor, Item, ParseError, Parser};
 use crate::read::amount::{AmountCtx, AmountKind, amountp, balance_assertionp};
 use crate::read::common::{accountnamep, codep, posting_commentp};
 use crate::text::strip;
-use crate::write::journal::{PostingLayout, show_account_name, show_transaction};
 
 pub static MODE: Mode = Mode {
     name: "add",

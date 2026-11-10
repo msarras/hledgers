@@ -12,12 +12,12 @@ use crate::amount::render::{
 };
 use crate::amount::{Amount, AmountCost, Side, Sym};
 use crate::dates::Day;
+use crate::model::render::render_comment_lines;
 use crate::model::{
     CONVERSION_POSTING_TAG, Journal, Posting, PriceDirective, Status, Tag, Transaction,
     is_hidden_tag_name, payee_and_note_from_description,
 };
 use crate::text::{Wide, display_width, fit_text, is_letter, is_space, is_upper, strip_quotes};
-use crate::write::journal::render_comment_lines;
 
 /// Beancount's top-level account names.
 const TOP_LEVEL_ACCOUNTS: [&str; 5] = ["Assets", "Liabilities", "Equity", "Income", "Expenses"];

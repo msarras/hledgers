@@ -14,7 +14,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::account::tree::PeriodData;
 use crate::parse::{Alts, PResult, Parser, choice, choice_try, is_non_newline_space, or};
 
 /// A date in the proleptic Gregorian calendar, as the number of days since
@@ -2800,6 +2799,87 @@ pub fn parse_date_with_format(
         let days = (utc + i128::from(tz_out) * 60).div_euclid(86400);
         Some(epoch.add_days(i64::try_from(days).ok()?))
     })
+}
+
+/// A value for each of some contiguous report periods, known by their
+/// start dates, and one for the time before them (PeriodData).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PeriodData<T> {
+    pub pre: T,
+    pub periods: BTreeMap<Day, T>,
+}
+
+impl<T> PeriodData<T> {
+    /// The value before the periods, and the periods' start dates with
+    /// their values (periodDataFromList).
+    pub fn from_list(pre: T, periods: impl IntoIterator<Item = (Day, T)>) -> PeriodData<T> {
+        PeriodData {
+            pre,
+            periods: periods.into_iter().collect(),
+        }
+    }
+
+    /// Each value transformed (fmap).
+    pub fn map<U>(&self, mut f: impl FnMut(&T) -> U) -> PeriodData<U> {
+        PeriodData {
+            pre: f(&self.pre),
+            periods: self.periods.iter().map(|(d, v)| (*d, f(v))).collect(),
+        }
+    }
+
+    /// The values of the periods both have, combined (opPeriodData).
+    pub fn op<U, V>(&self, other: &PeriodData<U>, f: impl Fn(&T, &U) -> V) -> PeriodData<V> {
+        PeriodData {
+            pre: f(&self.pre, &other.pre),
+            periods: (self.periods.iter())
+                .filter_map(|(d, a)| other.periods.get(d).map(|b| (*d, f(a, b))))
+                .collect(),
+        }
+    }
+
+    /// The values of the periods either has: those only in this one, only in
+    /// the other, or in both, combined by the three functions
+    /// (mergePeriodData).
+    pub fn merge<U, V>(
+        self,
+        other: PeriodData<U>,
+        only1: impl Fn(T) -> V,
+        only2: impl Fn(U) -> V,
+        both: impl Fn(T, U) -> V,
+    ) -> PeriodData<V> {
+        let mut periods = BTreeMap::new();
+        let mut others = other.periods;
+        for (d, a) in self.periods {
+            let v = match others.remove(&d) {
+                Some(b) => both(a, b),
+                None => only1(a),
+            };
+            periods.insert(d, v);
+        }
+        for (d, b) in others {
+            periods.insert(d, only2(b));
+        }
+        PeriodData {
+            pre: both(self.pre, other.pre),
+            periods,
+        }
+    }
+
+    /// With `x` for each period of `pad` this has no value for
+    /// (padPeriodData).
+    pub fn pad<U>(&mut self, x: &T, pad: &PeriodData<U>)
+    where
+        T: Clone,
+    {
+        for d in pad.periods.keys() {
+            self.periods.entry(*d).or_insert_with(|| x.clone());
+        }
+    }
+
+    /// The value of the last period, if any.
+    pub fn last(&self) -> Option<&T> {
+        self.periods.values().next_back()
+    }
 }
 
 pub(crate) mod tests {

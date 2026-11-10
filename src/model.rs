@@ -1,10 +1,15 @@
 //! The journal and what it contains: transactions, postings, declarations,
 //! prices (the data types of Hledger.Data.Types, with the helpers of
 //! Hledger.Data.Posting and Hledger.Data.Transaction that do not render).
+//! Their rendering as journal text is in [`render`], and the excerpts of
+//! them that error messages show in [`errors`].
 //!
 //! Postings do not point back to their transaction. Code that needs both
 //! iterates them as pairs, or as [`PostingRef`]s; `Posting::txn` records the
 //! position of a journal posting's transaction in `Journal::txns`.
+
+pub mod errors;
+pub mod render;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

@@ -1074,7 +1074,7 @@ fn validate_csv(name: &str, groups: &[LocatedGroup]) -> Result<(), String> {
     {
         Some(((l1, l2), recs)) => Err(format!(
             "{}This CSV record has less than two fields.\nPerhaps the separator is wrong (it can be set with a separator rule).",
-            super::errors::csv_record_error_prefix(
+            crate::model::errors::csv_record_error_prefix(
                 name,
                 *l1,
                 l2 + 1,
@@ -1140,7 +1140,7 @@ impl Converter<'_> {
         record: &[CsvRecord],
     ) -> Result<Transaction, String> {
         let rules = self.rules;
-        let errpfx = super::errors::csv_record_error_prefix(
+        let errpfx = crate::model::errors::csv_record_error_prefix(
             &pos.0.file,
             pos.0.line,
             pos.1.line,

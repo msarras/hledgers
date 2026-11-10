@@ -5,22 +5,22 @@
 
 use std::collections::BTreeSet;
 
-use super::errors::{
-    account_tag_error_excerpt, commodity_tag_error_excerpt, posting_account_error_excerpt,
-    posting_error_excerpt, price_directive_error_excerpt, transaction_error_excerpt,
-};
 use crate::account::{account_leaf_name, lot_base_account};
 use crate::amount::Sym;
 use crate::amount::render::AmountFormat;
+use crate::model::errors::{
+    account_tag_error_excerpt, commodity_tag_error_excerpt, posting_account_error_excerpt,
+    posting_error_excerpt, price_directive_error_excerpt, transaction_error_excerpt,
+};
+use crate::model::render::{
+    DEFAULT_DECIMAL_MARK_COLUMN, posting_as_lines, show_transaction_line_first_part,
+};
 use crate::model::{
     CONVERSION_POSTING_TAG, COST_POSTING_TAG, FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG,
     GENERATED_TRANSACTION_TAG, IMBALANCE_POSTING_TAG, Journal, LOT_PARENT_ASSERTION_TAG,
     LOTSPLIT_POSTING_TAG, MODIFIED_TRANSACTION_TAG, Posting, Status, Transaction,
 };
 use crate::text::{chomp, is_space, show_string};
-use crate::write::journal::{
-    DEFAULT_DECIMAL_MARK_COLUMN, posting_as_lines, show_transaction_line_first_part,
-};
 
 /// The checks `--strict` adds, most important first: commodities, then
 /// accounts; balancing without inferred costs happens when reading
@@ -129,7 +129,7 @@ pub fn journal_check_commodities(j: &Journal) -> Result<(), String> {
 
 /// The columns of a posting's amount and assertion in the rendered
 /// transaction, if it is found there.
-fn amount_columns(p: &Posting, t: &Transaction, rendered: &str) -> super::errors::Columns {
+fn amount_columns(p: &Posting, t: &Transaction, rendered: &str) -> crate::model::errors::Columns {
     let index = t.postings.iter().position(|q| q == p)? + 1;
     let comment_lines = t.comment.split_terminator('\n').count().saturating_sub(1);
     let line = rendered

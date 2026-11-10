@@ -13,12 +13,13 @@ use super::InputOpts;
 use super::journal::ParseState;
 use crate::account::{AccountName, AccountType, account_name_infer_type, expand_account_names};
 use crate::amount::{
-    Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, Precision,
-    Rounding, Sym, add_amount_style, add_amount_style_as, styles_with_rounding,
+    Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, MixedAmount,
+    Precision, Rounding, Sym, add_amount_style, add_amount_style_as, styles_with_rounding,
 };
 use crate::dates::DateSpan;
 use crate::decimal::Decimal;
-use crate::lots::{calculate, classify};
+use crate::lots::{calculate, classify, lot_subaccount_name, merge_cost_basis, parse_lot_name};
+use crate::model::errors::posting_account_error_excerpt;
 use crate::model::{Commodity, CommodityAliases, Journal, Posting, Tag, Transaction};
 
 /// Finalise a journal parsed from this file and text (journalFinalise).
@@ -52,7 +53,7 @@ pub fn journal_finalise(
     j = journal_tag_costs_and_equity_and_maybe_infer_costs(iopts, false, j)?;
     // lot cost basis and transacted cost inference, gain posting tagging
     if has_lots {
-        j = classify::journal_infer_basis_from_account_names(lenient, j)?;
+        j = journal_infer_basis_from_account_names(lenient, j)?;
         j = classify::journal_infer_postings_transacted_cost(j);
     }
     if check_lots {
@@ -240,7 +241,7 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
 /// alias, is an error.
 fn journal_apply_commodity_aliases(mut j: Journal) -> Result<Journal, String> {
     let excerpt = |c: &Commodity| {
-        let (f, l, ex) = super::errors::commodity_tag_error_excerpt(c);
+        let (f, l, ex) = crate::model::errors::commodity_tag_error_excerpt(c);
         format!("{f}:{l}:\n{ex}")
     };
     let mut declaring: BTreeMap<&Sym, Vec<&Commodity>> = BTreeMap::new();
@@ -455,6 +456,69 @@ impl AliasConverter<'_> {
             ba.amount = self.exact(&ba.amount);
         }
     }
+}
+
+/// In postings to a lot subaccount (`ACCOUNT:{DATE, COST}`), take the cost
+/// basis from the name, merged with the amount's own; with `lenient`, a
+/// posting whose name is invalid or conflicting is left as it is
+/// (journalInferBasisFromAccountNames).
+fn journal_infer_basis_from_account_names(
+    lenient: bool,
+    mut j: Journal,
+) -> Result<Journal, String> {
+    let parse = |s: &str| super::amount::parse_amount(s).ok();
+    for t in &mut j.txns {
+        for i in 0..t.postings.len() {
+            let p = &t.postings[i];
+            let Some(name) = lot_subaccount_name(&p.account) else {
+                continue;
+            };
+            let pos_err = |msg: String| {
+                let (f, l, ex) = posting_account_error_excerpt(t, p);
+                format!("{f}:{l}:\n{ex}\n{msg}")
+            };
+            let lot_err = |msg: String| {
+                pos_err(format!(
+                    "{msg}\n\nA final account name part enclosed in {{ }} must be a valid lot subaccount name.\n\
+                     Please adjust the account name, or use --ignore-lots/-I."
+                ))
+            };
+            let inferred = parse_lot_name(parse, name)
+                .map_err(lot_err)
+                .and_then(|cb| {
+                    if cb.date.is_none() || cb.cost.is_none() {
+                        return Err(lot_err(format!(
+                            "lot subaccount name must contain a date and cost: {name}"
+                        )));
+                    }
+                    p.amount
+                        .amounts_raw()
+                        .iter()
+                        .map(|a| {
+                            let merged = match &a.cost_basis {
+                                None => cb.clone(),
+                                Some(existing) => merge_cost_basis(&cb, existing).map_err(|e| {
+                                    pos_err(format!(
+                                        "{e}\n\nThe lot subaccount name and the amount's lot annotation must agree.\n\
+                                         Please make them match, or remove one of them."
+                                    ))
+                                })?,
+                            };
+                            Ok(Amount {
+                                cost_basis: Some(Box::new(merged)),
+                                ..a.clone()
+                            })
+                        })
+                        .collect::<Result<Vec<Amount>, String>>()
+                });
+            match inferred {
+                Ok(amts) => t.postings[i].amount = MixedAmount::from_amounts(amts),
+                Err(_) if lenient => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(j)
 }
 
 /// With `--forecast`, add the transactions the periodic transaction rules

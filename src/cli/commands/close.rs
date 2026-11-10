@@ -19,13 +19,13 @@ use crate::cli::io::with_title;
 use crate::cli::opts::CliOpts;
 use crate::decimal::Decimal;
 use crate::lots::{lot_subaccount_name, parse_lot_name, show_lot_name};
+use crate::model::render::show_transaction;
 use crate::model::{BalanceAssertion, Journal, Posting, SourcePos, Transaction};
 use crate::query::Query;
 use crate::read::rules::take_base_name;
 use crate::reports::opts::{AccountListMode, BalanceAccumulation, ReportOpts, ReportSpec};
 use crate::reports::periodic::balance_report;
 use crate::valuation::ConversionOp;
-use crate::write::journal::show_transaction;
 
 const NONE: Arity = Arity::None;
 const REQ: Arity = Arity::Req;
