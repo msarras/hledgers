@@ -322,29 +322,32 @@ fn from_raw_number(
     raw: RawNumber,
     exponent: Option<i64>,
 ) -> Result<(Decimal, u8, Option<char>, Option<DigitGroups>), String> {
-    let (int_groups, decimals, groups) = match raw {
+    let (int_groups, decimals, groups) = match &raw {
         RawNumber::WithSeparators(..) if exponent.is_some() => {
             return Err(
                 "invalid number: digit separators and exponents may not be used together"
                     .to_string(),
             );
         }
-        RawNumber::NoSeparators(digits, decimals) => (vec![digits], decimals, None),
+        RawNumber::NoSeparators(digits, decimals) => {
+            (std::slice::from_ref(digits), *decimals, None)
+        }
         RawNumber::WithSeparators(sep, groups, decimals) => {
             let mut sizes: Vec<u8> = groups.iter().map(|g| g.len() as u8).collect();
             if sizes.len() >= 2 && sizes[0] < sizes[1] {
                 sizes.remove(0);
             }
             sizes.reverse();
-            (groups, decimals, Some(DigitGroups { sep, sizes }))
+            (
+                groups.as_slice(),
+                *decimals,
+                Some(DigitGroups { sep: *sep, sizes }),
+            )
         }
         RawNumber::Ambiguous(..) => unreachable!("disambiguated before"),
     };
     let decimal_digits = decimals.map_or("", |(_, d)| d);
-    let mut digits = String::with_capacity(32);
-    int_groups.iter().for_each(|g| digits.push_str(g));
-    digits.push_str(decimal_digits);
-    let mantissa = parse_digits(&digits);
+    let mantissa = parse_digits(int_groups.iter().copied().chain([decimal_digits]));
     let precision = decimal_digits.len() as i64 - exponent.unwrap_or(0);
     let quantity = if precision < 0 {
         let shift = usize::try_from(-precision).unwrap_or(usize::MAX);
@@ -360,16 +363,16 @@ fn from_raw_number(
     Ok((quantity.0, quantity.1, decimals.map(|(m, _)| m), groups))
 }
 
-/// The natural number these ASCII digits make (none make 0).
-fn parse_digits(digits: &str) -> IBig {
-    if digits.len() <= 18 {
+/// The natural number these runs of ASCII digits make, one after another
+/// (none make 0); copied into one string only when too long for a u64.
+fn parse_digits<'a>(runs: impl Iterator<Item = &'a str> + Clone) -> IBig {
+    if runs.clone().map(str::len).sum::<usize>() <= 18 {
         IBig::from(
-            digits
-                .bytes()
+            runs.flat_map(str::bytes)
                 .fold(0u64, |n, b| n * 10 + u64::from(b - b'0')),
         )
     } else {
-        digits.parse().expect("ASCII digits")
+        runs.collect::<String>().parse().expect("ASCII digits")
     }
 }
 

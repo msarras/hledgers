@@ -1494,15 +1494,21 @@ impl<'a> JournalParser<'a, '_> {
         let multiplier = is_rule && self.c.eat('*');
         let amount_start = self.c.pos;
         let ctx = amount_ctx(self.st, self.j);
-        let amount = if multiplier {
-            amountp(&mut self.c, &ctx, AmountKind::Multiplier)
+        // where no amount can start, there is none, found without the error
+        // posting_amountp would build
+        let amount = if !multiplier && matches!(self.c.peek(), None | Some('\n' | ';' | '=')) {
+            None
         } else {
-            posting_amountp(&mut self.c, &ctx, AmountKind::Ordinary)
-        };
-        let amount = match amount {
-            Ok(a) => Some(a),
-            Err(_) if self.c.pos == amount_start => None,
-            Err(e) => return Err(e.into()),
+            let amount = if multiplier {
+                amountp(&mut self.c, &ctx, AmountKind::Multiplier)
+            } else {
+                posting_amountp(&mut self.c, &ctx, AmountKind::Ordinary)
+            };
+            match amount {
+                Ok(a) => Some(a),
+                Err(_) if self.c.pos == amount_start => None,
+                Err(e) => return Err(e.into()),
+            }
         };
         // what an error at the comment could also have been: a missing amount
         let missing_amount = amount.is_none() && self.c.pos == amount_start;
@@ -1514,17 +1520,28 @@ impl<'a> JournalParser<'a, '_> {
         } else {
             None
         };
-        let mut hints = Vec::new();
-        if missing_amount && assertion.is_none() && self.c.pos == amount_start {
-            hints.push(Item::label("amount"));
-        }
+        let amount_hint = missing_amount && assertion.is_none() && self.c.pos == amount_start;
         let spaced = self.c.skip_spaces();
-        hints.extend(super::common::digit_hint(&self.c));
         // an assertion's amount may be followed by a cost (amountnobasisp)
-        if !spaced && assertion.as_ref().is_some_and(|a| a.amount.cost.is_none()) {
-            hints.push(Item::label("transaction price"));
-        }
-        let (comment, tags, date, date2) = posting_commentp(&mut self.c, year, &hints)?;
+        let price_hint = !spaced && assertion.as_ref().is_some_and(|a| a.amount.cost.is_none());
+        // a comment that fails is read again, with those hints in its error
+        let comment_start = self.c;
+        let comment = match posting_commentp(&mut self.c, year, &[]) {
+            Err(_) => {
+                self.c = comment_start;
+                let hints: Vec<Item> = [
+                    amount_hint.then(|| Item::label("amount")),
+                    super::common::digit_hint(&self.c),
+                    price_hint.then(|| Item::label("transaction price")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                posting_commentp(&mut self.c, year, &hints)
+            }
+            read => read,
+        };
+        let (comment, tags, date, date2) = comment?;
         let posting = Posting {
             date,
             date2,
