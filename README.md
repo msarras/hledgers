@@ -175,6 +175,20 @@ details (the heading gradient of `help`, charts coloured for the terminal's
 background) are not reproduced. `--version` prints hledger's version and
 then hledgers' own.
 
+## Download
+
+Each release on the repository's Releases page carries archives built by
+`.github/workflows/release.yml`, named `hledgers-vX.Y.Z-TARGET.tar.gz`
+(`.zip` on Windows), for Linux x86_64 and arm64 (glibc 2.28 or later: Debian
+10, Ubuntu 18.10, RHEL 8 or newer), macOS on Apple silicon and Intel, and
+Windows x86_64, plus a `SHA256SUMS` file. Unpack the archive and put
+`hledgers` (`hledgers.exe` on Windows) on your PATH.
+
+On Windows, shell command lines (`source` rules, `!` in `run` and `repl`)
+run through `cmd /C`, the home directory is `%USERPROFILE%` when `HOME` is
+unset, and colour needs a terminal that understands ANSI escapes, such as
+Windows Terminal.
+
 ## Build
 
 Requires Rust 1.97 or later.
@@ -208,6 +222,21 @@ a separate process.
   every failing case, not just gated ones.
 - `HLEDGERS_TEST_BIN=PATH` runs the corpus against another binary, such as a
   hledger built from the submodule's commit, to check the harness itself.
+
+## Release
+
+Set `version` in Cargo.toml, commit, then tag the commit and push the tag:
+
+    git tag v0.2.0
+    git push origin v0.2.0
+
+The release workflow builds the binary for each platform, runs it on
+`hledger/examples/sample.journal`, and creates the GitHub release with the
+archives, `SHA256SUMS` and generated release notes. Started by hand from the
+Actions tab (Run workflow), it builds and tests but publishes nothing, which
+checks the platforms before a release. The Linux arm64 build uses
+GitHub's `ubuntu-24.04-arm` runner, which is free for public repositories
+only.
 
 ## Benchmark
 
