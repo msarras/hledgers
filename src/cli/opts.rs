@@ -548,9 +548,9 @@ fn expand_path_or_glob(cwd: &str, p: &str) -> Result<String, String> {
     if p == "-" {
         return Ok(p.to_string());
     }
-    let expanded = crate::read::journal::expand_home_path(p)?;
+    let expanded = crate::platform::expand_home_path(p)?;
     if p.contains(['*', '?', '[', '{']) {
-        let matches = crate::read::journal::glob_matches(cwd, &expanded);
+        let matches = crate::platform::glob_matches(cwd, &expanded);
         return matches
             .into_iter()
             .next()

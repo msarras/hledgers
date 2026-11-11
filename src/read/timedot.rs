@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use super::InputOpts;
 use super::amount::numberp;
-use super::common::{datep, digit_hint, noncomment_textp, transaction_commentp};
+use super::common::{datep, digit_hint, noncomment_textp, source_pos, transaction_commentp};
 use super::journal::{Failure, ParseState, R, modified_account_namep};
 use crate::account::Realness;
 use crate::amount::{Amount, AmountStyle, MixedAmount, Precision, Sym};
@@ -86,17 +86,7 @@ fn comment_line_label(starts: &str) -> String {
 impl TimedotParser<'_, '_> {
     /// The source position of the cursor.
     fn pos(&mut self) -> SourcePos {
-        let (from, line) = &mut self.counted;
-        *line += self.c.src[*from..self.c.pos].matches('\n').count();
-        *from = self.c.pos;
-        let line_start = self.c.src[..self.c.pos].rfind('\n').map_or(0, |i| i + 1);
-        let col = self.c.src[line_start..self.c.pos]
-            .chars()
-            .fold(1, |col, ch| match ch {
-                '\t' => col + 8 - (col - 1) % 8,
-                _ => col + 1,
-            });
-        SourcePos::new(&self.file, *line, col)
+        source_pos(&self.c, &self.file, &mut self.counted)
     }
 
     /// Empty lines and comment lines (`#`, `;` or `*`) until a date line

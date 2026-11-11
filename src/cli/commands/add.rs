@@ -15,7 +15,7 @@ use crate::cli::opts::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::dates::{Day, fix_smart_date, smartdate};
 use crate::model::render::{PostingLayout, show_account_name, show_transaction};
 use crate::model::{BalanceAssertion, Journal, Posting, Status, Tag, Transaction};
-use crate::parse::{Cursor, Item, ParseError, Parser};
+use crate::parse::{Cursor, Item, ParseError, Parser, megaparsec_column};
 use crate::read::amount::{AmountCtx, AmountKind, amountp, balance_assertionp};
 use crate::read::common::{accountnamep, codep, posting_commentp};
 use crate::text::strip;
@@ -633,10 +633,7 @@ fn parse_amount_and_comment(j: &Journal, year: i64, s: &str) -> Result<AmountAns
     c.skip_spaces();
     let assertion = if c.peek() == Some('=') {
         // its position in the answer, with tabs to stops of 8 as megaparsec counts
-        let col = s[..c.pos].chars().fold(1, |col, ch| match ch {
-            '\t' => col + 8 - (col - 1) % 8,
-            _ => col + 1,
-        });
+        let col = megaparsec_column(&s[..c.pos]);
         let pos = crate::model::SourcePos {
             file: "".into(),
             line: 1,

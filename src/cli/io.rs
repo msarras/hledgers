@@ -24,7 +24,7 @@ fn write_output_with(opts: &CliOpts, text: &str, paged: bool) -> Result<(), Stri
     let file = match opts.output_file.as_deref() {
         None | Some("-") if opts.raw.bool("view") => Some(view_file(opts)?),
         None | Some("-") => None,
-        Some(f) => Some(crate::read::journal::expand_home_path(f)?),
+        Some(f) => Some(crate::platform::expand_home_path(f)?),
     };
     match file {
         None if paged => run_pager(opts, text),

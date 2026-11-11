@@ -387,6 +387,16 @@ fn columns(s: &str) -> usize {
     })
 }
 
+/// The column, from 1, after this text at the start of a line, as
+/// megaparsec counts it: tabs to the next stop of 8, other characters one
+/// column each (sourceColumn).
+pub fn megaparsec_column(line_prefix: &str) -> usize {
+    line_prefix.chars().fold(1, |col, ch| match ch {
+        '\t' => col + 8 - (col - 1) % 8,
+        _ => col + 1,
+    })
+}
+
 /// The line with its tabs replaced by spaces up to the next multiple of 8
 /// (megaparsec's expandTab).
 fn expand_tabs(s: &str) -> String {

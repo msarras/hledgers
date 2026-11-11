@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use crate::account::AccountAlias;
 use crate::dates::{Day, is_date_sep_char};
-use crate::model::{Status, Tag};
-use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space};
+use crate::model::{SourcePos, Status, Tag};
+use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space, megaparsec_column};
 use crate::regex::to_regex_ci;
 use crate::text::is_space;
 
@@ -575,6 +575,17 @@ pub fn account_aliasp(c: &mut Cursor) -> PResult<AccountAlias> {
         old.trim_end_matches(is_space).into(),
         new.trim_end_matches(is_space).into(),
     ))
+}
+
+/// The source position of the cursor, as megaparsec counts columns (tabs
+/// to the next multiple of 8), counting lines on from a known offset and
+/// line number.
+pub fn source_pos(c: &Cursor, file: &Arc<str>, (from, line): &mut (usize, usize)) -> SourcePos {
+    *line += c.src[*from..c.pos].matches('\n').count();
+    *from = c.pos;
+    let line_start = c.src[..c.pos].rfind('\n').map_or(0, |i| i + 1);
+    let col = megaparsec_column(&c.src[line_start..c.pos]);
+    SourcePos::new(file, *line, col)
 }
 
 pub(crate) mod tests {

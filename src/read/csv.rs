@@ -364,10 +364,10 @@ fn take_extension(p: &str) -> &str {
 /// The files a source rule's pattern matches, its leading `~` expanded and
 /// relative to a directory, oldest first (expandGlob, sortByModTime).
 fn source_files(dir: &str, pattern: &str) -> Result<Vec<String>, String> {
-    let expanded = super::journal::expand_home_path(pattern)?;
+    let expanded = crate::platform::expand_home_path(pattern)?;
     let dir = if expanded.starts_with('/') { "/" } else { dir };
     let mut found: Vec<(Option<std::time::SystemTime>, String)> =
-        super::journal::glob_matches(dir, &expanded)
+        crate::platform::glob_matches(dir, &expanded)
             .into_iter()
             .map(|f| (std::fs::metadata(&f).and_then(|m| m.modified()).ok(), f))
             .collect();

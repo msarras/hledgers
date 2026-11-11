@@ -1,7 +1,7 @@
 //! Config files: extra command-line arguments, general and per command, and
 //! command aliases, read from a hledger.conf file (Hledger.Cli.Conf).
 
-use crate::parse::{Item, ParseError};
+use crate::parse::{Item, ParseError, megaparsec_column};
 use crate::platform::{config_dir, home_dir};
 
 /// Config file sections: each name with its argument lines and their line
@@ -188,7 +188,7 @@ fn expand_path(p: &str) -> Result<String, String> {
     if p == "-" {
         return Ok(p.to_string());
     }
-    let p = crate::read::journal::expand_home_path(p)?;
+    let p = crate::platform::expand_home_path(p)?;
     if p.starts_with('/') {
         Ok(p)
     } else {
@@ -341,7 +341,7 @@ fn parse_conf(text: &str) -> Result<Sections, ParseError> {
         }
         // an alias definition, continued by following lines indented more
         // than its name, with blank and comment lines among them skipped
-        let col = column(&l.text[..indent]);
+        let col = megaparsec_column(&l.text[..indent]);
         let mut parts = vec![arg];
         let mut j = i + 1;
         let mut end = i + 1;
@@ -352,7 +352,7 @@ fn parse_conf(text: &str) -> Result<Sections, ParseError> {
                 continue;
             }
             let ind = lines[j].text.len() - r.len();
-            if column(&lines[j].text[..ind]) <= col || r.starts_with('[') {
+            if megaparsec_column(&lines[j].text[..ind]) <= col || r.starts_with('[') {
                 break;
             }
             parts.push(arg_text(r).trim().to_string());
@@ -431,18 +431,6 @@ fn arg_text(s: &str) -> &str {
 /// A non-newline space character (spacenonewline).
 fn is_blank(c: char) -> bool {
     c != '\n' && crate::text::is_space(c)
-}
-
-/// The column, from 1, after this leading white space, with tab stops
-/// every 8 columns (megaparsec's sourceColumn).
-fn column(indent: &str) -> usize {
-    indent.chars().fold(1, |col, c| {
-        if c == '\t' {
-            col + 8 - (col - 1) % 8
-        } else {
-            col + 1
-        }
-    })
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use super::InputOpts;
 use super::common::{
-    datep, empty_or_comment_linep, noncomment_textp, timeofdayp, transaction_commentp,
+    datep, empty_or_comment_linep, noncomment_textp, source_pos, timeofdayp, transaction_commentp,
 };
 use super::journal::{Failure, ParseState, R, modified_account_namep};
 use crate::account::Realness;
@@ -223,22 +223,6 @@ fn entriesp(c: &mut Cursor, st: &ParseState, file: &str, old: bool) -> R<Vec<Ent
         };
         entries.push(entry);
     }
-}
-
-/// The source position of the cursor, as megaparsec counts columns (tabs
-/// to the next multiple of 8), counting lines on from a known offset and
-/// line number.
-fn source_pos(c: &Cursor, file: &Arc<str>, (from, line): &mut (usize, usize)) -> SourcePos {
-    *line += c.src[*from..c.pos].matches('\n').count();
-    *from = c.pos;
-    let line_start = c.src[..c.pos].rfind('\n').map_or(0, |i| i + 1);
-    let col = c.src[line_start..c.pos]
-        .chars()
-        .fold(1, |col, ch| match ch {
-            '\t' => col + 8 - (col - 1) % 8,
-            _ => col + 1,
-        });
-    SourcePos::new(file, *line, col)
 }
 
 /// One or more spaces, or an error saying what was found and what else

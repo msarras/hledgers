@@ -295,7 +295,7 @@ pub fn path_join(dir: &str, p: &str) -> String {
 fn expand_includes(f: &str, text: &str) -> Result<(String, LineSources), String> {
     let mut out = String::new();
     let mut sources = Vec::new();
-    let ancestors = vec![super::journal::canonical_path(f)];
+    let ancestors = vec![crate::platform::canonical_path(f)];
     expand_lines(
         &ancestors,
         &take_directory(f),
@@ -325,7 +325,7 @@ fn expand_lines(
             continue;
         };
         let included = path_join(dir, strip(path));
-        let canonical = super::journal::canonical_path(&included);
+        let canonical = crate::platform::canonical_path(&included);
         if ancestors.contains(&canonical) {
             let msg = format!("This included file forms a cycle: {included}");
             return Err(include_error_msg(file, lnum, line, &msg));
