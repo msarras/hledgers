@@ -1884,9 +1884,416 @@ fn set_local_gain_precision(t: &Transaction, m: MixedAmount) -> MixedAmount {
     })
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::model::render::{PostingLayout, show_transaction};
+    use crate::read::InputOpts;
+
+    /// This journal read and finalised as `hledger -f f.j` reads it, as
+    /// the transactions `print --lots -x` shows on or after `from` (the
+    /// lot subaccounts and the amounts as finalised), or the error.
+    fn printed(text: &str, from: Day) -> Result<String, String> {
+        let iopts = InputOpts {
+            today: Day::from_ymd(2026, 6, 1).unwrap(),
+            ..InputOpts::default()
+        };
+        let (j, st) = crate::read::journal::parse_journal(&iopts, "f.j", text)?;
+        let j = crate::read::finalise::journal_finalise(&iopts, "f.j", text, j, st)?;
+        let styles = j.commodity_styles();
+        Ok((j.txns.iter())
+            .filter(|t| t.date >= from)
+            .map(|t| {
+                let mut t = t.clone();
+                t.style_amounts(&styles);
+                show_transaction(&t, PostingLayout::default(), false)
+            })
+            .collect())
+    }
+
+    fn day(y: i64, m: u32, d: u32) -> Day {
+        Day::from_ymd(y, m, d).unwrap()
+    }
+
+    // The expected outputs are the reference hledger's on the same journals
+    // (`print --lots -x`, or the error after the program name).
+
+    /// Classification decides which transactions can involve lots, and the lot
+    /// calculation takes its answer (c9fa087): an amount of a lotful commodity
+    /// or with a cost basis gets a lot subaccount, others are left alone.
+    #[cfg_attr(test, test)]
+    pub(crate) fn lotful_commodities_and_cost_bases_get_lots() {
+        let journal = concat!(
+            "commodity AAPL  ; lots:\n",
+            "\n",
+            "2026-01-01 buy declared\n",
+            "    assets:stocks    10 AAPL @ $50\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-01-02 buy with basis\n",
+            "    assets:stocks    5 MSFT {$20}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-01-03 plain\n",
+            "    assets:stocks    3 GOOG @ $10\n",
+            "    assets:cash\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap(),
+            concat!(
+                "2026-01-01 buy declared\n",
+                "    assets:stocks:{2026-01-01, $50}               10 AAPL {$50} @ $50\n",
+                "    assets:cash                                $-500\n",
+                "\n",
+                "2026-01-02 buy with basis\n",
+                "    assets:stocks:{2026-01-02, $20}                5 MSFT {$20} @ $20\n",
+                "    assets:cash                                $-100\n",
+                "\n",
+                "2026-01-03 plain\n",
+                "    assets:stocks                                  3 GOOG @ $10\n",
+                "    assets:cash                                 $-30\n",
+                "\n",
+            )
+        );
+    }
+
+    /// A disposal method on an account does not make a commodity lotful.
+    #[cfg_attr(test, test)]
+    pub(crate) fn an_account_method_alone_makes_no_lots() {
+        let journal = concat!(
+            "account assets:stocks  ; lots: FIFO\n",
+            "\n",
+            "2026-01-01 buy, account tag only\n",
+            "    assets:stocks    10 AAPL @ $50\n",
+            "    assets:cash\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap(),
+            concat!(
+                "2026-01-01 buy, account tag only\n",
+                "    assets:stocks                                 10 AAPL @ $50\n",
+                "    assets:cash                                $-500\n",
+                "\n",
+            )
+        );
+    }
+
+    /// FIFO disposes of the oldest lots first.
+    #[cfg_attr(test, test)]
+    pub(crate) fn fifo_disposes_oldest_lots_first() {
+        let journal = concat!(
+            "commodity AAPL  ; lots: FIFO\n",
+            "\n",
+            "2026-01-15 buy cheap\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy dear\n",
+            "    assets:stocks    10 AAPL {$70}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 buy middle\n",
+            "    assets:stocks    10 AAPL {$60}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-04-01 sell\n",
+            "    assets:stocks   -15 AAPL {} @ $65\n",
+            "    assets:cash      $975\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 4, 1)).unwrap(),
+            concat!(
+                "2026-04-01 sell\n",
+                "    assets:stocks:{2026-01-15, $50}              -10 AAPL {2026-01-15, $50} @ $65\n",
+                "    assets:stocks:{2026-02-01, $70}               -5 AAPL {2026-02-01, $70} @ $65\n",
+                "    assets:cash                                 $975\n",
+                "    revenue:gains                              $-125\n",
+                "\n",
+            )
+        );
+    }
+
+    /// LIFO disposes of the newest lots first.
+    #[cfg_attr(test, test)]
+    pub(crate) fn lifo_disposes_newest_lots_first() {
+        let journal = concat!(
+            "commodity AAPL  ; lots: LIFO\n",
+            "\n",
+            "2026-01-15 buy cheap\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy dear\n",
+            "    assets:stocks    10 AAPL {$70}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 buy middle\n",
+            "    assets:stocks    10 AAPL {$60}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-04-01 sell\n",
+            "    assets:stocks   -15 AAPL {} @ $65\n",
+            "    assets:cash      $975\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 4, 1)).unwrap(),
+            concat!(
+                "2026-04-01 sell\n",
+                "    assets:stocks:{2026-03-01, $60}              -10 AAPL {2026-03-01, $60} @ $65\n",
+                "    assets:stocks:{2026-02-01, $70}               -5 AAPL {2026-02-01, $70} @ $65\n",
+                "    assets:cash                                 $975\n",
+                "    revenue:gains                               $-25\n",
+                "\n",
+            )
+        );
+    }
+
+    /// HIFO disposes of the highest cost lots first.
+    #[cfg_attr(test, test)]
+    pub(crate) fn hifo_disposes_highest_cost_lots_first() {
+        let journal = concat!(
+            "commodity AAPL  ; lots: HIFO\n",
+            "\n",
+            "2026-01-15 buy cheap\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy dear\n",
+            "    assets:stocks    10 AAPL {$70}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 buy middle\n",
+            "    assets:stocks    10 AAPL {$60}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-04-01 sell\n",
+            "    assets:stocks   -15 AAPL {} @ $65\n",
+            "    assets:cash      $975\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 4, 1)).unwrap(),
+            concat!(
+                "2026-04-01 sell\n",
+                "    assets:stocks:{2026-02-01, $70}              -10 AAPL {2026-02-01, $70} @ $65\n",
+                "    assets:stocks:{2026-03-01, $60}               -5 AAPL {2026-03-01, $60} @ $65\n",
+                "    assets:cash                                 $975\n",
+                "    revenue:gains                                $25\n",
+                "\n",
+            )
+        );
+    }
+
+    /// AVERAGE disposes of the oldest lots first, at the average cost.
+    #[cfg_attr(test, test)]
+    pub(crate) fn average_disposes_oldest_lots_first() {
+        let journal = concat!(
+            "commodity AAPL  ; lots: AVERAGE\n",
+            "\n",
+            "2026-01-15 buy cheap\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy dear\n",
+            "    assets:stocks    10 AAPL {$70}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 buy middle\n",
+            "    assets:stocks    10 AAPL {$60}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-04-01 sell\n",
+            "    assets:stocks   -15 AAPL {} @ $65\n",
+            "    assets:cash      $975\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 4, 1)).unwrap(),
+            concat!(
+                "2026-04-01 sell\n",
+                "    assets:stocks:{2026-01-15}                   -10 AAPL {2026-01-15, $60} @ $65\n",
+                "    assets:stocks:{2026-02-01}                    -5 AAPL {2026-02-01, $60} @ $65\n",
+                "    assets:cash                                 $975\n",
+                "    revenue:gains                               $-75\n",
+                "\n",
+            )
+        );
+    }
+
+    /// A disposal naming a lot takes that one; a transfer moves lots oldest
+    /// first, keeping their names under the destination.
+    #[cfg_attr(test, test)]
+    pub(crate) fn a_named_lot_is_disposed_and_a_transfer_takes_the_oldest() {
+        let journal = concat!(
+            "commodity AAPL  ; lots:\n",
+            "\n",
+            "2026-01-15 buy cheap\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy dear\n",
+            "    assets:stocks    10 AAPL {$70}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 sell the dear lot\n",
+            "    assets:stocks   -4 AAPL {2026-02-01, $70} @ $65\n",
+            "    assets:cash      $260\n",
+            "    revenue:gains\n",
+            "\n",
+            "2026-03-02 move\n",
+            "    assets:stocks   -12 AAPL {}\n",
+            "    assets:ira       12 AAPL {}\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 3, 1)).unwrap(),
+            concat!(
+                "2026-03-01 sell the dear lot\n",
+                "    assets:stocks:{2026-02-01, $70}               -4 AAPL {2026-02-01, $70} @ $65\n",
+                "    assets:cash                                 $260\n",
+                "    revenue:gains                                $20\n",
+                "\n",
+                "2026-03-02 move\n",
+                "    assets:stocks:{2026-01-15, $50}              -10 AAPL {2026-01-15, $50}\n",
+                "    assets:stocks:{2026-02-01, $70}               -2 AAPL {2026-02-01, $70}\n",
+                "    assets:ira:{2026-01-15, $50}                  10 AAPL {2026-01-15, $50}\n",
+                "    assets:ira:{2026-02-01, $70}                   2 AAPL {2026-02-01, $70}\n",
+                "\n",
+            )
+        );
+    }
+
+    /// Disposing of more than all the lots hold is an error.
+    #[cfg_attr(test, test)]
+    pub(crate) fn disposing_more_than_the_lots_hold_is_an_error() {
+        let journal = concat!(
+            "commodity AAPL  ; lots:\n",
+            "\n",
+            "2026-01-15 buy\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 sell too many\n",
+            "    assets:stocks   -15 AAPL {} @ $55\n",
+            "    assets:cash      $825\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap_err(),
+            concat!(
+                "f.j:7:\n",
+                "7 | 2026-02-01 sell too many\n",
+                "  |     assets:stocks                                -15 AAPL {} @ $55\n",
+                "  |     assets:cash                                 $825\n",
+                "  |     revenue:gains\n",
+                "\n",
+                "Insufficient lots for commodity AAPL in account assets:stocks: need 15 but only 10 available\n",
+                "\n",
+                "Postings were read as: dispose, unclassified, gain.",
+            )
+        );
+    }
+
+    /// Disposing of more than the lots matching a cost hold is an error,
+    /// listing them.
+    #[cfg_attr(test, test)]
+    pub(crate) fn disposing_more_than_the_matching_lots_hold_is_an_error() {
+        let journal = concat!(
+            "2026-01-15 buy\n",
+            "    assets:stocks    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 sell too many\n",
+            "    assets:stocks   -15 AAPL {$50} @ $55\n",
+            "    assets:cash      $825\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap_err(),
+            concat!(
+                "f.j:6:\n",
+                "  | 2026-02-01 sell too many\n",
+                "6 |     assets:stocks                                -15 AAPL {$50} @ $55\n",
+                "  |     assets:cash                                 $825\n",
+                "  |     revenue:gains\n",
+                "\n",
+                "Insufficient lots for commodity AAPL in account assets:stocks: need 15 but only 10 available\n",
+                "Lots matching {$50}:\n",
+                "  {2026-01-15, $50}  10\n",
+                "  Total: 10 AAPL\n",
+                "\n",
+                "Postings were read as: dispose, unclassified, gain.",
+            )
+        );
+    }
+
+    /// Disposing of a lotful commodity with no lots is an error.
+    #[cfg_attr(test, test)]
+    pub(crate) fn disposing_with_no_lots_is_an_error() {
+        let journal = concat!(
+            "commodity AAPL  ; lots:\n",
+            "\n",
+            "2026-02-01 sell none\n",
+            "    assets:stocks   -5 AAPL {} @ $55\n",
+            "    assets:cash      $275\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap_err(),
+            concat!(
+                "f.j:3:\n",
+                "3 | 2026-02-01 sell none\n",
+                "  |     assets:stocks                                 -5 AAPL {} @ $55\n",
+                "  |     assets:cash                                 $275\n",
+                "  |     revenue:gains\n",
+                "\n",
+                "no AAPL lots available for disposal from account assets:stocks on 2026-02-01\n",
+                "(To record a short position, use a liability account.)\n",
+                "\n",
+                "Postings were read as: dispose, unclassified, gain.",
+            )
+        );
+    }
+
+    /// FIFOALL refuses a disposal while another account has an older lot.
+    #[cfg_attr(test, test)]
+    pub(crate) fn fifoall_wants_the_oldest_lot_of_any_account_first() {
+        let journal = concat!(
+            "commodity AAPL  ; lots: FIFOALL\n",
+            "\n",
+            "2026-01-15 buy\n",
+            "    assets:a    10 AAPL {$50}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-02-01 buy\n",
+            "    assets:b    10 AAPL {$60}\n",
+            "    assets:cash\n",
+            "\n",
+            "2026-03-01 sell from b\n",
+            "    assets:b   -5 AAPL {} @ $65\n",
+            "    assets:cash      $325\n",
+            "    revenue:gains\n",
+        );
+        assert_eq!(
+            printed(journal, day(2026, 1, 1)).unwrap_err(),
+            concat!(
+                "f.j:11:\n",
+                "11 | 2026-03-01 sell from b\n",
+                "   |     assets:b                                      -5 AAPL {} @ $65\n",
+                "   |     assets:cash                                 $325\n",
+                "   |     revenue:gains\n",
+                "\n",
+                "FIFOALL: lot(s) on other account(s) have higher priority than the lots in assets:b:\n",
+                "  assets:a: {2026-01-15, $50}  10\n",
+                "Selected from assets:b:\n",
+                "  {2026-02-01, $60}  5\n",
+                "Consider disposing from the account(s) listed above first, or use FIFO for per-account scope.\n",
+                "Using FIFOALL (from commodity tag on AAPL).\n",
+                "\n",
+                "Postings were read as: dispose, unclassified, gain.",
+            )
+        );
+    }
 
     #[test]
     fn labels_skip_used_numbers() {

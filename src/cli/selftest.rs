@@ -34,6 +34,7 @@ const TESTS: &[(&[&str], &str, Test)] = {
     use crate::cli::commands::register::tests as register;
     use crate::dates::tests as dates;
     use crate::i18n;
+    use crate::lots::calculate::tests as lots;
     use crate::model::tests as model;
     use crate::query::tests as query;
     use crate::read::amount::tests as read_amount;
@@ -100,6 +101,17 @@ const TESTS: &[(&[&str], &str, Test)] = {
         (&["Hledger", DATA, "splitSpan"], "boundariesToDayPartition doctests", dates::day_partitions),
         (&["Hledger", DATA, "splitSpan"], "splitSpan, splitSpanToDateSpans doctests", dates::splitting_spans),
         (&["Hledger", DATA, "Journal"], "journalDateSpan", model::journal_date_span),
+        (&["Hledger", DATA, "Lots"], "lotful commodities and cost bases get lots", lots::lotful_commodities_and_cost_bases_get_lots),
+        (&["Hledger", DATA, "Lots"], "an account method alone makes no lots", lots::an_account_method_alone_makes_no_lots),
+        (&["Hledger", DATA, "Lots"], "fifo disposes oldest lots first", lots::fifo_disposes_oldest_lots_first),
+        (&["Hledger", DATA, "Lots"], "lifo disposes newest lots first", lots::lifo_disposes_newest_lots_first),
+        (&["Hledger", DATA, "Lots"], "hifo disposes highest cost lots first", lots::hifo_disposes_highest_cost_lots_first),
+        (&["Hledger", DATA, "Lots"], "average disposes oldest lots first", lots::average_disposes_oldest_lots_first),
+        (&["Hledger", DATA, "Lots"], "a named lot is disposed and a transfer takes the oldest", lots::a_named_lot_is_disposed_and_a_transfer_takes_the_oldest),
+        (&["Hledger", DATA, "Lots"], "disposing more than the lots hold is an error", lots::disposing_more_than_the_lots_hold_is_an_error),
+        (&["Hledger", DATA, "Lots"], "disposing more than the matching lots hold is an error", lots::disposing_more_than_the_matching_lots_hold_is_an_error),
+        (&["Hledger", DATA, "Lots"], "disposing with no lots is an error", lots::disposing_with_no_lots_is_an_error),
+        (&["Hledger", DATA, "Lots"], "fifoall wants the oldest lot of any account first", lots::fifoall_wants_the_oldest_lot_of_any_account_first),
         (&["Hledger", DATA, "Period"], "Period doctests", dates::periods),
         (&["Hledger", DATA, "PeriodData"], "periodDataFromList, Semigroup instance, Monoid instance", tree::period_data_semigroup),
         (&["Hledger", DATA, "PeriodicTransaction"], "runPeriodicTransaction doctests", modifiers::periodic_transactions),
