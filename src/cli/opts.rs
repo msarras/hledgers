@@ -470,7 +470,8 @@ impl CliOpts {
 
     /// The journal files to read, as [`journal_file_paths`](Self::journal_file_paths)
     /// gives them, but the default file need not exist
-    /// (journalFilePathFromOptsNoDefault, defaultJournalPath).
+    /// (journalFilePathFromOptsNoDefault, defaultJournalPath). A relative
+    /// $LEDGER_FILE is kept relative, after `./`.
     pub fn possible_journal_file_paths(&self) -> Result<Vec<String>, String> {
         let cwd = std::env::current_dir()
             .map(|d| d.display().to_string())
@@ -486,7 +487,7 @@ impl CliOpts {
         let f = if ledger_file.is_empty() {
             format!("{}/.hledger.journal", crate::platform::home_dir())
         } else {
-            expand_path_or_glob(&cwd, &ledger_file)?
+            expand_path_or_glob(".", &ledger_file)?
         };
         Ok(vec![f])
     }
@@ -542,8 +543,9 @@ fn expand_path_preserving_prefix(cwd: &str, prefixed: &str) -> Result<String, St
     })
 }
 
-/// A file path made absolute, with a leading `~` expanded; or the first
-/// file a glob pattern matches (expandPathOrGlob). `-` is left alone.
+/// A file path, with a leading `~` expanded, after the directory `cwd` if
+/// it is relative; or the first file a glob pattern matches there
+/// (expandPathOrGlob). `-` is left alone.
 fn expand_path_or_glob(cwd: &str, p: &str) -> Result<String, String> {
     if p == "-" {
         return Ok(p.to_string());

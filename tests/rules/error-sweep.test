@@ -52,3 +52,20 @@ $ hledger -f timeclock:- --alias '/a/=\2' --alias '/x/=' print --color=always
 $ D=$(mktemp -d) && printf 'account assets\naccount liabilities\naccount equity\naccount revenues\naccount expenses\naccount assets:cash\n' >$D/a.j && LEDGER_FILE=$D/a.j HTTPS_PROXY=http://127.0.0.1:9 hledger setup | grep 'basic types'; printf 'account assets\n' >$D/a.j && LEDGER_FILE=$D/a.j HTTPS_PROXY=http://127.0.0.1:9 hledger setup | grep 'basic types'; rm -rf $D
   accounts of all basic types exist ?      yes  ALERXC accounts detected
   accounts of all basic types exist ?       no  bs/is/cf need LERXC accounts
+
+# ** 5. A relative $LEDGER_FILE is used, and shown, as ./FILE, a glob's
+# match too (upstream expands it against ".").
+$ LEDGER_FILE=import/a.j hledger files
+./import/a.j
+
+# ** 6.
+$ LEDGER_FILE='import/[a]*.j' hledger files
+./import/a.j
+
+# ** 7.
+$ LEDGER_FILE=import/nosuch.j hledger print
+>2
+hledger: Error: data file "./import/nosuch.j" was not found.
+Please create it first, eg with "hledger add" or a text editor.
+Or, specify an existing data file with -f or $LEDGER_FILE.
+>=1
