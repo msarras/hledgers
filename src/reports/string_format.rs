@@ -3,9 +3,7 @@
 //! minimum and maximum width, such as `%-20(account)` or `%.10(total)`.
 //! The single-column balance report renders them.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
+use crate::text::is_print;
 
 /// A line format: its components, and how values of several lines are
 /// placed: on one line separated by commas, top-aligned, or
@@ -185,15 +183,6 @@ fn shown(rest: &str) -> String {
     rest.chars()
         .next()
         .map_or_else(|| "end of input".to_string(), |c| format!("{c:?}"))
-}
-
-/// Whether a character is printable: a letter, mark, number, punctuation,
-/// symbol or space separator (Haskell's isPrint).
-fn is_print(c: char) -> bool {
-    static PRINT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\A[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]").expect("a valid regex")
-    });
-    PRINT.is_match(c.encode_utf8(&mut [0; 4]))
 }
 
 pub(crate) mod tests {

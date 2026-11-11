@@ -562,6 +562,51 @@ fn alias_replace(alias: &AccountAlias, a: &str) -> Result<String, String> {
     }
 }
 
+/// Aliases as upstream's error messages show them (pshow): pretty-simple's
+/// layout of their derived Show text, its strings with characters that are
+/// not printable as hex codes, coloured as there if `color`. Alias patterns
+/// always ignore case. Only a list with a regular expression alias can fail
+/// to apply, so the list never takes pretty-simple's one-line form.
+pub fn show_aliases(aliases: &[AccountAlias], color: bool) -> String {
+    let paint = |sgr: &str, s: &str| {
+        if color {
+            format!("\x1b[0;{sgr}m{s}\x1b[0m")
+        } else {
+            s.to_string()
+        }
+    };
+    let quoted = |s: &str| {
+        let text: String = (s.chars())
+            .map(|c| match c {
+                '\n' => "\n  ".to_string(),
+                c if crate::text::is_print(c) => c.to_string(),
+                c => format!("\\x{:x}", u32::from(c)),
+            })
+            .collect();
+        let q = paint("97;1", "\"");
+        format!("{q}{}{q}", paint("94;1", &text))
+    };
+    let mut out = paint("95;1", "[");
+    for (i, alias) in aliases.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+            out.push_str(&paint("95;1", ","));
+        }
+        out.push_str(&match alias {
+            AccountAlias::Basic(old, new) => format!(" BasicAlias {} {}", quoted(old), quoted(new)),
+            AccountAlias::Regex(re, repl) => format!(
+                " RegexAlias\n  {} RegexpCI {} {} {}",
+                paint("96;1", "("),
+                quoted(re.src()),
+                paint("96;1", ")"),
+                quoted(repl)
+            ),
+        });
+    }
+    out.push('\n');
+    out + &paint("95;1", "]")
+}
+
 /// The name cut to its first `n` components.
 fn clip_account_name_to(n: usize, a: &str) -> &str {
     match a.match_indices(ACCT_SEP).nth(n.saturating_sub(1)) {

@@ -1,0 +1,54 @@
+# * Differences from the reference hledger found by the error sweep of
+# 2026-11-09, each now as the reference has it (expectations from the
+# reference hledger; fixtures in import/).
+
+# ** 1. A failing --alias on CSV data shows the aliases as upstream's pshow
+# lays them out, in the order given.
+$ hledger -f import/bank.csv --alias b=c --alias '/a/=\2' print
+>2
+hledger: Error: problem while applying account aliases:
+[ BasicAlias "b" "c"
+, RegexAlias
+  ( RegexpCI "a" ) "\2"
+]
+ to account name: assets:bank
+ no match group exists for backreference "\2"
+>=1
+
+# ** 2. On timedot data too.
+<
+2024-01-01
+proj:a  1
+
+$ hledger -f timedot:- --alias '/a/=\2' print
+>2
+hledger: Error: problem while applying account aliases:
+[ RegexAlias
+  ( RegexpCI "a" ) "\2"
+]
+ to account name: proj:a
+ no match group exists for backreference "\2"
+>=1
+
+# ** 3. On timeclock data too, coloured as there when colour is on.
+<
+i 2024-01-01 09:00:00 proj:a
+o 2024-01-01 10:30:00
+
+$ hledger -f timeclock:- --alias '/a/=\2' --alias '/x/=' print --color=always
+>2
+[91m[1mhledger: Error: problem while applying account aliases:[39m[49m[22m
+[0;95;1m[[0m RegexAlias
+  [0;96;1m([0m RegexpCI [0;97;1m"[0m[0;94;1ma[0m[0;97;1m"[0m [0;96;1m)[0m [0;97;1m"[0m[0;94;1m\2[0m[0;97;1m"[0m
+[0;95;1m,[0m RegexAlias
+  [0;96;1m([0m RegexpCI [0;97;1m"[0m[0;94;1mx[0m[0;97;1m"[0m [0;96;1m)[0m [0;97;1m"[0m[0;94;1m[0m[0;97;1m"[0m
+[0;95;1m][0m
+ to account name: proj:a
+ no match group exists for backreference "\2"
+>=1
+
+# ** 4. setup names the basic account types found, or missing, by their
+# letters (with no network: the proxy refuses).
+$ D=$(mktemp -d) && printf 'account assets\naccount liabilities\naccount equity\naccount revenues\naccount expenses\naccount assets:cash\n' >$D/a.j && LEDGER_FILE=$D/a.j HTTPS_PROXY=http://127.0.0.1:9 hledger setup | grep 'basic types'; printf 'account assets\n' >$D/a.j && LEDGER_FILE=$D/a.j HTTPS_PROXY=http://127.0.0.1:9 hledger setup | grep 'basic types'; rm -rf $D
+  accounts of all basic types exist ?      yes  ALERXC accounts detected
+  accounts of all basic types exist ?       no  bs/is/cf need LERXC accounts

@@ -159,6 +159,7 @@ pub fn read_timeclock(iopts: &InputOpts, f: &str, text: &str) -> Result<Journal,
     let txns = timeclock_transactions(iopts, &st, f, text).map_err(|e| e.message(f, text))?;
     let aliases = super::journal::aliases_from_opts(iopts)?;
     let j = super::csv::journal_apply_aliases(
+        &iopts.prog_args,
         &aliases,
         Journal {
             txns,

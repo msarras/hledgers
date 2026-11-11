@@ -507,7 +507,7 @@ fn setup_journal(opts: &CliOpts, conf: &Option<Result<Conf, String>>) {
     }
 
     pdesc("accounts of all basic types exist ?");
-    let shown = |ts: &[AccountType]| ts.iter().map(|t| format!("{t:?}")).collect::<String>();
+    let shown = |ts: &[AccountType]| ts.iter().map(|t| t.letter()).collect::<String>();
     if missing_types.is_empty() {
         p(Y, &format!("{} accounts detected", shown(&basic)));
     } else {

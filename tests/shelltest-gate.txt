@@ -217,6 +217,7 @@ register/unordered-dates.test
 related.test
 rewrite.test
 roi.test
+rules/error-sweep.test
 rules/import-upstream.test
 rules/lazy-errors.test
 rules/let-split.test

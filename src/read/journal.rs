@@ -790,7 +790,8 @@ impl<'a> JournalParser<'a, '_> {
             .map_err(|e| Failure::Unlocated(e.clone()))?;
         let aliases: Vec<AccountAlias> =
             self.st.aliases.iter().chain(opt_aliases).cloned().collect();
-        let cj = super::csv::journal_apply_aliases(&aliases, cj).map_err(Failure::Included)?;
+        let cj = super::csv::journal_apply_aliases(&self.iopts.prog_args, &aliases, cj)
+            .map_err(Failure::Included)?;
         Arc::make_mut(&mut self.j.files).push((file.to_string(), String::new()));
         self.j.txns.extend(cj.txns);
         Ok(())

@@ -11,7 +11,7 @@
 //! complex scripts (such as Hangul jamo and some Indic vowel signs), none of
 //! which occur in hledger's tests.
 
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use ::regex::Regex;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -186,6 +186,15 @@ pub fn is_letter(c: char) -> bool {
             && RE
                 .get_or_init(|| Regex::new(r"^\p{L}$").unwrap())
                 .is_match(c.encode_utf8(&mut [0; 4])))
+}
+
+/// Whether a character is printable: a letter, mark, number, punctuation,
+/// symbol or space separator (Haskell's isPrint).
+pub fn is_print(c: char) -> bool {
+    static PRINT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\A[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]").expect("a valid regex")
+    });
+    PRINT.is_match(c.encode_utf8(&mut [0; 4]))
 }
 
 /// Haskell's isUpper: an uppercase or titlecase letter (Lu, Lt).

@@ -40,7 +40,7 @@ pub fn warn(args: &[String], msg: &str) {
 
 /// Whether to colour stderr: yes if --color says so, otherwise if it is a
 /// terminal supporting colour and NO_COLOR is not set (useColorOnStderr).
-fn use_color_on_stderr(color_option: Option<&str>) -> bool {
+pub fn use_color_on_stderr(color_option: Option<&str>) -> bool {
     use_color_on(std::io::stderr().is_terminal(), color_option)
 }
 

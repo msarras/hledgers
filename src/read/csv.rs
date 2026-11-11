@@ -16,7 +16,7 @@ use super::rules::{
 };
 use crate::account::{
     AccountAlias, Realness, account_name_apply_aliases, account_name_posting_type,
-    account_name_without_posting_type,
+    account_name_without_posting_type, show_aliases,
 };
 use crate::amount::render::{AmountFormat, show_mixed_amount_b};
 use crate::amount::{AmountStyle, MixedAmount, Sym};
@@ -698,7 +698,7 @@ pub fn finalise_csv_journal(
     context: &CsvContext,
 ) -> Result<Journal, String> {
     let aliases = super::journal::aliases_from_opts(iopts)?;
-    let j = journal_apply_aliases(&aliases, j)?;
+    let j = journal_apply_aliases(&iopts.prog_args, &aliases, j)?;
     let mut iopts = iopts.clone();
     iopts.balancing.ignore_assertions = true;
     super::finalise::journal_finalise(&iopts, f, "", j, Default::default())
@@ -706,11 +706,19 @@ pub fn finalise_csv_journal(
 }
 
 /// Account aliases applied to the postings' accounts (journalApplyAliases).
-pub fn journal_apply_aliases(aliases: &[AccountAlias], mut j: Journal) -> Result<Journal, String> {
+/// The command-line arguments say whether an error's list of aliases is
+/// coloured.
+pub fn journal_apply_aliases(
+    args: &[String],
+    aliases: &[AccountAlias],
+    mut j: Journal,
+) -> Result<Journal, String> {
     for p in j.txns.iter_mut().flat_map(|t| &mut t.postings) {
         let a = account_name_apply_aliases(aliases, &p.account).map_err(|e| {
+            let color = crate::console::use_color_on_stderr(crate::console::color_option(args));
             format!(
-                "problem while applying account aliases:\n{aliases:?}\n to account name: {}\n {e}",
+                "problem while applying account aliases:\n{}\n to account name: {}\n {e}",
+                show_aliases(aliases, color),
                 p.account
             )
         })?;
