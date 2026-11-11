@@ -90,7 +90,7 @@ pub fn transaction_first_line(t: &Transaction) -> String {
     if let Some(c) = render_comment_lines(&t.comment).first() {
         s.push_str(c);
     }
-    s.truncate(s.trim_end().len());
+    s.truncate(s.trim_end_matches(crate::text::is_space).len());
     s
 }
 
@@ -355,7 +355,7 @@ impl PostingRender {
 /// The lines of some text, each without trailing spaces.
 fn push_lines(out: &mut Vec<String>, s: &str) {
     for l in s.lines() {
-        out.push(l.trim_end().to_string());
+        out.push(l.trim_end_matches(crate::text::is_space).to_string());
     }
 }
 

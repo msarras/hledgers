@@ -284,3 +284,18 @@ hledger: Error: D/surrogate.csv:1:
 This CSV record has less than two fields.
 Perhaps the separator is wrong (it can be set with a separator rule).
 >=0
+
+# ** 30. Text is stripped of trailing white space as Haskell's isSpace
+# says, which does not include U+2028 or U+0085: comments ending with them
+# keep them when printed.
+<
+2024-01-01 desc  ; tc 
+  a  1 ; pc 
+  b  ; x
+
+$ hledger -f - print
+2024-01-01 desc   ; tc 
+    a                                              1  ; pc 
+    b                                                 ; x
+
+>=0
