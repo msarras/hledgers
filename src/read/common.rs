@@ -528,14 +528,20 @@ fn bracketed_date_tagsp(
 
 /// An account alias, `OLD = NEW` or `/REGEX/ = REPLACEMENT`
 /// (accountaliasp). A regular expression may contain `\/`; it is kept as
-/// written. An invalid one is an error at the expression.
+/// written. An invalid one is an error at the expression. Errors expect
+/// what upstream's alternatives would have taken there: `\/`, `\` or the
+/// closing `/` in an expression, `/` where neither form starts.
 pub fn account_aliasp(c: &mut Cursor) -> PResult<AccountAlias> {
+    let in_regex = [Item::tokens("\\/"), Item::tokens("\\")];
     if c.eat('/') {
         let re_start = c.pos;
         loop {
             match c.peek() {
                 Some('\\') => {
                     c.bump();
+                    if c.at_end() {
+                        return Err(c.unexpected(&[]));
+                    }
                     c.bump();
                 }
                 Some('/' | '\n' | '\r') | None => break,
@@ -546,10 +552,18 @@ pub fn account_aliasp(c: &mut Cursor) -> PResult<AccountAlias> {
         }
         let re_end = c.pos;
         if re_end == re_start {
-            return Err(c.unexpected(&[]));
+            // an empty expression: what `string "\\/"` found, the next two
+            // characters, is the unexpected item megaparsec keeps
+            let next: String = c.rest().chars().take(2).collect();
+            let found = if next.is_empty() {
+                Item::EndOfInput
+            } else {
+                Item::Tokens(next)
+            };
+            return Err(ParseError::trivial(c.pos, Some(found), &in_regex));
         }
         if !c.eat('/') {
-            return Err(c.unexpected(&[Item::tokens("/")]));
+            return Err(c.unexpected(&[&in_regex[..], &[Item::tokens("/")]].concat()));
         }
         c.skip_spaces();
         if !c.eat('=') {
@@ -564,7 +578,7 @@ pub fn account_aliasp(c: &mut Cursor) -> PResult<AccountAlias> {
     }
     let old = c.take_while(|ch| ch != '=');
     if old.is_empty() {
-        return Err(c.unexpected(&[]));
+        return Err(c.unexpected(&[Item::tokens("/")]));
     }
     if !c.eat('=') {
         return Err(c.unexpected(&[Item::tokens("=")]));

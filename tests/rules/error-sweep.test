@@ -95,3 +95,45 @@ Balance changes in 2023-11-27..2024-03-24:
 $ D=$(mktemp -d) && cp error-sweep/latin1.txt $D/c.conf && hledger --conf $D/c.conf -f import/a.j print 2>&1 | sed "s|$D|D|"; rm -rf $D
 hledger: Error: D/c.conf: hGetContents: invalid argument (cannot decode byte sequence starting from 233)
 (hledger 1.99 could not read this config file. To run without it, add -n.)
+
+# ** 10. A --alias that does not parse: the error expects what upstream's
+# alternatives would have taken there: an expression not closed, an empty
+# one, a backslash at the end, no name before =.
+$ hledger -f import/a.j --alias '/x' print
+>2
+hledger: Error: --alias:1:3:
+  |
+1 | /x
+  |   ^
+unexpected end of input
+expecting "\/", '/', or '\'
+>=1
+
+$ hledger -f import/a.j --alias '//=x' print
+>2
+hledger: Error: --alias:1:2:
+  |
+1 | //=x
+  |  ^^
+unexpected "/="
+expecting "\/" or '\'
+>=1
+
+$ hledger -f import/a.j --alias '/x\' print
+>2
+hledger: Error: --alias:1:4:
+  |
+1 | /x\
+  |    ^
+unexpected end of input
+>=1
+
+$ hledger -f import/a.j --alias '=x' print
+>2
+hledger: Error: --alias:1:1:
+  |
+1 | =x
+  | ^
+unexpected '='
+expecting '/'
+>=1
