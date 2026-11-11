@@ -164,7 +164,16 @@ pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule
             posting: posting_round_calculated_amounts(posting),
             is_multiplier,
         }),
-        Ok(_) => Err(Failure::Here(p.c.unexpected(&[Item::EndOfInput]))),
+        Ok(Some(_)) => Err(Failure::Here(p.c.unexpected(&[Item::EndOfInput]))),
+        // no account name after the spaces and status: the error the
+        // account name parser gives there, which postingp's try keeps
+        Ok(None) => {
+            let mut c = Cursor::new(&text);
+            c.skip_spaces();
+            statusp(&mut c);
+            c.skip_spaces();
+            Err(Failure::Here(c.unexpected(&[])))
+        }
         Err(e) => Err(e),
     };
     rule.map_err(|e| match e {

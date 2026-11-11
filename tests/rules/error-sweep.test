@@ -162,3 +162,14 @@ hledger: Error: /nonexistent/x: withFile: does not exist (No such file or direct
 # ** 17. A directory, as GHC says it when writing.
 $ D=$(mktemp -d) && hledger -f import/a.j print -o $D 2>&1 | sed "s|$D|D|"; rm -rf $D
 hledger: Error: D: withFile: inappropriate type (Is a directory)
+
+# ** 18. rewrite --add-posting with no account name: the error is where the
+# name should start, as the account name parser gives it.
+$ hledger -f import/a.j rewrite --add-posting '  '
+>2
+hledger: Error: 1:4:
+  |
+1 |    
+  |    ^
+unexpected newline
+>=1
