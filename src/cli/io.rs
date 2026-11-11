@@ -33,7 +33,9 @@ fn write_output_with(opts: &CliOpts, text: &str, paged: bool) -> Result<(), Stri
             Ok(())
         }
         Some(path) => {
-            std::fs::write(&path, text).map_err(|e| format!("{path}: withFile: {e}"))?;
+            std::fs::write(&path, text).map_err(|e| {
+                format!("{path}: withFile: {}", crate::read::io_write_error_text(&e))
+            })?;
             if opts.raw.bool("view")
                 && let Err(tried) = super::docs::launch(&path)
             {

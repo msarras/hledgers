@@ -41,7 +41,7 @@ pub fn save_latest_dates(dates: &[Day], f: &str) -> Result<(), String> {
     let path = latest_dates_file_for(f);
     let text: String = dates.iter().map(|d| format!("{d}\n")).collect();
     std::fs::write(&path, text)
-        .map_err(|e| format!("{path}: withFile: {}", super::io_error_text(&e)))
+        .map_err(|e| format!("{path}: withFile: {}", super::io_write_error_text(&e)))
 }
 
 /// Save each file's latest dates (saveLatestDatesForFiles).

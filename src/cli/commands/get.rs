@@ -248,8 +248,12 @@ fn merge_and_write_prices(outfile: &str, new: &str) -> Result<String, String> {
         .map(|pd| crate::model::render::show_price_directive(pd) + "\n")
         .collect();
     create_dir(&take_directory(outfile))?;
-    std::fs::write(outfile, text)
-        .map_err(|e| format!("{outfile}: withFile: {}", crate::read::io_error_text(&e)))?;
+    std::fs::write(outfile, text).map_err(|e| {
+        format!(
+            "{outfile}: withFile: {}",
+            crate::read::io_write_error_text(&e)
+        )
+    })?;
     Ok(format!(
         "wrote {outfile} (existing {n_existing}, added {n_added})"
     ))

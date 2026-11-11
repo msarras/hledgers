@@ -505,6 +505,17 @@ pub fn io_error_text(e: &std::io::Error) -> String {
         NotFound => "does not exist (No such file or directory)".to_string(),
         PermissionDenied => "permission denied (Permission denied)".to_string(),
         IsADirectory => "inappropriate type (is a directory)".to_string(),
+        NotADirectory => "inappropriate type (Not a directory)".to_string(),
         _ => e.to_string(),
+    }
+}
+
+/// An I/O error writing a file as GHC shows it: as [`io_error_text`], but
+/// a directory in the way is the system's "Is a directory", GHC checking
+/// for one itself only when it opens a file to read.
+pub fn io_write_error_text(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::IsADirectory => "inappropriate type (Is a directory)".to_string(),
+        _ => io_error_text(e),
     }
 }
