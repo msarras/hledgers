@@ -17,8 +17,15 @@ pub const DECODING_ADVICE: &str = "Some text could not be decoded with the syste
 /// unless it ends with the decoding advice (exitUnicode), whose newline
 /// makes an empty line when not coloured; after the program name and
 /// `Error: ` (unless it starts with that already), the first line in
-/// bright bold red if colour is on for stderr.
+/// bright bold red if colour is on for stderr. An [`uncaught`] error is
+/// shown as GHC's runtime reports one: after the program name, without
+/// `Error: ` or colour, then two empty lines (for its empty exception
+/// context).
 pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
+    if let Some(m) = uncaught_message(msg) {
+        eprint!("{progname}: {m}\n\n\n");
+        return;
+    }
     let msg = if msg.ends_with(DECODING_ADVICE) {
         msg
     } else {
@@ -57,15 +64,19 @@ pub fn progname(argv0: &str) -> String {
     .to_string()
 }
 
-/// Exit with an error upstream raises as an exception none of its
-/// handlers catch, as GHC's runtime reports it: after the program name,
-/// without `Error: ` or colour, then two empty lines (for its empty
-/// exception context).
-pub fn uncaught(msg: &str) -> ! {
-    let argv0 = std::env::args_os().next().unwrap_or_default();
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    eprint!("{}: {msg}\n\n\n", progname(&argv0.to_string_lossy()));
-    std::process::exit(1)
+/// Marks an error upstream raises as an exception none of its handlers
+/// catch; the message follows it. Whatever wraps the error on its way up
+/// comes before the mark and is not shown.
+const UNCAUGHT: &str = "\0uncaught exception: ";
+
+/// An error upstream raises as an exception none of its handlers catch.
+pub fn uncaught(msg: &str) -> String {
+    format!("{UNCAUGHT}{msg}")
+}
+
+/// The message of an [`uncaught`] error, if this is one.
+pub fn uncaught_message(msg: &str) -> Option<&str> {
+    msg.split_once(UNCAUGHT).map(|(_, m)| m)
 }
 
 /// Print a warning on stderr, after `Warning: `, its first line in bright

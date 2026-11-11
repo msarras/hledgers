@@ -715,6 +715,10 @@ impl<'a> Session<'a> {
                     let _ = editor.add_history_entry(input.as_str());
                     match step(&input) {
                         Ok(()) | Err(Halt::Exit(_)) => {}
+                        // an uncaught exception ends the session
+                        Err(Halt::Error(e)) if crate::console::uncaught_message(&e).is_some() => {
+                            return Err(Halt::Error(e));
+                        }
                         Err(Halt::Error(e)) => {
                             println!("{}", e.trim_end_matches(crate::text::is_space));
                         }
@@ -757,6 +761,7 @@ impl<'a> Session<'a> {
                     c.seen = seen;
                 }
                 Err(e) => {
+                    let e = crate::console::uncaught_message(&e).unwrap_or(&e);
                     eprintln!("could not reload {fp}, keeping previous version:\n{e}");
                     self.ctx.cache.borrow_mut()[i].seen = newest;
                 }
