@@ -212,7 +212,7 @@ fn chart_svg(out: &mut Out, dark: bool, chart: &Chart) {
         out.text("title", &[], title);
     }
     out.open("style", &[]);
-    out.0.push_str(&stylesheet(false, dark));
+    out.0.push_str(&stylesheet(dark));
     out.close("style");
     out.leaf(
         "rect",
@@ -1857,8 +1857,10 @@ fn tick_quantity(decimals: usize, t: f64) -> Decimal {
     Decimal::new(mantissa, decimals as u8)
 }
 
-/// The chart's styles, with a dark variant if wanted (stylesheet).
-fn stylesheet(shaded: bool, dark: bool) -> String {
+/// The chart's styles, with a dark variant if wanted (stylesheet), without
+/// the rules for shading the past and future, which upstream's svgToday
+/// option uses and this port does not have.
+fn stylesheet(dark: bool) -> String {
     let mut lines: Vec<String> = [
         ".hledger-chart{max-width:100%;height:auto;font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif;font-size:14px}",
         ".hledger-chart .title{font-size:17px;font-weight:600}",
@@ -1873,7 +1875,7 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
     ]
     .map(String::from)
     .to_vec();
-    let mut rules: Vec<(&str, &str, &str)> = vec![
+    let rules: [(&str, &str, &str); 13] = [
         (".bg", "fill", "surface"),
         (".title", "fill", "ink"),
         (".heading", "fill", "ink"),
@@ -1888,14 +1890,6 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
         (".clip", "fill", "ink"),
         (".hatch", "stroke", "surface"),
     ];
-    if shaded {
-        rules.extend([
-            (".shade.past-negative", "fill", "pastnegative"),
-            (".shade.future", "fill", "future"),
-            (".shade.future-negative", "fill", "futurenegative"),
-            (".axis.zero", "stroke", "zero"),
-        ]);
-    }
     let light = [
         ("surface", "#fcfcfb"),
         ("ink", "#0b0b0b"),
@@ -1903,10 +1897,6 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
         ("muted", "#898781"),
         ("grid", "#e1e0d9"),
         ("axis", "#c3c2b7"),
-        ("pastnegative", "#fbe4e4"),
-        ("future", "#f1f0ec"),
-        ("futurenegative", "#f0dcda"),
-        ("zero", "#e34948"),
     ];
     let darkcolours = [
         ("surface", "#1a1a19"),
@@ -1915,10 +1905,6 @@ fn stylesheet(shaded: bool, dark: bool) -> String {
         ("muted", "#898781"),
         ("grid", "#2c2c2a"),
         ("axis", "#383835"),
-        ("pastnegative", "#432929"),
-        ("future", "#252524"),
-        ("futurenegative", "#3a2a28"),
-        ("zero", "#e66767"),
     ];
     let mut series_colours: Vec<Colour> = Vec::new();
     use AccountType::*;
