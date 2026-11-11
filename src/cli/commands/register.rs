@@ -3,8 +3,6 @@
 //! tsv, json, html or fods, or as a chart; and the text layout it shares
 //! with aregister (postingsOrTransactionsReportAsText).
 
-use std::collections::BTreeMap;
-
 use crate::account::{Realness, account_name_drop, elide_account_name};
 use crate::amount::render::{
     AmountFormat, show_mixed_amount_lines_b, show_mixed_amount_lines_reusing,
@@ -23,8 +21,8 @@ use crate::reports::postings::{
     PostingsReportItem, postings_report, postings_report_start_balances,
 };
 use crate::text::{Wide, fit_text, is_space, show_string};
-use crate::write::csv::{print_csv, print_tsv};
-use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::csv::print_delimited;
+use crate::write::fods::print_fods;
 use crate::write::html::titled_table_html;
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
@@ -128,8 +126,7 @@ pub fn register(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     Ok(match fmt.as_str() {
         "txt" => with_title(opts, postings_report_as_text(opts, &report)?),
         "json" => to_json_text(&report),
-        "csv" => print_csv(postings_report_as_csv(opts, &report)),
-        "tsv" => print_tsv(postings_report_as_csv(opts, &report)),
+        "csv" | "tsv" => print_delimited(&fmt, postings_report_as_csv(opts, &report)),
         "html" => {
             let rows = postings_report_as_html_rows(opts, &report);
             titled_table_html(ropts.effective_title(""), &rows) + "\n"
@@ -137,13 +134,7 @@ pub fn register(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         _ => {
             let fmt = AmountFormat::ONE_LINE_NO_COST;
             let rows = postings_report_as_spreadsheet(opts, &fmt, true, &report).collect();
-            print_fods(
-                locale_encoding_name(),
-                &BTreeMap::from([(
-                    ropts.translations.tr("Register").to_string(),
-                    ((1, 0), rows),
-                )]),
-            )
+            print_fods(ropts.translations.tr("Register"), ((1, 0), rows))
         }
     })
 }

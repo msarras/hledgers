@@ -9,7 +9,7 @@ use crate::account::{AccountName, AccountType, parent_account_names};
 use crate::amount::{Amount, AmountStyle, MixedAmount, Sym};
 use crate::cli::args::{Arity, Flag};
 use crate::cli::io::unsupported_output_format_error;
-use crate::cli::opts::CliOpts;
+use crate::cli::opts::{CliOpts, OUTPUT_FORMATS};
 use crate::dates::{DateSpan, Day, Period};
 use crate::decimal::Decimal;
 use crate::i18n::Translations;
@@ -30,7 +30,7 @@ use crate::write::chart_svg::chart_as_svg;
 use crate::write::chart_text::{
     ColourMode, TextChartOpts, chart_as_styled_lines, styled_lines_as_text,
 };
-use crate::write::csv::{print_csv, print_tsv};
+use crate::write::csv::print_delimited;
 use crate::write::fods::locale_encoding_name;
 use crate::write::html::escape;
 use crate::write::json::to_json_text;
@@ -151,21 +151,9 @@ pub fn chart_requested(opts: &CliOpts) -> bool {
 /// html when the report has html (writeChart's checks, made before the
 /// chart).
 pub fn check_chart_format(opts: &CliOpts) -> Result<(), String> {
-    const FORMATS: [&str; 10] = [
-        "txt",
-        "beancount",
-        "csv",
-        "json",
-        "html",
-        "ledger",
-        "sql",
-        "tsv",
-        "fods",
-        "svg",
-    ];
     match opts.output_format().as_str() {
         "txt" | "svg" | "csv" | "tsv" | "json" | "html" => Ok(()),
-        f if FORMATS.contains(&f) => Err(format!(
+        f if OUTPUT_FORMATS.contains(&f) => Err(format!(
             "--chart does not yet support {f} output; try txt, svg, html, csv, tsv or json"
         )),
         f => Err(unsupported_output_format_error(f)),
@@ -197,8 +185,7 @@ pub fn render_chart(
     Ok(match opts.output_format().as_str() {
         "txt" => chart_as_text_for_opts(opts, &chart),
         "svg" => chart_as_svg(true, &chart),
-        "csv" => print_csv(chart_as_csv(&chart)),
-        "tsv" => print_tsv(chart_as_csv(&chart)),
+        f @ ("csv" | "tsv") => print_delimited(f, chart_as_csv(&chart)),
         "json" => to_json_text(&chart) + "\n",
         // without the dark variant, since the html is always light
         _ => {

@@ -303,10 +303,12 @@ pub fn locale_encoding_name() -> &'static str {
     }
 }
 
-/// Tables as a flat ODS document (printFods): the styles of all their
-/// cells' kinds, the heading rows and columns each keeps in view, then
-/// the tables, in name order.
-pub fn print_fods(encoding: &str, tables: &BTreeMap<String, Sheet>) -> String {
+/// A named table as a flat ODS document in the locale's encoding
+/// (printFods, given one table): the styles of all its cells' kinds, the
+/// heading rows and columns it keeps in view, then the table.
+pub fn print_fods(name: &str, sheet: Sheet) -> String {
+    let encoding = locale_encoding_name();
+    let tables = &BTreeMap::from([(name.to_string(), sheet)]);
     let cells = tables.values().flat_map(|(_, rows)| rows.iter().flatten());
     let styles: BTreeSet<StyleKey> = cells
         .map(|c| {

@@ -5,7 +5,7 @@
 //! the net totals, all amounts normally positive. Text, csv, tsv, json,
 //! html and fods output, and charts (with --chart, or svg).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::account::AccountType;
 use crate::amount::render::AmountFormat;
@@ -22,7 +22,9 @@ use crate::cli::commands::balance::{
     multi_balance_report_num_header_columns, multi_balance_report_table_as_text,
     multi_balance_row_as_text, multi_balance_totals_rows, report_link_opts, valuation_description,
 };
-use crate::cli::io::{unsupported_output_format_error, warn_if_large_multi_period_report};
+use crate::cli::io::{
+    title_prefix, unsupported_output_format_error, warn_if_large_multi_period_report,
+};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
@@ -37,8 +39,8 @@ use crate::reports::periodic::{
     compound_balance_report,
 };
 use crate::text::Wide;
-use crate::write::csv::{print_csv, print_tsv};
-use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::csv::print_delimited;
+use crate::write::fods::print_fods;
 use crate::write::html::{table_html, table_style};
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{self as spr, Border, Emphasis, Style, horizontal_span};
@@ -260,18 +262,10 @@ pub fn compound_balance_command(
     }
     let layout = layout?;
     Ok(match fmt.as_str() {
-        "csv" => print_csv(compound_balance_report_as_csv(
-            &ropts1,
-            layout,
-            cbc.sections,
-            &cbr,
-        )),
-        "tsv" => print_tsv(compound_balance_report_as_csv(
-            &ropts1,
-            layout,
-            cbc.sections,
-            &cbr,
-        )),
+        "csv" | "tsv" => print_delimited(
+            &fmt,
+            compound_balance_report_as_csv(&ropts1, layout, cbc.sections, &cbr),
+        ),
         "json" => to_json_text(&cbr),
         "html" => compound_balance_report_as_html(&ropts1, layout, cbc.sections, &cbr) + "\n",
         "fods" => {
@@ -284,7 +278,7 @@ pub fn compound_balance_command(
                 cbc.sections,
                 &cbr,
             );
-            print_fods(locale_encoding_name(), &BTreeMap::from([(title, sheet)]))
+            print_fods(&title, sheet)
         }
         _ => compound_balance_report_as_text(&ropts1, layout, &cbr),
     })
@@ -448,11 +442,7 @@ fn compound_balance_report_as_text(
         };
         table = concat_tables(Line::DoubleLine, table, totals);
     }
-    let mut out = if cbr.title.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n\n", cbr.title)
-    };
+    let mut out = title_prefix(&cbr.title);
     out.push_str(&multi_balance_report_table_as_text(ropts, layout, &table));
     out
 }

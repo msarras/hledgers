@@ -27,7 +27,9 @@ use crate::cli::chart::{
     CHART_FLAG, CHART_WIDTH_FLAG, chart_requested, check_chart_format, render_chart,
 };
 use crate::cli::commands::print::round_from_raw_opts;
-use crate::cli::io::{unsupported_output_format_error, warn_if_large_multi_period_report};
+use crate::cli::io::{
+    title_prefix, unsupported_output_format_error, warn_if_large_multi_period_report,
+};
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
 };
@@ -44,7 +46,7 @@ use crate::reports::periodic::multi_balance_report;
 use crate::text::show_ffloat;
 use crate::valuation::{ConversionOp, PriceOracle, ValuationType, amount_value_at_date};
 use crate::write::chart::{BarLayout, Chart, ChartLabel, Mark, Panel, Series, SeriesRole, XAxis};
-use crate::write::csv::{print_csv, print_tsv};
+use crate::write::csv::print_delimited;
 use crate::write::json::double;
 use crate::write::spreadsheet::{self as spr, CellType, add_header_borders};
 use crate::write::table::{
@@ -1677,11 +1679,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let records: Vec<&Holding> = rpt.rows.iter().collect();
     Ok(match fmt.as_str() {
         "txt" => {
-            let mut out = if title.is_empty() {
-                String::new()
-            } else {
-                format!("{title}\n\n")
-            };
+            let mut out = title_prefix(&title);
             if rpt.rows.is_empty() {
                 out.push_str(&format!("{}\n", ropts.translations.tr("(no holdings)")));
                 return Ok(out);
@@ -1736,20 +1734,11 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
                 .collect::<Vec<String>>(),
             ];
             recs.extend(records.iter().map(|h| holding_csv(h)));
-            if fmt == "csv" {
-                print_csv(&recs)
-            } else {
-                print_tsv(&recs)
-            }
+            print_delimited(&fmt, &recs)
         }
         "html" => crate::write::html::titled_table_html(&title, &html()) + "\n",
         "fods" => {
-            let mut sheets = BTreeMap::new();
-            sheets.insert(
-                ropts.translations.tr("Holdings").to_string(),
-                ((1, 0), html()),
-            );
-            crate::write::fods::print_fods(crate::write::fods::locale_encoding_name(), &sheets)
+            crate::write::fods::print_fods(ropts.translations.tr("Holdings"), ((1, 0), html()))
         }
         // upstream adds a newline to toJsonText's
         "json" => {
@@ -1873,11 +1862,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
     let machine = |amts: &[Amount]| show_machine(amts);
     Ok(match fmt.as_str() {
         "txt" => {
-            let mut out = if title.is_empty() {
-                String::new()
-            } else {
-                format!("{title}\n\n")
-            };
+            let mut out = title_prefix(&title);
             if reports.is_empty() {
                 out.push_str(&format!("{}\n", ropts.translations.tr("(no holdings)")));
                 return Ok(out);
@@ -1926,20 +1911,11 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
                     t.xirr.map_or(String::new(), |x| show_ffloat(1, x)),
                 ]);
             }
-            if fmt == "csv" {
-                print_csv(&recs)
-            } else {
-                print_tsv(&recs)
-            }
+            print_delimited(&fmt, &recs)
         }
         "html" => crate::write::html::titled_table_html(&title, &html()) + "\n",
         "fods" => {
-            let mut sheets = BTreeMap::new();
-            sheets.insert(
-                ropts.translations.tr("Holdings").to_string(),
-                ((1, 0), html()),
-            );
-            crate::write::fods::print_fods(crate::write::fods::locale_encoding_name(), &sheets)
+            crate::write::fods::print_fods(ropts.translations.tr("Holdings"), ((1, 0), html()))
         }
         "json" => {
             use crate::write::json::ToJson;

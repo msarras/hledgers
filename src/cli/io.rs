@@ -5,7 +5,7 @@
 
 use std::io::Write;
 
-use super::opts::CliOpts;
+use super::opts::{CliOpts, OUTPUT_FORMATS};
 use crate::platform::find_executables;
 
 /// Write a command's output to standard output, or to the -o file, or with
@@ -217,6 +217,16 @@ pub fn with_title(opts: &CliOpts, body: String) -> String {
     }
 }
 
+/// A title and a blank line, to go before a report, or nothing for no
+/// title.
+pub fn title_prefix(title: &str) -> String {
+    if title.is_empty() {
+        String::new()
+    } else {
+        format!("{title}\n\n")
+    }
+}
+
 /// These items one per line, after the report's title if any: the output
 /// of the commands listing names (T.unlines and writeOutputWithTitle).
 pub fn lines_with_title<S: AsRef<str>>(
@@ -261,21 +271,7 @@ pub fn unsupported_output_format_error(fmt: &str) -> String {
         "Sorry, output format \"{fmt}\" is unrecognised or not yet supported for this kind of report."
     );
     let ext = fmt.rsplit('.').next().unwrap_or("");
-    if fmt.contains('.')
-        && [
-            "txt",
-            "beancount",
-            "csv",
-            "json",
-            "html",
-            "ledger",
-            "sql",
-            "tsv",
-            "fods",
-            "svg",
-        ]
-        .contains(&ext)
-    {
+    if fmt.contains('.') && OUTPUT_FORMATS.contains(&ext) {
         msg.push_str(&format!(
             "\nTo write to a file named {fmt}, use -o (--output-file), not -O (--output-format)."
         ));

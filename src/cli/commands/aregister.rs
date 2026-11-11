@@ -4,8 +4,6 @@
 //! account's running balance; as text laid out like register's, or as
 //! csv, tsv, json, html or fods, or as a chart.
 
-use std::collections::BTreeMap;
-
 use crate::account::{account_name_drop, account_name_to_account_regex, account_summarised_name};
 use crate::amount::render::AmountFormat;
 use crate::amount::{Rounding, styles_with_rounding};
@@ -27,8 +25,8 @@ use crate::reports::account_txns::{
     AccountTransactionsReportItem, account_transactions_report, transaction_register_date,
 };
 use crate::reports::opts::{BalanceAccumulation, ReportOpts, ReportSpec};
-use crate::write::csv::{print_csv, print_tsv};
-use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::csv::print_delimited;
+use crate::write::fods::print_fods;
 use crate::write::html::{escape, format_row, format_title, stylesheet, table_style};
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
@@ -154,16 +152,12 @@ pub fn aregister(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     match fmt.as_str() {
         "txt" => ar.as_text(&items),
         "html" => ar.as_html(&items),
-        "csv" => Ok(print_csv(ar.as_csv(&items)?)),
-        "tsv" => Ok(print_tsv(ar.as_csv(&items)?)),
+        "csv" | "tsv" => Ok(print_delimited(&fmt, ar.as_csv(&items)?)),
         "fods" => {
             let rows = ar
                 .as_spreadsheet(&AmountFormat::ONE_LINE_NO_COST, ar.heading()?, &items)
                 .collect();
-            Ok(print_fods(
-                locale_encoding_name(),
-                &BTreeMap::from([("Aregister".to_string(), ((1, 0), rows))]),
-            ))
+            Ok(print_fods("Aregister", ((1, 0), rows)))
         }
         "json" => Ok(to_json_text(&items)),
         _ => Err(unsupported_output_format_error(&fmt)),

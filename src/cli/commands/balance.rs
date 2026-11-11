@@ -5,7 +5,7 @@
 //! table with a column per period; or a budget report. Text, csv, tsv,
 //! json, html and fods output, and charts (with --chart, or svg).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::account::{
     UNBUDGETED_ACCOUNT_NAME, account_name_drop, account_name_level, parent_account_names,
@@ -25,7 +25,7 @@ use crate::cli::chart::{
     multi_balance_report_as_chart, render_chart,
 };
 use crate::cli::io::{
-    unsupported_output_format_error, warn_if_large_multi_period_report, with_title,
+    title_prefix, unsupported_output_format_error, warn_if_large_multi_period_report, with_title,
 };
 use crate::cli::opts::{
     CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
@@ -45,8 +45,8 @@ use crate::reports::periodic::{
 use crate::reports::string_format::{Component, Field, StringFormat};
 use crate::text::{Wide, format_text};
 use crate::valuation::{ConversionOp, ValuationType};
-use crate::write::csv::{print_csv, print_tsv};
-use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::csv::print_delimited;
+use crate::write::fods::print_fods;
 use crate::write::html::titled_table_html;
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
@@ -139,19 +139,8 @@ pub fn balance(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         fmt.as_str(),
         "txt" | "csv" | "tsv" | "json" | "html" | "fods"
     );
-    let delimited_text = |records: Vec<Vec<String>>| {
-        if fmt == "csv" {
-            print_csv(&records)
-        } else {
-            print_tsv(&records)
-        }
-    };
-    let fods = |name: &str, sheet: spr::Sheet| {
-        print_fods(
-            locale_encoding_name(),
-            &BTreeMap::from([(ropts.translations.tr(name).to_string(), sheet)]),
-        )
-    };
+    let delimited_text = |records: Vec<Vec<String>>| print_delimited(&fmt, records);
+    let fods = |name: &str, sheet: spr::Sheet| print_fods(ropts.translations.tr(name), sheet);
     let one_line = AmountFormat::ONE_LINE_NO_COST;
     if budget {
         warn_if_large_multi_period_report(opts, j)?;
@@ -629,12 +618,7 @@ pub fn multi_balance_report_as_text(
     layout: Layout,
     report: &MultiBalanceReport,
 ) -> String {
-    let title = multi_balance_report_title(ropts, report);
-    let mut out = if title.is_empty() {
-        String::new()
-    } else {
-        format!("{title}\n\n")
-    };
+    let mut out = title_prefix(&multi_balance_report_title(ropts, report));
     let table = multi_balance_report_as_table(ropts, layout, report);
     out.push_str(&multi_balance_report_table_as_text(ropts, layout, &table));
     out
@@ -1701,12 +1685,7 @@ pub fn budget_report_as_text(
     layout: Layout,
     report: &BudgetReport,
 ) -> Result<String, String> {
-    let title = budget_report_title(ropts, report);
-    let mut out = if title.is_empty() {
-        String::new()
-    } else {
-        format!("{title}\n\n")
-    };
+    let mut out = title_prefix(&budget_report_title(ropts, report));
     let table = budget_report_as_table(ropts, layout, report)?;
     out.push_str(&multi_balance_report_table_as_text(ropts, layout, &table));
     Ok(out)

@@ -450,20 +450,8 @@ impl CliOpts {
         if let Some(f) = &self.output_format {
             return f.clone();
         }
-        const FORMATS: [&str; 10] = [
-            "txt",
-            "beancount",
-            "csv",
-            "json",
-            "html",
-            "ledger",
-            "sql",
-            "tsv",
-            "fods",
-            "svg",
-        ];
         if let Some(ext) = self.output_file.as_deref().and_then(file_path_extension)
-            && FORMATS.contains(&ext)
+            && OUTPUT_FORMATS.contains(&ext)
         {
             return ext.to_string();
         }
@@ -474,6 +462,21 @@ impl CliOpts {
         }
     }
 }
+
+/// The output formats known, though not every command writes each one
+/// (outputFormats).
+pub const OUTPUT_FORMATS: [&str; 10] = [
+    "txt",
+    "beancount",
+    "csv",
+    "json",
+    "html",
+    "ledger",
+    "sql",
+    "tsv",
+    "fods",
+    "svg",
+];
 
 /// A file name's extension, without the dot.
 fn file_path_extension(f: &str) -> Option<&str> {

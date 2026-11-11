@@ -1,7 +1,7 @@
 //! The print command (Hledger.Cli.Commands.Print): transactions shown as
 //! journal entries, or with --export, the whole journal.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::amount::render::{AmountFormat, show_amount_b};
 use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
@@ -21,8 +21,8 @@ use crate::write::beancount::{
     beancount_comment_block, beancount_comment_line, beancount_directives,
     beancount_rename_accounts, beancount_transactions, show_transaction_beancount,
 };
-use crate::write::csv::{print_csv, print_tsv};
-use crate::write::fods::{locale_encoding_name, print_fods};
+use crate::write::csv::print_delimited;
+use crate::write::fods::print_fods;
 use crate::write::html::titled_table_html;
 use crate::write::journal::{ItemRenderer, journal_items_as_text};
 use crate::write::json::to_json_text;
@@ -327,11 +327,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
         "csv" | "tsv" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
             let rows = entries_report_as_spreadsheet(&AmountFormat::MACHINE, None, &[], &txns);
-            Ok(if fmt == "csv" {
-                print_csv(rows)
-            } else {
-                print_tsv(rows)
-            })
+            Ok(print_delimited(&fmt, rows))
         }
         "html" | "fods" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
@@ -346,8 +342,7 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
             Ok(if fmt == "html" {
                 titled_table_html("", &rows) + "\n"
             } else {
-                let tables = BTreeMap::from([("Print".to_string(), ((1, 0), rows))]);
-                print_fods(locale_encoding_name(), &tables)
+                print_fods("Print", ((1, 0), rows))
             })
         }
         "json" => Ok(to_json_text(&style_all(

@@ -25,6 +25,18 @@ pub fn print_csv<S: AsRef<str>>(
     out
 }
 
+/// Records as CSV for the csv format, otherwise as TSV.
+pub fn print_delimited<S: AsRef<str>>(
+    fmt: &str,
+    records: impl IntoIterator<Item = impl IntoIterator<Item = S>>,
+) -> String {
+    if fmt == "csv" {
+        print_csv(records)
+    } else {
+        print_tsv(records)
+    }
+}
+
 /// Records as TSV: fields separated by tabs, a tab, newline or carriage
 /// return in a field replaced by a space, a record per line (printTSV).
 pub fn print_tsv<S: AsRef<str>>(
