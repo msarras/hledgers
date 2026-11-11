@@ -4,13 +4,16 @@
 use std::collections::BTreeSet;
 
 use crate::amount::render::{AmountFormat, show_amount_b};
-use crate::amount::{Amount, CommodityStyles, Rounding, Sym, styles_with_rounding};
+use crate::amount::{Amount, CommodityStyles, Sym, styles_with_rounding};
 use crate::cli::anchor::set_account_anchor;
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::io::{unsupported_output_format_error, with_title};
-use crate::cli::opts::{CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, output_format_flag};
+use crate::cli::opts::{
+    CliOpts, LAYOUT_FLAG, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, ROUND_FLAG, layout_from_raw_opts,
+    output_format_flag, round_from_raw_opts,
+};
 use crate::dates::Day;
-use crate::model::render::{PostingLayout, show_account_name, show_transaction};
+use crate::model::render::{show_account_name, show_transaction};
 use crate::model::{
     FEESPLIT_POSTING_TAG, GENERATED_POSTING_TAG, Journal, LOTSPLIT_POSTING_TAG, Posting,
     Transaction, comment_add_tag_next_line, source_pos_pair_pretty,
@@ -103,22 +106,6 @@ pub static MODE: Mode = Mode {
     ..Mode::DEFAULT
 };
 
-/// The --round flag (roundFlag).
-pub const ROUND_FLAG: Flag = Flag::new(
-    &["round"],
-    REQ,
-    "TYPE",
-    "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
-);
-
-/// The --layout flag (layoutFlag).
-pub const LAYOUT_FLAG: Flag = Flag::new(
-    &["layout"],
-    REQ,
-    "hledger1|COL",
-    "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
-);
-
 /// Run the print command (print').
 pub fn print(opts: &CliOpts, mut j: Journal) -> Result<String, String> {
     let raw = &opts.raw;
@@ -156,36 +143,6 @@ pub fn journal_apply_match_opt(opts: &CliOpts, mut j: Journal) -> Result<Journal
         }
     }
     Ok(j)
-}
-
-/// The --round option's rounding, if given (roundFromRawOpts).
-pub fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
-    let mut r = None;
-    for v in opts.raw.list("round") {
-        r = Some(match v {
-            "none" => Rounding::No,
-            "soft" => Rounding::Soft,
-            "hard" => Rounding::Hard,
-            "all" => Rounding::All,
-            _ => {
-                return Err(format!(
-                    "--round's value should be none, soft, hard or all; got: {v}"
-                ));
-            }
-        });
-    }
-    Ok(r)
-}
-
-/// The posting layout of --layout (layoutFromRawOpts).
-pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
-    match opts.raw.string("layout") {
-        None => Ok(PostingLayout::default()),
-        Some("hledger1") => Ok(PostingLayout::Hledger1),
-        Some(s) => s.trim().parse::<usize>().map(PostingLayout::Decimal).map_err(|_| {
-            format!("--layout's value should be 'hledger1' or a positive integer column number; got: {s}")
-        }),
-    }
 }
 
 /// Render the selected transactions, or with --export, the journal

@@ -26,12 +26,12 @@ use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::chart::{
     CHART_FLAG, CHART_WIDTH_FLAG, chart_requested, check_chart_format, render_chart,
 };
-use crate::cli::commands::print::round_from_raw_opts;
 use crate::cli::io::{
     title_prefix, unsupported_output_format_error, warn_if_large_multi_period_report,
 };
 use crate::cli::opts::{
-    CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag, tree_flag,
+    CliOpts, OUTPUT_FILE_FLAG, OUTPUT_VIEW_FLAG, flat_flag, output_format_flag,
+    round_from_raw_opts, tree_flag,
 };
 use crate::dates::{DateSpan, Day, Interval, maybe_day_partition_to_date_spans};
 use crate::decimal::Decimal;

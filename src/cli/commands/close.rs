@@ -12,11 +12,10 @@ use crate::amount::{
     Amount, CommodityStyles, CostBasis, MixedAmount, Rounding, Sym, styles_with_rounding,
 };
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::commands::print::{
-    LAYOUT_FLAG, ROUND_FLAG, layout_from_raw_opts, round_from_raw_opts,
-};
 use crate::cli::io::with_title;
-use crate::cli::opts::CliOpts;
+use crate::cli::opts::{
+    CliOpts, LAYOUT_FLAG, ROUND_FLAG, layout_from_raw_opts, round_from_raw_opts,
+};
 use crate::decimal::Decimal;
 use crate::lots::{lot_subaccount_name, parse_lot_name, show_lot_name};
 use crate::model::render::show_transaction;

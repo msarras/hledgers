@@ -2,9 +2,10 @@
 //! command accepts, and CliOpts, the options of a command run.
 
 use super::args::{Arity, Flag};
-use crate::amount::CommodityStyles;
+use crate::amount::{CommodityStyles, Rounding};
 use crate::console::usage_error;
 use crate::dates::{DateSpan, Day, Interval, fix_smart_date_str_ef, parse_period_expr};
+use crate::model::render::PostingLayout;
 use crate::parse::{PResult, ParseError, Parser};
 use crate::read::{BalancingOpts, InputOpts};
 use crate::reports::opts::RawOpts;
@@ -225,6 +226,52 @@ pub const fn tree_flag(amount_help: bool) -> Flag {
         "list/tree mode: show accounts as a tree"
     };
     Flag::new(&["tree"], NONE, "", help).short(&['t'])
+}
+
+/// The --round flag (roundFlag).
+pub const ROUND_FLAG: Flag = Flag::new(
+    &["round"],
+    REQ,
+    "TYPE",
+    "how much rounding or padding should be done when displaying amounts ?\nnone - show original decimal digits,\n       as in journal (default)\nsoft - just add or remove decimal zeros\n       to match precision\nhard - round posting amounts to precision\n       (can unbalance transactions)\nall  - also round cost amounts to precision\n       (can unbalance transactions)",
+);
+
+/// The --layout flag (layoutFlag).
+pub const LAYOUT_FLAG: Flag = Flag::new(
+    &["layout"],
+    REQ,
+    "hledger1|COL",
+    "how should posting amounts be aligned ?\nhledger1 - right-align amounts, as in hledger 1\nCOL      - align decimal marks at column COL (default: 53)",
+);
+
+/// The --round option's rounding, if given (roundFromRawOpts).
+pub fn round_from_raw_opts(opts: &CliOpts) -> Result<Option<Rounding>, String> {
+    let mut r = None;
+    for v in opts.raw.list("round") {
+        r = Some(match v {
+            "none" => Rounding::No,
+            "soft" => Rounding::Soft,
+            "hard" => Rounding::Hard,
+            "all" => Rounding::All,
+            _ => {
+                return Err(format!(
+                    "--round's value should be none, soft, hard or all; got: {v}"
+                ));
+            }
+        });
+    }
+    Ok(r)
+}
+
+/// The posting layout of --layout (layoutFromRawOpts).
+pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
+    match opts.raw.string("layout") {
+        None => Ok(PostingLayout::default()),
+        Some("hledger1") => Ok(PostingLayout::Hledger1),
+        Some(s) => s.trim().parse::<usize>().map(PostingLayout::Decimal).map_err(|_| {
+            format!("--layout's value should be 'hledger1' or a positive integer column number; got: {s}")
+        }),
+    }
 }
 
 /// Which of the things a journal can declare (accounts, commodities,

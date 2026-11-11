@@ -6,12 +6,10 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
-use super::print::{
-    LAYOUT_FLAG, layout_from_raw_opts, print, transaction_with_mostly_original_postings,
-};
+use super::print::{print, transaction_with_mostly_original_postings};
 use crate::amount::CommodityStyles;
 use crate::cli::args::{Arity, Flag, Mode};
-use crate::cli::opts::CliOpts;
+use crate::cli::opts::{CliOpts, LAYOUT_FLAG, layout_from_raw_opts};
 use crate::model::render::{PostingLayout, show_transaction};
 use crate::model::{
     GENERATED_TRANSACTION_TAG, Journal, SourcePos, Transaction, TransactionModifier,

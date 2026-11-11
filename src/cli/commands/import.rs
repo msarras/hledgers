@@ -5,9 +5,9 @@
 
 use std::io::Write;
 
-use super::print::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::cli::args::{Arity, Flag, Mode};
 use crate::cli::opts::CliOpts;
+use crate::cli::opts::{LAYOUT_FLAG, layout_from_raw_opts};
 use crate::model::render::show_transaction;
 use crate::model::{Journal, Transaction};
 use crate::read::latest::save_latest_dates_for_files;
