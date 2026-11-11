@@ -3,8 +3,10 @@
 //! them with hledger's settings: two-space indents, object keys sorted,
 //! numbers and strings in aeson's notation.
 
+use std::borrow::Cow;
+use std::fmt::Write;
+
 use dashu_int::IBig;
-use dashu_int::ops::UnsignedAbs;
 use serde_json::{Number, Value, json};
 
 use crate::account::Realness;
@@ -23,12 +25,17 @@ use crate::reports::postings::PostingsReportItem;
 /// A value as hledger's JSON output shows it (ToJSON).
 pub trait ToJson {
     fn to_json(&self) -> Value;
+
+    /// The value written by write_value at this indent level.
+    fn write_json(&self, out: &mut String, level: usize) {
+        write_value(out, level, &self.to_json());
+    }
 }
 
 /// The value as pretty-printed JSON, with a final newline (toJsonText).
 pub fn to_json_text(v: &impl ToJson) -> String {
     let mut out = String::new();
-    write_value(&mut out, 0, &v.to_json());
+    v.write_json(&mut out, 0);
     out.push('\n');
     out
 }
@@ -37,41 +44,60 @@ pub fn to_json_text(v: &impl ToJson) -> String {
 /// indented two spaces deeper than the brackets, which are empty with no
 /// items; `": "` after a key.
 fn write_value(out: &mut String, level: usize, v: &Value) {
-    let item = |out: &mut String, i: usize| {
-        out.push_str(if i == 0 { "\n" } else { ",\n" });
-        out.push_str(&"  ".repeat(level + 1));
-    };
-    let close = |out: &mut String, empty: bool, bracket: char| {
-        if !empty {
-            out.push('\n');
-            out.push_str(&"  ".repeat(level));
-        }
-        out.push(bracket);
-    };
     match v {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         // serde_json writes a positive exponent as e+N, aeson as eN
-        Value::Number(n) => out.push_str(&n.to_string().replacen("e+", "e", 1)),
+        Value::Number(n) => match n.as_str().split_once("e+") {
+            Some((mantissa, exp)) => {
+                out.push_str(mantissa);
+                out.push('e');
+                out.push_str(exp);
+            }
+            None => out.push_str(n.as_str()),
+        },
         Value::String(s) => write_string(out, s),
         Value::Array(vs) => {
             out.push('[');
             for (i, v) in vs.iter().enumerate() {
-                item(out, i);
+                item_start(out, level + 1, i);
                 write_value(out, level + 1, v);
             }
-            close(out, vs.is_empty(), ']');
+            close(out, level, vs.is_empty(), ']');
         }
         Value::Object(m) => {
             out.push('{');
             for (i, (k, v)) in m.iter().enumerate() {
-                item(out, i);
+                item_start(out, level + 1, i);
                 write_string(out, k);
                 out.push_str(": ");
                 write_value(out, level + 1, v);
             }
-            close(out, m.is_empty(), '}');
+            close(out, level, m.is_empty(), '}');
         }
+    }
+}
+
+/// An array's or object's item begins on a new line, indented to this
+/// level, after a comma unless it is the first.
+fn item_start(out: &mut String, level: usize, i: usize) {
+    out.push_str(if i == 0 { "\n" } else { ",\n" });
+    indent(out, level);
+}
+
+/// An array's or object's closing bracket, on a new line indented to this
+/// level unless it has no items.
+fn close(out: &mut String, level: usize, empty: bool, bracket: char) {
+    if !empty {
+        out.push('\n');
+        indent(out, level);
+    }
+    out.push(bracket);
+}
+
+fn indent(out: &mut String, level: usize) {
+    for _ in 0..level {
+        out.push_str("  ");
     }
 }
 
@@ -80,17 +106,28 @@ fn write_value(out: &mut String, level: usize, v: &Value) {
 /// characters as `\u00xx`, everything else as it is.
 fn write_string(out: &mut String, s: &str) {
     out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c < '\u{20}' => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
+    // the escaped characters are ASCII: the text between them is copied whole
+    let mut start = 0;
+    for (i, b) in s.bytes().enumerate() {
+        if b != b'"' && b != b'\\' && b >= 0x20 {
+            continue;
+        }
+        out.push_str(&s[start..i]);
+        start = i + 1;
+        match b {
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            _ => {
+                let _ = write!(out, "\\u{b:04x}");
+            }
         }
     }
+    out.push_str(&s[start..]);
     out.push('"');
 }
 
@@ -113,8 +150,11 @@ fn exponent_notation(negative: bool, digits: &str, exponent: i64) -> String {
 /// An integer as aeson-pretty writes it: in exponent notation if its
 /// magnitude exceeds 10^19, otherwise in full (fromNumber's Generic).
 fn integer(n: &IBig) -> Value {
-    let negative = *n < IBig::ZERO;
-    let digits = n.unsigned_abs().to_string();
+    let text = n.to_string();
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(digits) => (true, digits),
+        None => (false, text.as_str()),
+    };
     if digits.len() > 20 || (digits.len() == 20 && digits != "10000000000000000000") {
         let significant = digits.trim_end_matches('0');
         number(&exponent_notation(
@@ -123,7 +163,7 @@ fn integer(n: &IBig) -> Value {
             digits.len() as i64 - 1,
         ))
     } else {
-        number(&n.to_string())
+        number(&text)
     }
 }
 
@@ -183,11 +223,26 @@ impl<T: ToJson> ToJson for [T] {
     fn to_json(&self) -> Value {
         Value::Array(self.iter().map(T::to_json).collect())
     }
+
+    /// Each item converted only when it is written, so that a long list,
+    /// such as a report's, is never held as values all at once.
+    fn write_json(&self, out: &mut String, level: usize) {
+        out.push('[');
+        for (i, v) in self.iter().enumerate() {
+            item_start(out, level + 1, i);
+            v.write_json(out, level + 1);
+        }
+        close(out, level, self.is_empty(), ']');
+    }
 }
 
 impl<T: ToJson> ToJson for Vec<T> {
     fn to_json(&self) -> Value {
         self.as_slice().to_json()
+    }
+
+    fn write_json(&self, out: &mut String, level: usize) {
+        self.as_slice().write_json(out, level);
     }
 }
 
@@ -202,9 +257,9 @@ impl<A: ToJson, B: ToJson> ToJson for (A, B) {
 impl ToJson for Decimal {
     fn to_json(&self) -> Value {
         let d = if self.places() <= 10 {
-            self.clone()
+            Cow::Borrowed(self)
         } else {
-            self.round_to(10)
+            Cow::Owned(self.round_to(10))
         };
         json!({
             "decimalPlaces": d.places(),
