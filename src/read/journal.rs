@@ -177,7 +177,7 @@ pub fn parse_tm_posting_rule(iopts: &InputOpts, s: &str) -> Result<TmPostingRule
         Err(e) => Err(e),
     };
     rule.map_err(|e| match e {
-        Failure::Here(e) => e.pretty("", &text),
+        Failure::Here(e) => e.shown_where_raised(&text).pretty("", &text),
         Failure::Included(msg) | Failure::Unlocated(msg) => msg,
     })
 }

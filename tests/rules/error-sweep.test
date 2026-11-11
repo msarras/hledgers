@@ -173,3 +173,38 @@ hledger: Error: 1:4:
   |    ^
 unexpected newline
 >=1
+
+# ** 19. rewrite shows an --add-posting's error where it was raised, not
+# where its region starts as other errors are shown (it does without
+# hledger's customErrorBundlePretty): an invalid date after the date, the
+# caret line as long as the date but cut at the end of the line; an
+# expression's error after the expression.
+$ hledger -f import/a.j rewrite --add-posting 'x  1 ; date:2024-13-01'
+>2
+hledger: Error: 1:24:
+  |
+1 |  x  1 ; date:2024-13-01
+  |                        ^
+
+This is not a valid date, please fix it.
+>=1
+
+$ hledger -f import/a.j rewrite --add-posting 'x  (1 / (2 - 2))'
+>2
+hledger: Error: 1:17:
+  |
+1 |  x  (1 / (2 - 2))
+  |                 ^^
+
+can't divide by zero
+>=1
+
+$ hledger -f import/a.j rewrite --add-posting 'x  10 EUR/4'
+>2
+hledger: Error: 1:12:
+  |
+1 |  x  10 EUR/4
+  |            ^
+
+this / is read as part of the commodity symbol EUR/; to divide, write a space before it (eg 10 EUR / 4)
+>=1

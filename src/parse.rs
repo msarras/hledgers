@@ -146,6 +146,54 @@ impl ParseError {
         }
     }
 
+    /// Like [`at_region`](ParseError::at_region), but raised at `raised`,
+    /// where the parser was when it found the problem (customFailure).
+    pub fn at_region_raised(
+        src: &str,
+        start: usize,
+        end: usize,
+        raised: usize,
+        msg: &str,
+    ) -> ParseError {
+        match ParseError::at_region(src, start, end, msg) {
+            ParseError::Fancy {
+                offset, end, msgs, ..
+            } => ParseError::Fancy {
+                offset,
+                end,
+                msgs,
+                raised,
+            },
+            e => e,
+        }
+    }
+
+    /// The error shown where it was raised, its caret line as long as its
+    /// region, as megaparsec's errorBundlePretty shows an hledger error
+    /// without the relocation of customErrorBundlePretty (as rewrite shows
+    /// the errors of --add-posting).
+    pub fn shown_where_raised(self, src: &str) -> ParseError {
+        match self {
+            ParseError::Fancy {
+                offset,
+                end,
+                msgs,
+                raised,
+            } => {
+                let n = src.get(offset..end).map_or(1, |s| s.chars().count());
+                let end =
+                    (src[raised..].char_indices().nth(n)).map_or(src.len(), |(i, _)| raised + i);
+                ParseError::Fancy {
+                    offset: raised,
+                    end,
+                    msgs,
+                    raised,
+                }
+            }
+            e => e,
+        }
+    }
+
     /// The error moved by `delta` bytes, for text parsed as part of a
     /// larger text that starts `delta` bytes earlier.
     pub fn shifted(self, delta: usize) -> ParseError {

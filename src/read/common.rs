@@ -63,17 +63,19 @@ pub fn datep(c: &mut Cursor, year: Option<i64>) -> PResult<Day> {
         return Err(c.unexpected(&[Item::label("month or day")]));
     }
     let invalid = |c: &Cursor| {
-        ParseError::at_region(
+        ParseError::at_region_raised(
             c.src,
             start,
+            c.pos,
             c.pos,
             "This date has different separators, please use consistent separators.",
         )
     };
     let not_a_date = |c: &Cursor| {
-        ParseError::at_region(
+        ParseError::at_region_raised(
             c.src,
             start,
+            c.pos,
             c.pos,
             "This is not a valid date, please fix it.",
         )
@@ -94,9 +96,10 @@ pub fn datep(c: &mut Cursor, year: Option<i64>) -> PResult<Day> {
     } else {
         match year {
             Some(y) => valid_date(y, read_digits(d1), read_digits(d2)).ok_or_else(|| not_a_date(c)),
-            None => Err(ParseError::at_region(
+            None => Err(ParseError::at_region_raised(
                 c.src,
                 start,
+                c.pos,
                 c.pos,
                 "This partial date can not be parsed because the current year is unknown.\n\
                  Please make it a full date, or add a default year directive.",

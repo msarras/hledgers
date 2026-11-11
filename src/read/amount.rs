@@ -730,9 +730,10 @@ fn factorp(c: &mut Cursor, ctx: &AmountCtx, depth: usize) -> PResult<Amount> {
                     _ => false,
                 };
                 if looks_divided {
-                    return Err(ParseError::at_region(
+                    return Err(ParseError::at_region_raised(
                         c.src,
                         c.pos - 1,
+                        c.pos,
                         c.pos,
                         &format!(
                             "this / is read as part of the commodity symbol {}; \
@@ -839,7 +840,7 @@ fn multiply_amounts(
 }
 
 fn expr_error(c: &Cursor, (start, end): (usize, usize), msg: &str) -> ParseError {
-    ParseError::at_region(c.src, start, end, msg)
+    ParseError::at_region_raised(c.src, start, end, c.pos, msg)
 }
 
 /// A cost: `@ UNITAMT`, `@@ TOTALAMT`, or the same with the `@` or `@@` in
