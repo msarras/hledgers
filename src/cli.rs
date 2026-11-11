@@ -25,17 +25,7 @@ use opts::CliOpts;
 /// exit status. Errors print as `PROGNAME: Error: MESSAGE` on stderr, status 1.
 pub fn run(args: impl Iterator<Item = OsString>) -> i32 {
     let mut args = args.map(|a| a.to_string_lossy().into_owned());
-    let argv0 = args.next().unwrap_or_default();
-    let progname = argv0
-        .rsplit(std::path::is_separator)
-        .next()
-        .unwrap_or_default();
-    let progname = if cfg!(windows) {
-        progname.strip_suffix(".exe").unwrap_or(progname)
-    } else {
-        progname
-    }
-    .to_string();
+    let progname = crate::console::progname(&args.next().unwrap_or_default());
     let args: Vec<String> = args.collect();
     match dispatch(&progname, &args) {
         Ok(status) => status,

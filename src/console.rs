@@ -25,6 +25,31 @@ pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
     eprintln!("{text}");
 }
 
+/// The program's name, from the path it was run by (getProgName).
+pub fn progname(argv0: &str) -> String {
+    let name = argv0
+        .rsplit(std::path::is_separator)
+        .next()
+        .unwrap_or_default();
+    if cfg!(windows) {
+        name.strip_suffix(".exe").unwrap_or(name)
+    } else {
+        name
+    }
+    .to_string()
+}
+
+/// Exit with an error upstream raises as an exception none of its
+/// handlers catch, as GHC's runtime reports it: after the program name,
+/// without `Error: ` or colour, then two empty lines (for its empty
+/// exception context).
+pub fn uncaught(msg: &str) -> ! {
+    let argv0 = std::env::args_os().next().unwrap_or_default();
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    eprint!("{}: {msg}\n\n\n", progname(&argv0.to_string_lossy()));
+    std::process::exit(1)
+}
+
 /// Print a warning on stderr, after `Warning: `, its first line in bright
 /// bold yellow if colour is on for stderr (warnIO, formatWarning). The
 /// command-line arguments can turn colour on or off.

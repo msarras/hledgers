@@ -469,7 +469,16 @@ fn read_data(f: &str, rules_file: &str, rules: &CsvRules) -> Result<String, Stri
     } else {
         std::fs::read(f).map_err(|e| format!("{f}: openFile: {}", super::io_error_text(&e)))?
     };
-    Ok(super::crlf_to_lf(&decode(encoding, &bytes)?))
+    // the encoding package's decoding errors are exceptions that upstream
+    // catches nowhere
+    let text = decode(encoding, &bytes).map_err(|e| {
+        if e.starts_with("Illegal") {
+            crate::console::uncaught(&e)
+        } else {
+            e
+        }
+    })?;
+    Ok(super::crlf_to_lf(&text))
 }
 
 /// A text encoding named by an encoding rule, as the encoding package
@@ -607,7 +616,8 @@ fn decode(encoding: TextEncoding, b: &[u8]) -> Result<String, String> {
                     .iter()
                     .fold(lead, |v, &w| (v << 6) | u32::from(w & 0x3f));
                 if v > 0x10ffff {
-                    return Err(format!("IllegalRepresentation {:?}", &b[i..i + n]));
+                    let shown: Vec<String> = b[i..i + n].iter().map(u8::to_string).collect();
+                    return Err(format!("IllegalRepresentation [{}]", shown.join(",")));
                 }
                 out.push(from_code(v));
                 i += n;
