@@ -18,7 +18,7 @@ use crate::text::display_width;
 use crate::write::chart::{
     BarLayout, Chart, ChartLabel, Colour, Colouring, MAX_TINTS, Mark, Panel, Series, SeriesRole,
     SummaryKind, XAxis, chart_colouring, colour_hex, is_contra, is_hatched, main_account_type,
-    scale_spans_f64, series_colours, total_is_bar_end,
+    round, scale_spans_f64, series_colours, series_groups, show_value, total_is_bar_end,
 };
 use crate::write::html::escape;
 
@@ -95,11 +95,6 @@ const MAX_COLUMNS: usize = 30;
 /// The hatching pattern's id (hatchId).
 const HATCH_ID: &str = "hledger-chart-hatch";
 
-/// Haskell's round, half to even.
-fn round(x: f64) -> i64 {
-    x.round_ties_even() as i64
-}
-
 /// A coordinate, rounded to one decimal place, without a trailing ".0"
 /// (num).
 fn num(x: f64) -> String {
@@ -145,16 +140,6 @@ fn text_width(t: &str) -> f64 {
 
 fn to_d(q: &Decimal) -> f64 {
     q.to_f64()
-}
-
-/// A quantity shown as an amount in the unit's commodity and style
-/// (showValue).
-fn show_value(unit: &Amount, q: &Decimal) -> String {
-    let a = Amount {
-        quantity: q.clone(),
-        ..unit.clone()
-    };
-    show_amount_b(&AmountFormat::ONE_LINE_NO_COST, &a).s
 }
 
 /// A series to draw, with its css class (DrawSeries).
@@ -618,12 +603,7 @@ fn time_svg(
         .collect();
     let stacks: Vec<Vec<&DrawSeries>> = match layout {
         BarLayout::Grouped => {
-            let mut groups: Vec<usize> = Vec::new();
-            for d in &bars {
-                if !groups.contains(&d.series.group) {
-                    groups.push(d.series.group);
-                }
-            }
+            let groups = series_groups(bars.iter().map(|d| d.series));
             (groups.iter())
                 .map(|k| {
                     bars.iter()
@@ -709,29 +689,7 @@ fn time_svg(
             .join(" · ")
     };
     // gridlines and y tick labels
-    for t in &ticks {
-        let class = if *t == 0.0 { "axis" } else { "grid" };
-        out.leaf(
-            "line",
-            &[
-                ("class", class),
-                ("x1", &num(plotleft)),
-                ("x2", &num(plotright)),
-                ("y1", &num(yof(*t))),
-                ("y2", &num(yof(*t))),
-            ],
-        );
-        out.text(
-            "text",
-            &[
-                ("class", "tick"),
-                ("x", &num(plotleft - 8.0)),
-                ("y", &num(yof(*t) + 5.0)),
-                ("text-anchor", "end"),
-            ],
-            &ticklabel(*t),
-        );
-    }
+    gridlines(out, &ticks, (plotleft, plotright), &yof, &ticklabel);
     // x labels: every k'th period label, with the smallest k that leaves
     // them all room; or date ticks at calendar boundaries
     let shown: Vec<(f64, String)> = match xscale {
@@ -774,10 +732,12 @@ fn time_svg(
                     .filter(|(_, q)| signum(q) == sign)
                     .collect();
                 segs.sort_by_key(|(d, q)| !is_contra(d.series, q));
-                let segs: Vec<(&DrawSeries, &Decimal, String)> = (segs.into_iter())
-                    .map(|(d, q)| (d, q, tooltip(lbl, d.series, q)))
+                let segs: Vec<(&str, &Series, &Decimal)> = (segs.into_iter())
+                    .map(|(d, q)| (d.class.as_str(), d.series, q))
                     .collect();
-                vstack(out, (lo, hi), &yof, x, barwidth, &segs, sign as f64);
+                let tip = |s: &Series, q: &Decimal| tooltip(lbl, s, q);
+                let sign = sign as f64;
+                stack(out, true, (lo, hi), &yof, x, barwidth, &segs, &tip, sign);
             }
         }
     }
@@ -1170,29 +1130,7 @@ fn columns_svg(
     } else {
         0.0
     };
-    for t in &ticks {
-        let class = if *t == 0.0 { "axis" } else { "grid" };
-        out.leaf(
-            "line",
-            &[
-                ("class", class),
-                ("x1", &num(plotleft)),
-                ("x2", &num(plotright)),
-                ("y1", &num(yof(*t))),
-                ("y2", &num(yof(*t))),
-            ],
-        );
-        out.text(
-            "text",
-            &[
-                ("class", "tick"),
-                ("x", &num(plotleft - 8.0)),
-                ("y", &num(yof(*t) + 5.0)),
-                ("text-anchor", "end"),
-            ],
-            &ticklabel(*t),
-        );
-    }
+    gridlines(out, &ticks, (plotleft, plotright), &yof, &ticklabel);
     for (i, r) in rows.iter().enumerate() {
         let x = xcenter(i);
         let name = short_name(&r.label);
@@ -1233,22 +1171,12 @@ fn columns_svg(
         };
         let bx = x - barwidth / 2.0;
         for sign in [1, -1] {
-            let segs: Vec<(DrawSeries, &Decimal, String)> = (r.segs.iter())
+            let segs: Vec<(&str, &Series, &Decimal)> = (r.segs.iter())
                 .filter(|(_, _, q)| signum(q) == sign)
-                .map(|(c, s, q)| {
-                    (
-                        DrawSeries {
-                            class: c.clone(),
-                            series: s,
-                        },
-                        q,
-                        tip(s, q),
-                    )
-                })
+                .map(|(c, s, q)| (c.as_str(), *s, q))
                 .collect();
-            let segs: Vec<(&DrawSeries, &Decimal, String)> =
-                segs.iter().map(|(d, q, t)| (d, *q, t.clone())).collect();
-            vstack(out, (lo, hi), &yof, bx, barwidth, &segs, sign as f64);
+            let sign = sign as f64;
+            stack(out, true, (lo, hi), &yof, bx, barwidth, &segs, &tip, sign);
         }
         if let (Some(tname), Some(q)) = (mmark, row_value(r.index)) {
             let mut parts = vec![r.label.full.clone()];
@@ -1431,76 +1359,29 @@ fn bars_svg(
             );
         }
         for sign in [1.0, -1.0] {
-            let segs: Vec<&(String, &Series, Decimal)> = (r.segs.iter())
+            let segs: Vec<(&str, &Series, &Decimal)> = (r.segs.iter())
                 .filter(|(_, _, q)| signum(q) as f64 == sign)
+                .map(|(c, s, q)| (c.as_str(), *s, q))
                 .collect();
-            let cums: Vec<f64> = segs
-                .iter()
-                .scan(0.0, |acc, (_, _, q)| {
-                    *acc += to_d(q);
-                    Some(*acc)
-                })
-                .collect();
-            let clipped = cums.last().is_some_and(|c| *c > hi || *c < lo);
-            let outer = cums.last().map_or(xof(0.0), |c| xof(*c));
-            let segments = |out: &mut Out| {
-                let mut c0 = 0.0;
-                for (k, ((class, s, q), c1)) in segs.iter().zip(&cums).enumerate() {
-                    let gap = if k > 0 && (xof(*c1) - xof(c0)).abs() >= 4.0 {
-                        2.0
-                    } else {
-                        0.0
-                    };
-                    let xbase = xof(c0) + sign * gap;
-                    let len = (xof(*c1) - xbase) * sign;
-                    let path = bar_path(
-                        false,
-                        xbase,
-                        ymid - thickness / 2.0,
-                        thickness,
-                        sign * len,
-                        false,
-                    );
-                    if len > 0.5 {
-                        let tip = [
-                            r.label.full.clone(),
-                            s.label.full.clone(),
-                            show_value(unit, q),
-                        ]
-                        .join(" · ");
-                        out.tooltip(&tip, |out| {
-                            out.leaf("path", &[("class", &format!("fill {class}")), ("d", &path)]);
-                            if is_hatched(s, q) {
-                                out.leaf(
-                                    "path",
-                                    &[("fill", &format!("url(#{HATCH_ID})")), ("d", &path)],
-                                );
-                            }
-                        });
-                    }
-                    c0 = *c1;
-                }
+            let tip = |s: &Series, q: &Decimal| {
+                [
+                    r.label.full.clone(),
+                    s.label.full.clone(),
+                    show_value(unit, q),
+                ]
+                .join(" · ")
             };
-            rounded_end(
+            stack(
                 out,
-                !clipped,
                 false,
-                xof(0.0),
-                ymid - thickness / 2.0,
+                (lo, hi),
+                &xof,
+                ymid,
                 thickness,
-                outer - xof(0.0),
-                &segments,
+                &segs,
+                &tip,
+                sign,
             );
-            if clipped {
-                clip_mark(
-                    out,
-                    false,
-                    xof(if sign > 0.0 { hi } else { lo }),
-                    ymid,
-                    thickness,
-                    sign,
-                );
-            }
         }
         if let (Some(tname), Some(q)) = (mmark, row_value(r.index)) {
             let mut parts = vec![r.label.full.clone()];
@@ -1532,45 +1413,95 @@ fn bars_svg(
     rows.len() as f64 * ROW_HEIGHT + 32.0
 }
 
-/// One direction of a vertical stacked bar (vstack): segments from zero
-/// outward (up if sign is 1), 2px apart except tiny ones, with a rounded
-/// end; clipped beyond the scale's range, with a triangle there instead.
-fn vstack(
+/// Horizontal lines at the y axis ticks between these x positions, the
+/// zero line as the axis, with the ticks' labels left of them.
+fn gridlines(
     out: &mut Out,
-    (lo, hi): (f64, f64),
+    ticks: &[f64],
+    (plotleft, plotright): (f64, f64),
     yof: &dyn Fn(f64) -> f64,
-    x: f64,
-    width: f64,
-    segs: &[(&DrawSeries, &Decimal, String)],
+    ticklabel: &dyn Fn(f64) -> String,
+) {
+    for t in ticks {
+        let class = if *t == 0.0 { "axis" } else { "grid" };
+        out.leaf(
+            "line",
+            &[
+                ("class", class),
+                ("x1", &num(plotleft)),
+                ("x2", &num(plotright)),
+                ("y1", &num(yof(*t))),
+                ("y2", &num(yof(*t))),
+            ],
+        );
+        out.text(
+            "text",
+            &[
+                ("class", "tick"),
+                ("x", &num(plotleft - 8.0)),
+                ("y", &num(yof(*t) + 5.0)),
+                ("text-anchor", "end"),
+            ],
+            &ticklabel(*t),
+        );
+    }
+}
+
+/// One direction of a stacked bar (vstack, and barsSvg's rows): segments
+/// from zero outward (up or right if sign is 1), 2px apart except tiny
+/// ones, each with its tooltip, with a rounded end; clipped beyond the
+/// scale's range, with a triangle there instead. `at` places a value
+/// along the bar, which is `size` across: from `cross` if vertical,
+/// centred on it if not.
+#[allow(clippy::too_many_arguments)]
+fn stack(
+    out: &mut Out,
+    vertical: bool,
+    (lo, hi): (f64, f64),
+    at: &dyn Fn(f64) -> f64,
+    cross: f64,
+    size: f64,
+    segs: &[(&str, &Series, &Decimal)],
+    tip: &dyn Fn(&Series, &Decimal) -> String,
     sign: f64,
 ) {
+    // the bar's first side across it, and its middle
+    let (side, mid) = if vertical {
+        (cross, cross + size / 2.0)
+    } else {
+        (cross - size / 2.0, cross)
+    };
     let cums: Vec<f64> = segs
         .iter()
-        .scan(0.0, |acc, (_, q, _)| {
+        .scan(0.0, |acc, (_, _, q)| {
             *acc += to_d(q);
             Some(*acc)
         })
         .collect();
     let clipped = cums.last().is_some_and(|c| *c > hi || *c < lo);
-    let outer = cums.last().map_or(yof(0.0), |c| yof(*c));
+    let outer = cums.last().map_or(at(0.0), |c| at(*c));
     let segments = |out: &mut Out| {
         let mut c0 = 0.0;
-        for (k, ((d, q, tip), c1)) in segs.iter().zip(&cums).enumerate() {
-            let gap = if k > 0 && (yof(*c1) - yof(c0)).abs() >= 4.0 {
+        for (k, ((class, s, q), c1)) in segs.iter().zip(&cums).enumerate() {
+            let gap = if k > 0 && (at(*c1) - at(c0)).abs() >= 4.0 {
                 2.0
             } else {
                 0.0
             };
-            let ybase = yof(c0) - sign * gap;
-            let len = (ybase - yof(*c1)) * sign;
-            let path = bar_path(true, x, ybase, width, -sign * len, false);
+            // up is towards a smaller y
+            let (len, path) = if vertical {
+                let ybase = at(c0) - sign * gap;
+                let len = (ybase - at(*c1)) * sign;
+                (len, bar_path(true, side, ybase, size, -sign * len, false))
+            } else {
+                let xbase = at(c0) + sign * gap;
+                let len = (at(*c1) - xbase) * sign;
+                (len, bar_path(false, xbase, side, size, sign * len, false))
+            };
             if len > 0.5 {
-                out.tooltip(tip, |out| {
-                    out.leaf(
-                        "path",
-                        &[("class", &format!("fill {}", d.class)), ("d", &path)],
-                    );
-                    if is_hatched(d.series, q) {
+                out.tooltip(&tip(s, q), |out| {
+                    out.leaf("path", &[("class", &format!("fill {class}")), ("d", &path)]);
+                    if is_hatched(s, q) {
                         out.leaf(
                             "path",
                             &[("fill", &format!("url(#{HATCH_ID})")), ("d", &path)],
@@ -1581,25 +1512,24 @@ fn vstack(
             c0 = *c1;
         }
     };
+    let (a, b) = if vertical {
+        (side, at(0.0))
+    } else {
+        (at(0.0), side)
+    };
     rounded_end(
         out,
         !clipped,
-        true,
-        x,
-        yof(0.0),
-        width,
-        outer - yof(0.0),
+        vertical,
+        a,
+        b,
+        size,
+        outer - at(0.0),
         &segments,
     );
     if clipped {
-        clip_mark(
-            out,
-            true,
-            yof(if sign > 0.0 { hi } else { lo }),
-            x + width / 2.0,
-            width,
-            sign,
-        );
+        let edge = at(if sign > 0.0 { hi } else { lo });
+        clip_mark(out, vertical, edge, mid, size, sign);
     }
 }
 

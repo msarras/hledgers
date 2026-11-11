@@ -189,6 +189,32 @@ pub fn total_is_bar_end(bars: &[&Series], total: &Series) -> bool {
     })
 }
 
+/// The groups of these series, each once, in the order first seen.
+pub fn series_groups<'a>(series: impl IntoIterator<Item = &'a Series>) -> Vec<usize> {
+    let mut groups: Vec<usize> = Vec::new();
+    for s in series {
+        if !groups.contains(&s.group) {
+            groups.push(s.group);
+        }
+    }
+    groups
+}
+
+/// Haskell's round, half to even.
+pub fn round(x: f64) -> i64 {
+    x.round_ties_even() as i64
+}
+
+/// A quantity shown as an amount in the unit's commodity and style
+/// (showValue).
+pub fn show_value(unit: &Amount, q: &Decimal) -> String {
+    let a = Amount {
+        quantity: q.clone(),
+        ..unit.clone()
+    };
+    show_amount_b(&AmountFormat::ONE_LINE_NO_COST, &a).s
+}
+
 /// The main account type (asset, liability, equity, revenue or expense)
 /// of an account type, which is one of those or a subtype of one
 /// (mainAccountType).

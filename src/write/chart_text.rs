@@ -10,8 +10,8 @@ use crate::decimal::Decimal;
 use crate::text::{display_width, fit_text};
 use crate::write::chart::{
     BarLayout, Chart, Colour, Colouring, Mark, Panel, Series, SeriesRole, XAxis, chart_colouring,
-    colour_hex, is_contra, is_hatched, main_account_type, scale_spans, series_colours, series_size,
-    stable_slots_favouring_first, total_is_bar_end,
+    colour_hex, is_contra, is_hatched, main_account_type, round, scale_spans, series_colours,
+    series_groups, series_size, stable_slots_favouring_first, total_is_bar_end,
 };
 
 /// Options for drawing a text chart (TextChartOpts): the width to fill,
@@ -157,11 +157,6 @@ fn plain(t: &str) -> (Style, String) {
     (Style::Plain, t.to_string())
 }
 
-/// Haskell's round, half to even.
-fn round(x: f64) -> i64 {
-    x.round_ties_even() as i64
-}
-
 /// (panelLines)
 fn panel_lines(
     opts: TextChartOpts,
@@ -172,13 +167,7 @@ fn panel_lines(
 ) -> Vec<StyledLine> {
     let TextChartOpts { width, unicode } = opts;
     let unit = &p.unit;
-    let show_value = |q: &Decimal| {
-        let a = Amount {
-            quantity: q.clone(),
-            ..unit.clone()
-        };
-        show_amount_b(&AmountFormat::ONE_LINE_NO_COST, &a).s
-    };
+    let show_value = |q: &Decimal| crate::write::chart::show_value(unit, q);
     let summary_line = (p.summary.iter())
         .map(|su| {
             format!(
@@ -203,12 +192,7 @@ fn panel_lines(
     };
     let fill_char = |i: usize| fillchars[i % fillchars.len()];
     let contrachar = if unicode { '╱' } else { '/' };
-    let mut groups: Vec<usize> = Vec::new();
-    for s in &drawn {
-        if !groups.contains(&s.group) {
-            groups.push(s.group);
-        }
-    }
+    let groups = series_groups(drawn.iter().copied());
     let group_name = |k: usize| p.group_names.get(k).cloned().unwrap_or_default();
     let group_sign = |k: usize| {
         (drawn.iter())
