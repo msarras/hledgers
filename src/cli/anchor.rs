@@ -268,12 +268,16 @@ pub fn header_date_span_cell(
     query: &[String],
     span: &DateSpan,
 ) -> Cell<String> {
+    let cell = Cell::header(&render_period_heading(titles, span));
+    if base.is_none() {
+        return cell;
+    }
     let mut q = date_term(date2, span);
     q.extend(remove_dates(&remove_inacct(query)));
     with_link(
         compose_anchor_with(&[], base, &q),
         "Show the transactions in this period",
-        Cell::header(&render_period_heading(titles, span)),
+        cell,
     )
 }
 
@@ -287,6 +291,10 @@ pub fn date_span_cell_with(
     account: &str,
     span: &DateSpan,
 ) -> Cell<String> {
+    let cell = Cell::new(render_period_heading(titles, span));
+    if base.is_none() {
+        return cell;
+    }
     let mut params = account_params(lo.includes_subs, account);
     params.extend(link_params(lo));
     let mut q = date_term(lo.date2, &link_span(lo, span));
@@ -294,19 +302,23 @@ pub fn date_span_cell_with(
     with_link(
         compose_anchor_with(&params, base, &q),
         "Show transactions affecting this account in this period",
-        Cell::new(render_period_heading(titles, span)),
+        cell,
     )
 }
 
 /// A cell showing a date in an account's row, linking to the account's
 /// register for that day (dateCell).
 pub fn date_cell(base: Option<&str>, query: &[String], account: &str, d: Day) -> Cell<String> {
+    let cell = Cell::new(d.to_string());
+    if base.is_none() {
+        return cell;
+    }
     let mut q = vec![format!("date:{d}")];
     q.extend(remove_dates(&remove_inacct(query)));
     with_link(
         compose_anchor_with(&account_params(true, account), base, &q),
         "Show transactions affecting this account on this date",
-        Cell::new(d.to_string()),
+        cell,
     )
 }
 
@@ -321,13 +333,17 @@ pub fn total_date_span_cell(
     query: &[String],
     span: &DateSpan,
 ) -> Cell<String> {
+    let cell = Cell::new(render_period_heading(titles, span));
+    if base.is_none() {
+        return cell;
+    }
     let mut q = terms.to_vec();
     q.extend(date_term(lo.date2, &link_span(lo, span)));
     q.extend(remove_dates(&remove_inacct(query)));
     with_link(
         compose_anchor_with(&link_params(lo), base, &q),
         &amount_phrase(lo, true),
-        Cell::new(render_period_heading(titles, span)),
+        cell,
     )
 }
 
@@ -341,6 +357,9 @@ pub fn set_account_anchor_with<T>(
     account: &str,
     cell: Cell<T>,
 ) -> Cell<T> {
+    if base.is_none() {
+        return cell;
+    }
     let mut params = account_params(lo.includes_subs, account);
     params.extend(link_params(lo));
     let title = if lo.includes_subs {
