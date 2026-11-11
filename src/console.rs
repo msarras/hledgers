@@ -5,12 +5,25 @@
 
 use std::io::IsTerminal;
 
+/// The advice upstream's top-level handler adds to an error decoding text
+/// (exitUnicode). It ends with a newline, which the message keeps.
+pub const DECODING_ADVICE: &str = "Some text could not be decoded with the system's text encoding, UTF-8\n\
+     (or, the text encoding specified by CSV rules).\n\
+     Please either convert the text to this encoding,\n\
+     or configure a system locale which can decode this text.\n";
+
 /// Print an error message on stderr as upstream's top-level handler does
-/// (handleExit and printError): without trailing white space, after the
-/// program name and `Error: ` (unless it starts with that already), the
-/// first line in bright bold red if colour is on for stderr.
+/// (handleExit and printError): without trailing white space (exitOther),
+/// unless it ends with the decoding advice (exitUnicode), whose newline
+/// makes an empty line when not coloured; after the program name and
+/// `Error: ` (unless it starts with that already), the first line in
+/// bright bold red if colour is on for stderr.
 pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
-    let msg = msg.trim_end();
+    let msg = if msg.ends_with(DECODING_ADVICE) {
+        msg
+    } else {
+        msg.trim_end()
+    };
     let prefix = if msg.starts_with("Error:") {
         ""
     } else {
@@ -18,6 +31,11 @@ pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
     };
     let mut text = format!("{progname}: {prefix}{msg}");
     if use_color_on_stderr(color_option) {
+        // colouring the first line splits the text into lines and joins
+        // them again (modifyFirstLine), dropping a final newline
+        if text.ends_with('\n') {
+            text.pop();
+        }
         let first_end = text.find('\n').unwrap_or(text.len());
         text.insert_str(first_end, "\x1b[39m\x1b[49m\x1b[22m");
         text.insert_str(0, "\x1b[91m\x1b[1m");

@@ -237,3 +237,35 @@ hledger: IllegalCharacter 255
 
 
 >=1
+
+# ** 25. A run script that is not UTF-8 gets the decoding advice, which ends
+# with an empty line.
+$ hledger -f import/a.j run error-sweep/latin1.txt
+>2
+hledger: Error: error-sweep/latin1.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 233)
+Some text could not be decoded with the system's text encoding, UTF-8
+(or, the text encoding specified by CSV rules).
+Please either convert the text to this encoding,
+or configure a system locale which can decode this text.
+
+>=1
+
+# ** 26. A .latest file too.
+$ D=$(mktemp -d) && cp import/bank.csv $D && cp import/bank.csv.rules $D && cp error-sweep/latin1.txt $D/.latest.bank.csv && cd $D && hledger -f bank.csv print --new 2>&1 | sed "s|$D|D|"; cd /; rm -rf $D
+hledger: Error: D/.latest.bank.csv: hGetContents: invalid argument (cannot decode byte sequence starting from 233)
+Some text could not be decoded with the system's text encoding, UTF-8
+(or, the text encoding specified by CSV rules).
+Please either convert the text to this encoding,
+or configure a system locale which can decode this text.
+
+>=0
+
+# ** 27. And the journal file, as before but for the empty line.
+$ D=$(mktemp -d) && cp error-sweep/latin1.txt $D/l.j && hledger -f $D/l.j print 2>&1 | sed "s|$D|D|"; rm -rf $D
+hledger: Error: D/l.j: hGetContents: invalid argument (cannot decode byte sequence starting from 233)
+Some text could not be decoded with the system's text encoding, UTF-8
+(or, the text encoding specified by CSV rules).
+Please either convert the text to this encoding,
+or configure a system locale which can decode this text.
+
+>=0

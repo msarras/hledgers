@@ -243,7 +243,8 @@ fn run_with(ctx: &Context, defaults: Option<&[String]>, opts: &CliOpts) -> R<()>
         let mut commands = Vec::new();
         for f in &args {
             commands.extend(
-                crate::read::read_file_portably(f)?
+                crate::read::read_file_portably(f)
+                    .map_err(crate::read::with_decoding_hint)?
                     .lines()
                     .map(str::to_string),
             );

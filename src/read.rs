@@ -487,12 +487,7 @@ fn crlf_to_lf(text: &str) -> String {
 /// adds when text could not be decoded (exitUnicode).
 pub fn with_decoding_hint(msg: String) -> String {
     if msg.contains("cannot decode byte sequence") {
-        format!(
-            "{msg}\nSome text could not be decoded with the system's text encoding, UTF-8\n\
-             (or, the text encoding specified by CSV rules).\n\
-             Please either convert the text to this encoding,\n\
-             or configure a system locale which can decode this text."
-        )
+        format!("{msg}\n{}", crate::console::DECODING_ADVICE)
     } else {
         msg
     }

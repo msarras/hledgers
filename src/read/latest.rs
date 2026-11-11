@@ -59,7 +59,7 @@ pub fn previous_latest_dates(f: &str) -> Result<Vec<Day>, String> {
     if !super::file_exists(&path) {
         return Ok(Vec::new());
     }
-    let text = super::read_file_portably(&path)?;
+    let text = super::read_file_portably(&path).map_err(super::with_decoding_hint)?;
     let mut dates = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let s = line.trim_matches(crate::text::is_space);
