@@ -299,3 +299,16 @@ $ hledger -f - print
     b                                                 ; x
 
 >=0
+
+# ** 31. Beancount output too.
+<
+2024-01-01 x  ; c 
+  assets:a  1 USD ; d 
+  assets:b
+
+$ hledger -f - print -O beancount
+2024-01-01 * "x"  ; c 
+    Assets:A           1 USD  ; d 
+    Assets:B
+
+>=0

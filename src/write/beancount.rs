@@ -455,7 +455,7 @@ impl PostingBeancount {
                 " ".repeat(pad),
                 amt.s
             );
-            out.extend(line.lines().map(|l| l.trim_end().to_string()));
+            out.extend((line.lines()).map(|l| l.trim_end_matches(is_space).to_string()));
             for md in &mds {
                 out.push(format!(
                     "      {}",

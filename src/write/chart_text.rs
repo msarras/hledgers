@@ -7,7 +7,7 @@ use crate::account::AccountType;
 use crate::amount::Amount;
 use crate::amount::render::{AmountFormat, show_amount_b};
 use crate::decimal::Decimal;
-use crate::text::{display_width, fit_text};
+use crate::text::{display_width, fit_text, is_space, strip};
 use crate::write::chart::{
     BarLayout, Chart, Colour, Colouring, Mark, Panel, Series, SeriesRole, XAxis, chart_colouring,
     colour_hex, is_contra, is_hatched, main_account_type, round, scale_spans, series_colours,
@@ -650,7 +650,7 @@ fn panel_lines(
     let mut drawnstyles: Vec<Style> = Vec::new();
     for l in &rowlines {
         for (st, t) in l {
-            if *st != Style::Plain && !t.trim().is_empty() && !drawnstyles.contains(st) {
+            if *st != Style::Plain && !strip(t).is_empty() && !drawnstyles.contains(st) {
                 drawnstyles.push(*st);
             }
         }
@@ -762,14 +762,14 @@ fn overlay_at(i: isize, new: (Style, String), line: StyledLine) -> StyledLine {
 /// The line without trailing spaces (trimEnd).
 fn trim_end(mut line: StyledLine) -> StyledLine {
     while let Some((_, t)) = line.last() {
-        if t.trim_end().is_empty() {
+        if t.trim_end_matches(is_space).is_empty() {
             line.pop();
         } else {
             break;
         }
     }
     if let Some((_, t)) = line.last_mut() {
-        *t = t.trim_end().to_string();
+        *t = t.trim_end_matches(is_space).to_string();
     }
     line
 }
