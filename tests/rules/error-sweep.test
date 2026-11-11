@@ -137,3 +137,18 @@ hledger: Error: --alias:1:1:
 unexpected '='
 expecting '/'
 >=1
+
+# ** 14. An unknown check name is an error of the argument parse: shown
+# with the final command line, and before an unknown flag after it.
+$ hledger -f import/a.j check nosuch --nosuchflag
+>2
+hledger: Error: Unhandled argument, unknown check name: nosuch
+* while parsing the following args, final command line:
+*  check -f import/a.j nosuch --nosuchflag
+>=1
+
+# ** 15. In run too, as a usage error.
+$ hledger -f import/a.j run -- check nosuch
+>2
+hledger: Error: Unhandled argument, unknown check name: nosuch (use -h to see usage)
+>=1

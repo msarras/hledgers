@@ -279,9 +279,6 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     let raw = cmdargs_parse_with(&is_final_req_val, "final command line", &addons, &finalargs)?;
 
     // 6. select an action and run it
-    if raw.string("command") == Some("check") {
-        commands::check::validate_check_args(&raw)?;
-    }
     // colour on stdout, unless writing to a file (useColorOnStdout)
     let to_file = raw.string("output-file").is_some_and(|f| f != "-");
     let color =

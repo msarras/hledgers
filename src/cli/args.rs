@@ -385,6 +385,9 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
     let mut opts = RawOpts::default();
     let mut queue: std::collections::VecDeque<String> = args.iter().cloned().collect();
     let positional = |opts: &mut RawOpts, a: &str| match mode.args {
+        Some(_) if mode.name == "check" && !super::commands::check::is_check_arg(a) => {
+            Err(format!("Unhandled argument, unknown check name: {a}"))
+        }
         Some(_) => {
             opts.set("args", a);
             Ok(())

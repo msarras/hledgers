@@ -44,17 +44,12 @@ fn parse_check(s: &str) -> Option<usize> {
     CHECKS.iter().position(|c| c.starts_with(&capitalised))
 }
 
-/// Reject an unknown check name while the arguments are parsed, before
-/// the journal is read and can hide it with its own errors (checkmode's
-/// checkArg, reported the way cmdargs reports an argument's error).
-pub fn validate_check_args(raw: &crate::reports::opts::RawOpts) -> Result<(), String> {
-    for a in raw.args() {
-        let name = words_quoted(a).and_then(|ws| ws.into_iter().next());
-        if name.as_deref().and_then(parse_check).is_none() {
-            return Err(format!("Unhandled argument, unknown check name: {a}"));
-        }
-    }
-    Ok(())
+/// Whether an argument names a check (checkmode's checkArg), which the
+/// argument parser asks of each, so that an unknown one is an error of the
+/// parse, before the journal is read and can hide it with its own errors.
+pub fn is_check_arg(a: &str) -> bool {
+    let name = words_quoted(a).and_then(|ws| ws.into_iter().next());
+    name.as_deref().and_then(parse_check).is_some()
 }
 
 /// Run the check command (check): the named checks, in their order. The
