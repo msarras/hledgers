@@ -8,7 +8,7 @@
 //! format, or as a chart.
 
 use crate::i18n::Translations;
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
@@ -391,13 +391,17 @@ impl Flat {
         }
     }
 
-    /// A row's costs converted as its value is (rowCostValuer).
-    fn row_cost_valued(&self, acct: &str, a: Amount) -> Amount {
-        if !self.valuing {
-            return a;
+    /// A row's costs converted as its value is (rowCostValuer); the row's
+    /// value commodity is found once, when first needed.
+    fn row_cost_valuer<'a>(&'a self, acct: &'a str) -> impl Fn(Amount) -> Amount + 'a {
+        let fallback = OnceCell::new();
+        move |a| {
+            if !self.valuing {
+                return a;
+            }
+            let fallback = fallback.get_or_init(|| Self::value_commodity(&self.value_under(acct)));
+            self.cost_valued(fallback.as_ref(), a)
         }
-        let fallback = Self::value_commodity(&self.value_under(acct));
-        self.cost_valued(fallback.as_ref(), a)
     }
 
     /// The lots' cost bases: units times unit cost, converted as a row's
@@ -569,8 +573,8 @@ impl Flat {
             [Some(d)] => Some(*d),
             _ => None,
         };
-        let valued = |a: Amount| self.row_cost_valued(acct, a);
-        let ccosts = self.lot_costs(&clots, valued);
+        let valued = self.row_cost_valuer(acct);
+        let ccosts = self.lot_costs(&clots, &valued);
         let unit_cost = match clots.as_slice() {
             [(_, cb)] => cb
                 .as_ref()
@@ -635,6 +639,7 @@ fn flat_report(
     rounding: Rounding,
     spec: &ReportSpec,
     j: &Journal,
+    collapsed: &OnceCell<Journal>,
 ) -> Result<(Report, Flat), String> {
     let ropts = &spec.opts;
     let q = &spec.query;
@@ -670,10 +675,7 @@ fn flat_report(
                 (None, None) => None,
             };
             if let Some(f) = flow {
-                flows
-                    .entry(k.clone())
-                    .or_default()
-                    .insert(0, (r.date(), -f));
+                flows.entry(k.clone()).or_default().push((r.date(), -f));
             }
             if disposal && a.cost.is_some() && basis_cost.is_some() {
                 let (basis, transacted) = (a.to_cost_basis(), a.to_cost());
@@ -689,6 +691,8 @@ fn flat_report(
             }
         }
     }
+    // each lot account's flows, latest first
+    flows.values_mut().for_each(|fs| fs.reverse());
     for g in rgains.values_mut() {
         *g = g.clone().styled(&styles);
     }
@@ -751,9 +755,12 @@ fn flat_report(
     let mbr = if show_lots {
         multi_balance_report(&bspec, j)?
     } else {
-        let mut collapsed = j.clone();
-        journal_collapse_lot_detail(&mut collapsed);
-        multi_balance_report(&bspec, &collapsed)?
+        let collapsed = collapsed.get_or_init(|| {
+            let mut collapsed = j.clone();
+            journal_collapse_lot_detail(&mut collapsed);
+            collapsed
+        });
+        multi_balance_report(&bspec, collapsed)?
     };
     let empty = ropts.empty;
     let has_rgains =
@@ -797,7 +804,7 @@ fn flat_report(
                     Some(val) => sum_quantities(&val),
                     None => {
                         let lots = flat.lots_of(&n.full);
-                        sum_quantities(&flat.lot_costs(&lots, |a| flat.row_cost_valued(&n.full, a)))
+                        sum_quantities(&flat.lot_costs(&lots, flat.row_cost_valuer(&n.full)))
                     }
                 };
                 (&*n.full, std::cmp::Reverse(k))
@@ -873,20 +880,16 @@ fn flat_report(
 /// gains and XIRR over all lots in the query (totals).
 fn grand_totals(flat: &Flat, top_rows: &[AccountName]) -> Totals {
     let pvc = Flat::value_commodity(&flat.portfolio_value);
-    let lots: Vec<(&AccountName, &Lot)> = top_rows
-        .iter()
-        .flat_map(|a| flat.lots_under(a).into_iter().map(move |l| (a, l)))
+    let units: Vec<Amount> = (top_rows.iter())
+        .flat_map(|r| flat.lots_under(r))
+        .map(|(a, _)| a.clone())
         .collect();
-    let units: Vec<Amount> = sum_amounts(lots.iter().map(|(_, (a, _))| a.clone()).collect())
+    let units: Vec<Amount> = sum_amounts(units)
         .into_iter()
         .filter(|a| !a.looks_zero())
         .collect();
-    let costs: Vec<Amount> = lots
-        .iter()
-        .filter_map(|(r, (a, cb))| {
-            let c = cb.as_ref()?.cost.as_deref()?;
-            Some(flat.row_cost_valued(r, c.clone().multiply(&a.quantity)))
-        })
+    let costs: Vec<Amount> = (top_rows.iter())
+        .flat_map(|r| flat.lot_costs(&flat.lots_under(r), flat.row_cost_valuer(r)))
         .collect();
     let gains = flat
         .portfolio_value
@@ -929,21 +932,23 @@ fn grand_totals(flat: &Flat, top_rows: &[AccountName]) -> Totals {
 
 /// The holdings report (holdingsReport): flat, or in tree mode the flat
 /// report's lines grouped into account sections, with --lots each
-/// position's lots beneath it.
+/// position's lots beneath it. The journal without lot detail is made
+/// once, when first needed, in `collapsed`.
 fn holdings_report(
     show_lots: bool,
     rounding: Rounding,
     spec: &ReportSpec,
     j: &Journal,
+    collapsed: &OnceCell<Journal>,
 ) -> Result<Report, String> {
     if spec.opts.account_list_mode != AccountListMode::Tree {
-        return Ok(flat_report(show_lots, rounding, spec, j)?.0);
+        return Ok(flat_report(show_lots, rounding, spec, j, collapsed)?.0);
     }
     let mut flat_spec = spec.clone();
     flat_spec.opts.account_list_mode = AccountListMode::Flat;
-    let (prpt, pflat) = flat_report(false, rounding, &flat_spec, j)?;
+    let (prpt, pflat) = flat_report(false, rounding, &flat_spec, j, collapsed)?;
     let lots_report = if show_lots {
-        Some(flat_report(true, rounding, &flat_spec, j)?.0)
+        Some(flat_report(true, rounding, &flat_spec, j, collapsed)?.0)
     } else {
         None
     };
@@ -1560,7 +1565,7 @@ pub fn holdings(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         return periodic_holdings(opts, j, rounding);
     }
     let show_lots = opts.raw.bool("lots");
-    let rpt = holdings_report(show_lots, rounding, &opts.spec, j)?;
+    let rpt = holdings_report(show_lots, rounding, &opts.spec, j, &OnceCell::new())?;
     let title = ropts
         .effective_title(
             &ropts
@@ -1763,6 +1768,7 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
     let ropts = &spec.opts;
     let periods = maybe_day_partition_to_date_spans(spec.report_span_both_dates(j)?.1.as_ref());
     let mut reports: Vec<(DateSpan, Report)> = Vec::new();
+    let collapsed = OnceCell::new();
     for spn in periods {
         let Some(e) = spn.end() else { continue };
         let mut pspec = spec.clone();
@@ -1771,7 +1777,10 @@ fn periodic_holdings(opts: &CliOpts, j: &Journal, rounding: Rounding) -> Result<
             Query::Date(DateSpan::exact(None, Some(e))),
         ]);
         pspec.opts.account_list_mode = AccountListMode::Flat;
-        reports.push((spn, holdings_report(false, rounding, &pspec, j)?));
+        reports.push((
+            spn,
+            holdings_report(false, rounding, &pspec, j, &collapsed)?,
+        ));
     }
     let dates: Vec<Day> = reports.iter().map(|(_, r)| r.date).collect();
     let default_title = match (dates.iter().min(), dates.iter().max()) {
