@@ -87,11 +87,16 @@ pub fn accounts(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     let types = |a: &str| j.account_type(a);
 
     // 1. the accounts to show: posted to by the matched postings, whose
-    // tags for this are their accounts' tags only (journalPostingsKeepAccountTagsOnly)
+    // tags for this are their accounts' tags only (journalPostingsKeepAccountTagsOnly);
+    // only a tag: term looks at them
+    let tag_terms = has_tag_term(&nodepthq);
     let matched_used = nub(j.txns.iter().flat_map(|t| {
         t.postings
             .iter()
             .filter(|p| {
+                if !tag_terms {
+                    return nodepthq.matches_posting_extra(&types, PostingRef::new(t, p));
+                }
                 let p1 = Posting {
                     tags: j.inherited_account_tags(&p.account),
                     ..(*p).clone()
@@ -204,6 +209,18 @@ pub fn accounts(opts: &CliOpts, j: &Journal) -> Result<String, String> {
         }
     });
     Ok(lines_with_title(opts, lines))
+}
+
+/// Whether a query has a `tag:` term anywhere in it.
+fn has_tag_term(q: &Query) -> bool {
+    match q {
+        Query::Tag(..) => true,
+        Query::Not(q) => has_tag_term(q),
+        Query::And(qs) | Query::Or(qs) | Query::AnyPosting(qs) | Query::AllPostings(qs) => {
+            qs.iter().any(has_tag_term)
+        }
+        _ => false,
+    }
 }
 
 /// The names without duplicates, in their first occurrences' order.

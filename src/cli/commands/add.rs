@@ -70,7 +70,11 @@ pub fn add(opts: &CliOpts, j: Journal) -> Result<(), String> {
     };
     let mut input = Input::new();
     loop {
+        // the prompts' state to go back to, without a copy of the journal,
+        // which they do not change
+        let journal = std::mem::take(&mut state.journal);
         let start = state.clone();
+        state.journal = journal;
         match transaction_wizard(&mut input, &mut state)? {
             Wizard::Done(t) => {
                 let t = *t;
@@ -82,13 +86,19 @@ pub fn add(opts: &CliOpts, j: Journal) -> Result<(), String> {
                     eprintln!("Saved.");
                 }
                 eprintln!("Starting the next transaction (. or ctrl-D/ctrl-C to quit)");
-                state = start;
+                state = AddState {
+                    journal: std::mem::take(&mut state.journal),
+                    ..start
+                };
                 state.def_date = t.date;
                 state.journal.txns.push(t);
             }
             Wizard::Restart => {
                 eprintln!("Restarting this transaction.");
-                state = start;
+                state = AddState {
+                    journal: std::mem::take(&mut state.journal),
+                    ..start
+                };
             }
             Wizard::Eof => return Ok(()),
         }
@@ -433,12 +443,12 @@ fn description_wizard(
     let mut descriptions: Vec<String> = j.txns.iter().map(|t| t.description.clone()).collect();
     descriptions.sort();
     descriptions.dedup();
+    // the descriptions are distinct, so only those that are payees are left out
+    let new: Vec<String> = (descriptions.into_iter())
+        .filter(|d| payees.binary_search(d).is_err())
+        .collect();
     let mut completions = payees;
-    for d in descriptions {
-        if !completions.contains(&d) {
-            completions.push(d);
-        }
-    }
+    completions.extend(new);
     let s = input.read(
         &format!("Description{}: ", show_default(&def)),
         prev.desc_and_comment.as_deref().unwrap_or(""),
