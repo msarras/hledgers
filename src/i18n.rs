@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::text::{is_space, strip};
+
 /// A language's translations (Translations): messages by English text (or
 /// `context\x04text`), plural forms by English singular, and the rule that
 /// picks a plural form for a count.
@@ -545,7 +547,7 @@ impl PoParser<'_> {
 
     fn space(&mut self) {
         let r = self.rest();
-        self.pos += r.len() - r.trim_start().len();
+        self.pos += r.len() - r.trim_start_matches(is_space).len();
     }
 
     fn hspace(&mut self) {
@@ -578,7 +580,7 @@ impl PoParser<'_> {
                 let line_end = self.rest().find('\n').unwrap_or(self.rest().len());
                 let line = &self.rest()[1..line_end];
                 if let Some(fs) = line.strip_prefix(',') {
-                    flags.extend(fs.split(',').map(|f| f.trim().to_string()));
+                    flags.extend(fs.split(',').map(|f| strip(f).to_string()));
                 }
                 self.pos += line_end;
                 self.space();
@@ -756,7 +758,7 @@ fn build_translations(lang: &str, entries: Vec<PoEntry>) -> Result<Translations,
                 .lines()
                 .filter_map(|l| {
                     let (k, v) = l.split_once(':')?;
-                    Some((k.trim().to_lowercase(), v.trim().to_string()))
+                    Some((strip(k).to_lowercase(), strip(v).to_string()))
                 })
                 .collect()
         })
@@ -765,8 +767,8 @@ fn build_translations(lang: &str, entries: Vec<PoEntry>) -> Result<Translations,
     if let Some(ct) = field("content-type") {
         let charset = ct
             .split(';')
-            .map(|p| p.trim().to_lowercase())
-            .find_map(|p| p.strip_prefix("charset=").map(|c| c.trim().to_string()));
+            .map(|p| strip(p).to_lowercase())
+            .find_map(|p| p.strip_prefix("charset=").map(|c| strip(c).to_string()));
         if let Some(cs) = charset.filter(|c| !["utf-8", "utf8", "charset"].contains(&c.as_str())) {
             return Err(format!(
                 "unsupported charset {cs} (translation catalogs must be UTF-8)"
@@ -887,7 +889,7 @@ impl PluralExpr {
 fn parse_plural_forms(s: &str) -> Option<PluralExpr> {
     let fields: Vec<(&str, &str)> = s
         .split(';')
-        .filter_map(|p| p.split_once('=').map(|(k, v)| (k.trim(), v.trim())))
+        .filter_map(|p| p.split_once('=').map(|(k, v)| (strip(k), strip(v))))
         .collect();
     let get = |k: &str| fields.iter().find(|(n, _)| *n == k).map(|(_, v)| *v);
     get("nplurals")?.parse::<i64>().ok()?;
@@ -912,7 +914,7 @@ impl ExprParser<'_> {
 
     fn space(&mut self) {
         let r = self.rest();
-        self.pos += r.len() - r.trim_start().len();
+        self.pos += r.len() - r.trim_start_matches(is_space).len();
     }
 
     fn at_end(&self) -> bool {
@@ -1018,7 +1020,7 @@ fn is_valid_lang_tag(t: &str) -> bool {
 /// it names no language (normalizeLangTag): POSIX locale names (de_DE.UTF-8
 /// gives de-DE; C and POSIX none), case, Chinese regions as scripts.
 pub fn normalize_lang_tag(raw: &str) -> Option<String> {
-    let value = raw.split(';').next().unwrap_or("").trim();
+    let value = strip(raw.split(';').next().unwrap_or(""));
     let base_end = value.find(['.', '@']).unwrap_or(value.len());
     let (base, suffix) = value.split_at(base_end);
     if base.is_empty() || ["c", "posix"].contains(&base.to_lowercase().as_str()) {
