@@ -282,10 +282,10 @@ on the empty journal:
 
 | transactions | `balance` | `register` | `is` | `bs` | `roi` |
 |---|---:|---:|---:|---:|---:|
-| 0 | 31.0 ms / 6.6 ms (4.7x) | 30.2 ms / 6.5 ms (4.7x) | 31.5 ms / 6.8 ms (4.6x) | 31.3 ms / 6.8 ms (4.6x) | n/a |
-| 100 | 56.2 ms / 11.4 ms (4.9x) | 78.8 ms / 14.9 ms (5.3x) | 56.1 ms / 11.5 ms (4.9x) | 57.4 ms / 11.8 ms (4.9x) | 55.8 ms / 11.7 ms (4.8x) |
-| 1,000 | 170.2 ms / 39.9 ms (4.3x) | 527.0 ms / 86.2 ms (6.1x) | 168.5 ms / 39.3 ms (4.3x) | 168.5 ms / 41.2 ms (4.1x) | 205.6 ms / 40.5 ms (5.1x) |
-| 100,000 | 7.599 s / 1.855 s (4.1x) | 21.559 s / 3.859 s (5.6x) | 7.842 s / 2.099 s (3.7x) | 7.281 s / 2.201 s (3.3x) | 71.338 s / 2.082 s (34.3x) |
+| 0 | 31.2 ms / 6.3 ms (5.0x) | 30.7 ms / 6.0 ms (5.1x) | 31.7 ms / 6.5 ms (4.9x) | 31.6 ms / 6.5 ms (4.9x) | n/a |
+| 100 | 56.3 ms / 10.1 ms (5.6x) | 79.6 ms / 12.9 ms (6.2x) | 56.3 ms / 10.3 ms (5.5x) | 56.5 ms / 10.3 ms (5.5x) | 55.7 ms / 10.6 ms (5.3x) |
+| 1,000 | 170.0 ms / 31.7 ms (5.4x) | 524.5 ms / 67.9 ms (7.7x) | 168.3 ms / 31.5 ms (5.3x) | 168.1 ms / 32.7 ms (5.1x) | 207.4 ms / 32.3 ms (6.4x) |
+| 100,000 | 8.822 s / 1.527 s (5.8x) | 21.828 s / 3.241 s (6.7x) | 8.686 s / 1.480 s (5.9x) | 8.526 s / 1.382 s (6.2x) | 81.158 s / 1.530 s (53.0x) |
 
 A run on an empty journal takes hledgers about 6 ms and hledger 29 ms; of
 those 6 ms, about 2 ms is what starting any program takes on this machine
@@ -299,13 +299,13 @@ alternating runs:
 
 | command | hledger 1.99 | hledgers | speedup | peak RSS hledger | peak RSS hledgers |
 |---|---:|---:|---:|---:|---:|
-| `stats` | 7.094 s | 1.069 s | 6.6x | 563 MB | 291 MB |
-| `balance` | 6.834 s | 1.161 s | 5.9x | 567 MB | 291 MB |
-| `print` | 10.429 s | 1.453 s | 7.2x | 566 MB | 291 MB |
-| `register` | 37.673 s | 6.980 s | 5.4x | 642 MB | 1231 MB |
-| `bal -M` | 116.935 s | 24.401 s | 4.8x | 3687 MB | 3557 MB |
-| `reg -w 120` | 44.826 s | 8.193 s | 5.5x | 642 MB | 1452 MB |
-| `print -O json` | 36.863 s | 10.280 s | 3.6x | 1424 MB | 1696 MB |
+| `stats` | 6.759 s | 1.191 s | 5.7x | 563 MB | 294 MB |
+| `balance` | 7.260 s | 1.141 s | 6.4x | 567 MB | 295 MB |
+| `print` | 12.394 s | 1.486 s | 8.3x | 565 MB | 294 MB |
+| `register` | 43.097 s | 7.481 s | 5.8x | 641 MB | 1274 MB |
+| `bal -M` | 125.908 s | 16.697 s | 7.5x | 3688 MB | 3619 MB |
+| `reg -w 120` | 48.336 s | 8.332 s | 5.8x | 643 MB | 1491 MB |
+| `print -O json` | 40.566 s | 8.008 s | 5.1x | 1424 MB | 501 MB |
 
 The machine is a Xen virtual machine with 16 cores of an Intel Xeon
 E5-2690 v2 (3.0 GHz) and 16 GB of memory, running Debian with Linux 6.12;
@@ -313,7 +313,8 @@ hledger 1.99 is built with GHC from the submodule's commit. Its timings
 vary from run to run, at times by a factor of two, with the host's load.
 
 hledgers does work over independent items on all cores: a large file's
-transactions after its directives are parsed in parts, transactions are
+transactions after its directives are parsed in parts (an included file's
+too), transactions are
 balanced and styled, market prices inferred, and `print`, `register`,
 `aregister` and the balance report render their lines, each in parallel,
 the results in order. Work on fewer than 5000 transactions, postings or
