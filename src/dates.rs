@@ -1345,15 +1345,21 @@ pub fn interval_boundary_before(i: &Interval, d: Day) -> Result<Day, String> {
 }
 
 /// Boundaries before `end`, then the first one not before it
-/// (takeUntilFails). Boundaries that stop increasing, as with a count of 0,
-/// where upstream would go on forever, end them.
+/// (takeUntilFails), a boundary equal to the one before dropped
+/// (dedupeAdjacent): the 0th weekday of a month gives the first twice.
+/// Boundaries that stop increasing otherwise, as with a count of 0, where
+/// upstream would go on forever, end them.
 fn until(end: Day, mut bs: impl Iterator<Item = Day>) -> impl Iterator<Item = Day> {
     let mut last: Option<Day> = None;
     std::iter::from_fn(move || {
         if last.is_some_and(|l| l >= end) {
             return None;
         }
-        let b = bs.next().filter(|b| last.is_none_or(|l| *b > l))?;
+        let mut b = bs.next()?;
+        if last == Some(b) {
+            b = bs.next()?;
+        }
+        let b = Some(b).filter(|b| last.is_none_or(|l| *b > l))?;
         last = Some(b);
         Some(b)
     })

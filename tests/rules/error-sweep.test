@@ -69,3 +69,23 @@ hledger: Error: data file "./import/nosuch.j" was not found.
 Please create it first, eg with "hledger add" or a text editor.
 Or, specify an existing data file with -f or $LEDGER_FILE.
 >=1
+
+# ** 8. A report interval of the 0th weekday of each month (the week before
+# the first) gives a period per month, the first boundary computed twice
+# but used once.
+<
+2024-01-01 x
+    a   1
+    b
+
+2024-03-15 y
+    a   2
+    b
+
+$ hledger -f - bal -p 'every 0th mon' -N
+Balance changes in 2023-11-27..2024-03-24:
+
+   || 2023-11-27..2023-12-24  2023-12-25..2024-01-28  2024-01-29..2024-02-25  2024-02-26..2024-03-24 
+===++================================================================================================
+ a ||                      0                       1                       0                       2 
+ b ||                      0                      -1                       0                      -2 
