@@ -269,3 +269,18 @@ Please either convert the text to this encoding,
 or configure a system locale which can decode this text.
 
 >=0
+
+# ** 28. A UTF-32 code beyond U+10FFFF is chr's error, with the code.
+$ hledger -f error-sweep/beyond.csv print
+>2
+hledger: Error: Prelude.chr: bad argument: 1114112
+>=1
+
+# ** 29. A surrogate code is read, as U+FFFD.
+$ D=$(mktemp -d) && cp error-sweep/surrogate.csv $D && cp error-sweep/surrogate.csv.rules $D && hledger -f $D/surrogate.csv print 2>&1 | sed "s|$D|D|"; rm -rf $D
+hledger: Error: D/surrogate.csv:1:
+1 | 20�
+
+This CSV record has less than two fields.
+Perhaps the separator is wrong (it can be set with a separator rule).
+>=0

@@ -674,7 +674,12 @@ fn decode(encoding: TextEncoding, b: &[u8]) -> Result<String, String> {
                 .iter()
                 .map(|&w| {
                     let v = if le { w.swap_bytes() } else { w };
-                    char::from_u32(v).ok_or_else(|| "Prelude.chr: bad argument".to_string())
+                    // chr takes a surrogate, which the text keeps as U+FFFD
+                    match v {
+                        0xd800..=0xdfff => Ok('\u{fffd}'),
+                        _ => char::from_u32(v)
+                            .ok_or_else(|| format!("Prelude.chr: bad argument: {v}")),
+                    }
                 })
                 .collect()
         }
