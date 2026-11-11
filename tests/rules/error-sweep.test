@@ -312,3 +312,16 @@ $ hledger -f - print -O beancount
     Assets:B
 
 >=0
+
+# ** 32. A Ledger-style lot note keeps them.
+<
+2024-01-01 x
+  a  10 AAPL (note ) @ $1
+  b
+
+$ hledger -f - print
+2024-01-01 x
+    a                                             10 AAPL {"note "} @ $1
+    b
+
+>=0

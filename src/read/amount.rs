@@ -18,6 +18,7 @@ use crate::amount::{
 use crate::decimal::Decimal;
 use crate::model::{BalanceAssertion, Commodity, SourcePos};
 use crate::parse::{Cursor, Item, PResult, ParseError, is_non_newline_space};
+use crate::text::is_space;
 
 /// The kinds of amount, which are parsed a little differently
 /// (AmountParseKind).
@@ -1086,7 +1087,7 @@ fn lot_notep(c: &mut Cursor) -> PResult<Arc<str>> {
     if !c.eat(')') {
         return Err(c.unexpected(&[Item::tokens(")")]));
     }
-    Ok(Arc::from(note.trim_end().replace('"', "")))
+    Ok(Arc::from(note.trim_end_matches(is_space).replace('"', "")))
 }
 
 /// An amount read from text with no journal context: the whole text, with

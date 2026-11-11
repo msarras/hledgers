@@ -124,7 +124,11 @@ impl ParseError {
         match self {
             e @ ParseError::Trivial { .. } => {
                 let text = e.text();
-                ParseError::fail_at(src, e.offset(), text.trim_end())
+                ParseError::fail_at(
+                    src,
+                    e.offset(),
+                    text.trim_end_matches(crate::text::is_space),
+                )
             }
             e => e,
         }
