@@ -4,6 +4,7 @@
 //! topics, the tldr example pages, and each builtin command's help text.
 
 use crate::text::hs_lines;
+use std::borrow::Cow;
 use std::process::Command;
 
 /// A manual's file in the reference source's embeddedfiles directory.
@@ -80,12 +81,12 @@ const TLDRS: [(&str, &str); 11] = [
 
 /// A tool's manual in one format (0 man, 1 text, 2 info), or a not found
 /// message (manualMan, manualTxt, manualInfo).
-fn manual(tool: &str, format: usize) -> String {
+fn manual(tool: &str, format: usize) -> Cow<'static, str> {
     match MANUALS.iter().find(|(t, _)| *t == tool) {
-        Some((_, m)) => m[format].to_string(),
+        Some((_, m)) => Cow::Borrowed(m[format]),
         None => {
             let what = ["man page", "text manual", "info manual"][format];
-            format!("No {what} found for tool: {tool}")
+            Cow::Owned(format!("No {what} found for tool: {tool}"))
         }
     }
 }
@@ -173,17 +174,18 @@ pub enum TopicResolution {
     Ambiguous(Vec<(String, usize)>),
 }
 
-/// The topic, trimmed of spaces and lower-cased, and the topics whose names
-/// it matches in this way, without repeats.
+/// The topic, trimmed of spaces and lower-cased, and those of these topics
+/// whose names it matches in this way, without repeats.
 fn topics_where(
+    topics: &[(String, &'static str, String, usize)],
     topic: &str,
     matches: impl Fn(&str, &str) -> bool,
 ) -> Vec<(String, &'static str, String, usize)> {
     let t = topic.trim_matches(' ').to_lowercase();
     let mut found: Vec<_> = Vec::new();
-    for tp in manual_topics() {
-        if matches(&tp.0.to_lowercase(), &t) && !found.contains(&tp) {
-            found.push(tp);
+    for tp in topics {
+        if matches(&tp.0.to_lowercase(), &t) && !found.contains(tp) {
+            found.push(tp.clone());
         }
     }
     found
@@ -193,9 +195,10 @@ fn topics_where(
 /// name, else a unique prefix, else a unique infix; listing every infix
 /// match when ambiguous (resolveManualTopic).
 pub fn resolve_manual_topic(topic: &str) -> TopicResolution {
-    let exacts = topics_where(topic, |n, t| n == t);
-    let prefixes = topics_where(topic, |n, t| n.starts_with(t));
-    let infixes = topics_where(topic, |n, t| n.contains(t));
+    let topics = manual_topics();
+    let exacts = topics_where(&topics, topic, |n, t| n == t);
+    let prefixes = topics_where(&topics, topic, |n, t| n.starts_with(t));
+    let infixes = topics_where(&topics, topic, |n, t| n.contains(t));
     let name_level = |tps: Vec<(String, &str, String, usize)>| {
         TopicResolution::Ambiguous(tps.into_iter().map(|(n, _, _, l)| (n, l)).collect())
     };
@@ -213,7 +216,7 @@ pub fn resolve_manual_topic(topic: &str) -> TopicResolution {
 /// all of them for the empty topic (manualTopicsMatching).
 pub fn manual_topics_matching(topic: &str) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
-    for (n, _, _, l) in topics_where(topic, |n, t| n.contains(t)) {
+    for (n, _, _, l) in topics_where(&manual_topics(), topic, |n, t| n.contains(t)) {
         if !out.contains(&(n.clone(), l)) {
             out.push((n, l));
         }
@@ -265,7 +268,8 @@ fn with_manual_file(
 ) -> Result<(), String> {
     let path = std::env::temp_dir().join(format!("hledger-{tool}{}.{ext}", std::process::id()));
     let path_str = path.to_string_lossy().into_owned();
-    std::fs::write(&path, manual(tool, format) + "\n").map_err(|e| format!("{path_str}: {e}"))?;
+    std::fs::write(&path, (manual(tool, format) + "\n").as_bytes())
+        .map_err(|e| format!("{path_str}: {e}"))?;
     let result = call_command(&cmd(&single_quote_if_needed(&path_str)), &[]);
     let _ = std::fs::remove_file(&path);
     result
