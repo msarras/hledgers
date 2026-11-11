@@ -129,14 +129,15 @@ fn contains_ignoring_case(text: &str, lower: &str) -> bool {
                 .all(|(t, l)| t.to_ascii_lowercase() == *l)
         });
     }
-    let folded: Vec<char> = (text.chars())
-        .map(|c| match c {
-            '\u{17F}' => 's',
-            '\u{212A}' => 'k',
-            c => c.to_ascii_lowercase(),
-        })
-        .collect();
-    (folded.windows(lower.len())).any(|w| w.iter().zip(lower).all(|(c, l)| *c == *l as char))
+    let fold = |c: char| match c {
+        '\u{17F}' => 's',
+        '\u{212A}' => 'k',
+        c => c.to_ascii_lowercase(),
+    };
+    (text.char_indices()).any(|(i, _)| {
+        let mut folded = text[i..].chars().map(fold);
+        lower.iter().all(|l| folded.next() == Some(*l as char))
+    })
 }
 
 impl Regexp {

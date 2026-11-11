@@ -713,12 +713,6 @@ pub fn drop_cli_specific_opts(args: &[String]) -> Vec<String> {
     out
 }
 
-/// The arguments without --conf FILE, --conf=FILE, --no-conf and -n, for
-/// a config file's general arguments (dropConfFlags).
-pub fn drop_conf_flags(args: &[String]) -> Vec<String> {
-    drop_cli_specific_opts(args)
-}
-
 /// The arguments without the flags (and their values) that a mode does not
 /// accept, written in full (dropUnsupportedOpts).
 pub fn drop_unsupported_opts(mode: &'static Mode, args: &[String]) -> Vec<String> {

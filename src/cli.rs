@@ -134,7 +134,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
 
     // 3. identify a command name if possible
     let confallgenargs = replace_numeric_flags(&conf.lookup("general"));
-    let confothergenargs = args::drop_conf_flags(&confallgenargs);
+    let confothergenargs = args::drop_cli_specific_opts(&confallgenargs);
     let confdroppedgenargs = list_difference(&confallgenargs, &confothergenargs);
     let cmdarg = clicmdarg;
     let nocmdprovided = cmdarg.is_empty();
@@ -543,7 +543,7 @@ pub fn write_command_output(opts: &CliOpts, paged: bool, out: &str) -> Result<()
 /// (maybeWarnUnknownValuationCommodity).
 pub fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.journal_file_paths()?;
-    let iopts = journal_input_opts(opts, &paths)?;
+    let iopts = journal_input_opts(opts, &paths);
     let mut j = crate::read::read_journal_files(&iopts, &paths)?;
     journal_transform(opts, &mut j)?;
     maybe_warn_unknown_valuation_commodity(opts, &j);
@@ -554,7 +554,7 @@ pub fn with_journal(opts: &CliOpts) -> Result<Journal, String> {
 /// exist yet, for the commands that write to it (withPossibleJournal).
 pub fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
     let paths = opts.possible_journal_file_paths()?;
-    let iopts = journal_input_opts(opts, &paths)?;
+    let iopts = journal_input_opts(opts, &paths);
     let mut j = crate::read::read_possible_journal_files(&iopts, &paths)?;
     journal_transform(opts, &mut j)?;
     Ok(j)
@@ -562,15 +562,12 @@ pub fn with_possible_journal(opts: &CliOpts) -> Result<Journal, String> {
 
 /// The input options for reading these journal files: the data directory
 /// is beside the first.
-pub fn journal_input_opts(
-    opts: &CliOpts,
-    paths: &[String],
-) -> Result<crate::read::InputOpts, String> {
+pub fn journal_input_opts(opts: &CliOpts, paths: &[String]) -> crate::read::InputOpts {
     let mut iopts = opts.input.clone();
     iopts.journal_dir = paths.first().map(|p| {
         crate::read::rules::take_directory(crate::read::journal::split_reader_prefix(p).1)
     });
-    Ok(iopts)
+    iopts
 }
 
 /// The journal transformed for the report after reading (journalTransform):

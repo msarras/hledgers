@@ -1373,8 +1373,8 @@ impl<'a> JournalParser<'a, '_> {
             None => self.iopts.today,
         };
         let expr_start = self.c.pos;
-        let expr = accountnamep(&mut self.c, false).map_err(|_| self.c.unexpected(&[]))?;
-        let expr_end = expr_start + c_len(&self.c.src[expr_start..], &expr);
+        accountnamep(&mut self.c, false).map_err(|_| self.c.unexpected(&[]))?;
+        let expr_end = self.c.pos;
         let excerpt = &self.c.src[expr_start..expr_end];
         let mut p = Parser::new(excerpt);
         let (interval, span) = periodexprp(&mut p, refdate)
@@ -1597,14 +1597,6 @@ fn apply_parent_and_option_aliases(st: &ParseState, a: &str) -> R<String> {
 fn alias_or_fail(aliases: &[AccountAlias], a: &str) -> Result<String, String> {
     account_name_apply_aliases(aliases, a)
         .map_err(|e| format!("problem in account alias applied to {a}: {e}"))
-}
-
-/// The byte length of an account name parsed from the start of `src`
-/// (spaces inside it may have been tabs, which read as spaces).
-fn c_len(src: &str, parsed: &str) -> usize {
-    src.char_indices()
-        .nth(parsed.chars().count())
-        .map_or(src.len(), |(i, _)| i)
 }
 
 /// Whether text starts with these words, separated by one or more spaces
