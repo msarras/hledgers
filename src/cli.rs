@@ -488,48 +488,44 @@ pub type JournalCommand = fn(&CliOpts, &mut Journal) -> Result<String, String>;
 /// output as text, and whether that output may go through a pager, as the
 /// reports upstream writes with writeOutputLazyText.
 pub fn journal_command(name: &str) -> Option<(JournalCommand, bool)> {
-    let run: JournalCommand = match name {
-        "accounts" => |o, j| commands::accounts::accounts(o, j),
-        "activity" => |o, j| commands::activity::activity(o, j),
-        "aregister" => |o, j| commands::aregister::aregister(o, j),
-        "balance" => |o, j| commands::balance::balance(o, j),
-        "balancesheet" => |o, j| compound(&commands::compound::BALANCESHEET, o, j),
-        "balancesheetequity" => |o, j| compound(&commands::compound::BALANCESHEETEQUITY, o, j),
-        "cashflow" => |o, j| compound(&commands::compound::CASHFLOW, o, j),
-        "incomestatement" => |o, j| compound(&commands::compound::INCOMESTATEMENT, o, j),
-        "codes" => |o, j| commands::codes::codes(o, std::mem::take(j)),
-        "commodities" => |o, j| commands::commodities::commodities(o, j),
-        "descriptions" => |o, j| commands::descriptions::descriptions(o, std::mem::take(j)),
-        "diff" => |o, j| commands::diff::diff(o, j),
-        "notes" => |o, j| commands::notes::notes(o, std::mem::take(j)),
-        "payees" => |o, j| commands::payees::payees(o, j),
-        "print" => |o, j| commands::print::print(o, std::mem::take(j)),
-        "register" => |o, j| commands::register::register(o, j),
-        "check" => |o, j| commands::check::check(o, j),
-        "close" => |o, j| commands::close::close(o, j),
-        "files" => |o, j| commands::files::files(o, j),
-        "holdings" => |o, j| commands::holdings::holdings(o, j),
-        "prices" => |o, j| commands::prices::prices(o, j),
-        "rewrite" => |o, j| commands::rewrite::rewrite(o, std::mem::take(j)),
-        "roi" => |o, j| commands::roi::roi(o, j),
-        "stats" => |o, j| commands::stats::stats(o, std::mem::take(j)),
-        "tags" => |o, j| commands::tags::tags(o, std::mem::take(j)),
-        "transactions" => |o, j| commands::transactions::transactions(o, std::mem::take(j)),
+    use commands::compound::{BALANCESHEET, BALANCESHEETEQUITY, CASHFLOW, INCOMESTATEMENT};
+    use std::mem::take;
+    let run: (JournalCommand, bool) = match name {
+        "accounts" => (|o, j| commands::accounts::accounts(o, j), false),
+        "activity" => (|o, j| commands::activity::activity(o, j), false),
+        "aregister" => (|o, j| commands::aregister::aregister(o, j), true),
+        "balance" => (|o, j| commands::balance::balance(o, j), true),
+        "balancesheet" => (|o, j| compound(&BALANCESHEET, o, j), true),
+        "balancesheetequity" => (|o, j| compound(&BALANCESHEETEQUITY, o, j), true),
+        "cashflow" => (|o, j| compound(&CASHFLOW, o, j), true),
+        "incomestatement" => (|o, j| compound(&INCOMESTATEMENT, o, j), true),
+        "codes" => (|o, j| commands::codes::codes(o, take(j)), false),
+        "commodities" => (|o, j| commands::commodities::commodities(o, j), false),
+        "descriptions" => (
+            |o, j| commands::descriptions::descriptions(o, take(j)),
+            false,
+        ),
+        "diff" => (|o, j| commands::diff::diff(o, j), false),
+        "notes" => (|o, j| commands::notes::notes(o, take(j)), false),
+        "payees" => (|o, j| commands::payees::payees(o, j), false),
+        "print" => (|o, j| commands::print::print(o, take(j)), true),
+        "register" => (|o, j| commands::register::register(o, j), true),
+        "check" => (|o, j| commands::check::check(o, j), false),
+        "close" => (|o, j| commands::close::close(o, j), false),
+        "files" => (|o, j| commands::files::files(o, j), false),
+        "holdings" => (|o, j| commands::holdings::holdings(o, j), true),
+        "prices" => (|o, j| commands::prices::prices(o, j), false),
+        "rewrite" => (|o, j| commands::rewrite::rewrite(o, take(j)), false),
+        "roi" => (|o, j| commands::roi::roi(o, j), false),
+        "stats" => (|o, j| commands::stats::stats(o, take(j)), false),
+        "tags" => (|o, j| commands::tags::tags(o, take(j)), false),
+        "transactions" => (
+            |o, j| commands::transactions::transactions(o, take(j)),
+            true,
+        ),
         _ => return None,
     };
-    let paged = [
-        "aregister",
-        "balance",
-        "balancesheet",
-        "balancesheetequity",
-        "cashflow",
-        "incomestatement",
-        "holdings",
-        "print",
-        "register",
-        "transactions",
-    ];
-    Some((run, paged.contains(&name)))
+    Some(run)
 }
 
 /// Write a command's output, through a pager if it may be paged.
