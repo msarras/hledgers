@@ -302,17 +302,6 @@ impl Posting {
             a.amount = a.amount.clone().styled(styles);
         }
     }
-
-    /// The commodities of the amounts, without the missing amount marker
-    /// (postingCommodities).
-    pub fn commodities(&self) -> Vec<Sym> {
-        self.amount
-            .amounts_raw()
-            .iter()
-            .filter(|a| !a.is_missing())
-            .map(|a| a.commodity)
-            .collect()
-    }
 }
 
 /// Two comments joined with a comma (commentJoin).

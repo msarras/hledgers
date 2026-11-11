@@ -588,26 +588,23 @@ fn journal_postings_add_account_tags(j: &mut Journal) {
     if j.declared_account_tags.is_empty() {
         return;
     }
+    // each account's tags are found once, then added on all cores
     let mut inherited: BTreeMap<AccountName, Vec<Tag>> = BTreeMap::new();
-    for t in &mut j.txns {
+    for p in j.txns.iter().flat_map(|t| &t.postings) {
+        if !inherited.contains_key(&p.account) {
+            inherited.insert(p.account.clone(), j.inherited_account_tags(&p.account));
+        }
+    }
+    crate::par::for_each_mut(j.txns.len(), &mut j.txns, |t| {
         for p in &mut t.postings {
-            let tags = inherited.entry(p.account.clone()).or_insert_with(|| {
-                let mut tags: Vec<Tag> = Vec::new();
-                let a = &*p.account;
-                for name in std::iter::once(a).chain(crate::account::parent_account_names(a)) {
-                    for tag in j.declared_account_tags.get(name).into_iter().flatten() {
-                        if !tags.contains(tag) {
-                            tags.push(tag.clone());
-                        }
-                    }
-                }
-                tags
-            });
+            let tags = &inherited[&p.account];
             if !tags.is_empty() {
+                // room for exactly these, rather than the four a first push makes
+                p.tags.reserve_exact(tags.len());
                 p.add_tags(tags.iter().cloned());
             }
         }
-    }
+    });
 }
 
 /// Tag equity conversion postings and redundant costs, and with
@@ -690,19 +687,20 @@ fn journal_postings_add_commodity_tags(j: &mut Journal) {
     if j.declared_commodity_tags.values().all(Vec::is_empty) {
         return;
     }
-    for t in &mut j.txns {
+    let declared = &j.declared_commodity_tags;
+    crate::par::for_each_mut(j.txns.len(), &mut j.txns, |t| {
         for p in &mut t.postings {
-            let tags: Vec<Tag> = p
-                .commodities()
-                .iter()
-                .flat_map(|c| j.declared_commodity_tags.get(c).into_iter().flatten())
+            let tags: Vec<Tag> = (p.amount.amounts_raw().iter())
+                .filter(|a| !a.is_missing())
+                .flat_map(|a| declared.get(&a.commodity).into_iter().flatten())
                 .cloned()
                 .collect();
             if !tags.is_empty() {
+                p.tags.reserve_exact(tags.len());
                 p.add_tags(tags);
             }
         }
-    }
+    });
 }
 
 /// Infer market prices from the costs in transactions
