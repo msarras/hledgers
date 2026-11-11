@@ -197,14 +197,15 @@ fn expand_path(p: &str) -> Result<String, String> {
     }
 }
 
-/// A config file read, parsed and checked (readConfFile).
+/// A config file read, parsed and checked (readConfFile). Text that is not
+/// UTF-8 is an error, as GHC's readFile gives it.
 fn read_conf_file(f: &str) -> Result<(Conf, Option<String>), String> {
     if !file_exists(f) {
         return Err(format!("{f} does not exist"));
     }
     let bytes = std::fs::read(f)
         .map_err(|e| format!("{f}: openFile: {}", crate::read::io_error_text(&e)))?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let text = crate::read::decode_utf8(bytes).map_err(|e| format!("{f}: hGetContents: {e}"))?;
     let sections = parse_conf(&text).map_err(|e| e.pretty(f, &text))?;
     let conf = Conf {
         file: f.to_string(),

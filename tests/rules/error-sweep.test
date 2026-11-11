@@ -89,3 +89,9 @@ Balance changes in 2023-11-27..2024-03-24:
 ===++================================================================================================
  a ||                      0                       1                       0                       2 
  b ||                      0                      -1                       0                      -2 
+
+# ** 9. A config file that is not UTF-8 is an error, without the advice
+# given for other files (fixtures in error-sweep/).
+$ D=$(mktemp -d) && cp error-sweep/latin1.txt $D/c.conf && hledger --conf $D/c.conf -f import/a.j print 2>&1 | sed "s|$D|D|"; rm -rf $D
+hledger: Error: D/c.conf: hGetContents: invalid argument (cannot decode byte sequence starting from 233)
+(hledger 1.99 could not read this config file. To run without it, add -n.)

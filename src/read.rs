@@ -460,12 +460,18 @@ pub fn read_stdin_portably() -> Result<String, String> {
 /// endings made LF; or GHC's error about the first byte that can not be
 /// decoded (hGetContentsPortably).
 fn decode_portably(bytes: Vec<u8>) -> Result<String, String> {
-    let text = String::from_utf8(bytes).map_err(|e| {
-        let b = e.as_bytes()[e.utf8_error().valid_up_to()];
-        format!("invalid argument (cannot decode byte sequence starting from {b})")
-    })?;
+    let text = decode_utf8(bytes)?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     Ok(crlf_to_lf(text))
+}
+
+/// Bytes decoded as UTF-8, or GHC's error about the first byte that can
+/// not be decoded.
+pub fn decode_utf8(bytes: Vec<u8>) -> Result<String, String> {
+    String::from_utf8(bytes).map_err(|e| {
+        let b = e.as_bytes()[e.utf8_error().valid_up_to()];
+        format!("invalid argument (cannot decode byte sequence starting from {b})")
+    })
 }
 
 /// Text with its CRLF line endings made LF.
