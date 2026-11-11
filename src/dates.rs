@@ -585,12 +585,6 @@ impl DateSpan {
             p => p.to_string(),
         }
     }
-
-    /// The span with its dates' exactness (showDateSpanDebug).
-    pub fn show_debug(&self) -> String {
-        let show = |d: Option<EfDay>| d.map_or("Nothing".to_string(), |d| format!("Just ({d:?})"));
-        format!("DateSpan ({}) ({})", show(self.0), show(self.1))
-    }
 }
 
 /// The span as its period shows (showDateSpan), which hides whether the
@@ -670,24 +664,6 @@ pub fn days_span(days: impl IntoIterator<Item = Day>) -> DateSpan {
                 )
             });
     DateSpan::exact(min, max.map(nextday))
-}
-
-/// A lookup of the span containing a date among these spans, the one
-/// starting latest (and then ending latest) if several do; empty spans are
-/// ignored (latestSpanContaining).
-pub fn latest_span_containing(spans: &[DateSpan]) -> impl Fn(Day) -> Option<DateSpan> {
-    let mut by_days = BTreeMap::new();
-    for s in spans.iter().filter(|s| !s.is_empty()) {
-        by_days.insert((s.start(), s.end()), *s);
-    }
-    move |d| {
-        let sup = (Some(nextday(d)), None);
-        by_days
-            .range(..sup)
-            .next_back()
-            .map(|(_, s)| *s)
-            .filter(|s| s.contains(d))
-    }
 }
 
 /// Items grouped by the span, of these contiguous spans, their dates fall
@@ -887,17 +863,6 @@ impl Period {
             (Some(e), Some(b)) if b >= e => self,
             (Some(_), None) => self,
             _ => next,
-        }
-    }
-
-    /// The previous period, unless it ends before the span
-    /// (periodPreviousIn).
-    pub fn previous_in(self, span: DateSpan) -> Period {
-        let prev = self.previous();
-        match (span.start(), prev.end()) {
-            (Some(b), Some(e)) if e <= b => self,
-            (Some(_), None) => self,
-            _ => prev,
         }
     }
 
@@ -3328,10 +3293,6 @@ pub(crate) mod tests {
         assert_eq!(Period::MonthPeriod(2024, 3).show_abbrev(), "Mar");
         assert_eq!(format!("{:?}", Period::YearPeriod(-5)), "YearPeriod (-5)");
         assert_eq!(
-            DateSpan(ex(2024, 1, 1), None).show_debug(),
-            "DateSpan (Just (Exact 2024-01-01)) (Nothing)"
-        );
-        assert_eq!(
             format!("{:?}", SmartDate::Relative(-1, SmartInterval::Day)),
             "SmartRelative (-1) Day"
         );
@@ -3388,10 +3349,6 @@ pub(crate) mod tests {
         let in2024 = DateSpan(ex(2024, 1, 1), ex(2025, 1, 1));
         assert_eq!(MonthPeriod(2024, 12).next_in(in2024), MonthPeriod(2024, 12));
         assert_eq!(MonthPeriod(2024, 11).next_in(in2024), MonthPeriod(2024, 12));
-        assert_eq!(
-            MonthPeriod(2024, 1).previous_in(in2024),
-            MonthPeriod(2024, 1)
-        );
         assert_eq!(YearPeriod(2020).move_to(today), YearPeriod(2024));
         assert_eq!(
             WeekPeriod(day(2020, 1, 6)).move_to(today),
@@ -3426,9 +3383,6 @@ pub(crate) mod tests {
             DateSpan(ex(2024, 1, 1), ex(2024, 2, 1)),
             DateSpan(ex(2024, 2, 1), ex(2024, 3, 1)),
         ];
-        let find = latest_span_containing(&spans);
-        assert_eq!(find(day(2024, 2, 10)), Some(spans[1]));
-        assert_eq!(find(day(2024, 3, 1)), None);
         assert_eq!(spans_span(&spans), DateSpan(ex(2024, 1, 1), ex(2024, 3, 1)));
         assert_eq!(
             days_span([day(2024, 3, 5), day(2024, 1, 2)]),

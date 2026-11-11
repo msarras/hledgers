@@ -133,13 +133,12 @@ impl RawOpts {
         let Some(v) = self.string(name) else {
             return Ok(None);
         };
-        let usage = crate::console::usage_error;
         let n: i128 = v
             .trim()
             .parse()
-            .map_err(|_| usage(&format!("could not parse {name} number: {v}")))?;
+            .map_err(|_| usage_error(&format!("could not parse {name} number: {v}")))?;
         if !(0..=i128::from(i64::MAX)).contains(&n) {
-            return Err(usage(&format!(
+            return Err(usage_error(&format!(
                 "argument to {name} must lie in the range 0 to {}, but is {n}",
                 i64::MAX
             )));

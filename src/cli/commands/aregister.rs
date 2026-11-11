@@ -296,12 +296,7 @@ impl Aregister<'_> {
     /// The report as html: the heading, then a table of the items, with a
     /// heading row unless --heading=no (accountTransactionsReportAsHTML).
     fn as_html(&self, items: &[AccountTransactionsReportItem]) -> Result<String, String> {
-        let rules = table_style();
-        let rules: Vec<(&str, &str)> = rules
-            .iter()
-            .map(|(a, b)| (a.as_str(), b.as_str()))
-            .collect();
-        let mut out = format!("<style>{}</style>\n", stylesheet(&rules));
+        let mut out = format!("<style>{}</style>\n", stylesheet(&table_style()));
         out.push_str("<link rel=\"stylesheet\" href=\"hledger.css\">\n");
         let title = self.title()?;
         if !title.is_empty() {

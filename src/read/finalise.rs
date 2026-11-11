@@ -9,12 +9,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use super::InputOpts;
 use super::journal::ParseState;
+use super::{InputOpts, checks, costs};
 use crate::account::{AccountName, AccountType, account_name_infer_type, expand_account_names};
 use crate::amount::{
     Amount, AmountCost, AmountStyle, CommodityStyles, DEFAULT_MAX_DISPLAY_PRECISION, MixedAmount,
-    Precision, Rounding, Sym, add_amount_style, add_amount_style_as, styles_with_rounding,
+    Precision, Rounding, Sym, add_amount_style, styles_with_rounding,
 };
 use crate::dates::DateSpan;
 use crate::decimal::Decimal;
@@ -50,7 +50,7 @@ pub fn journal_finalise(
     j = journal_add_forecast(iopts, j)?;
     journal_postings_add_account_tags(&mut j);
     // pre-balancing cost and equity tagging
-    j = journal_tag_costs_and_equity_and_maybe_infer_costs(iopts, false, j)?;
+    j = costs::journal_tag_costs_and_equity_and_maybe_infer_costs(iopts.verbose_tags, false, j)?;
     // lot cost basis and transacted cost inference, gain posting tagging
     if has_lots {
         j = journal_infer_basis_from_account_names(lenient, j)?;
@@ -67,7 +67,9 @@ pub fn journal_finalise(
         j = journal_add_auto_postings(iopts, j)?;
     }
     // transaction balancing
-    j = journal_check_ordereddates(iopts, j)?;
+    if iopts.checking("ordereddates") {
+        checks::journal_check_ordereddates(&j)?;
+    }
     let (j, assertion_error) = journal_balance_transactions_and_defer_assertions(iopts, j)?;
     // lot classification
     let (mut j, tied) = if check_lots {
@@ -80,10 +82,10 @@ pub fn journal_finalise(
     journal_postings_add_commodity_tags(&mut j);
     // cost inference
     if iopts.infer_costs {
-        j = journal_tag_costs_and_equity_and_maybe_infer_costs(iopts, true, j)?;
+        j = costs::journal_tag_costs_and_equity_and_maybe_infer_costs(iopts.verbose_tags, true, j)?;
     }
     // market prices and renumbering
-    j = journal_infer_market_prices_from_transactions(j);
+    j = costs::journal_infer_market_prices_from_transactions(j);
     journal_renumber_account_declarations(&mut j);
     // lots and capital gains
     if check_lots {
@@ -97,7 +99,7 @@ pub fn journal_finalise(
     }
     // equity inference
     if iopts.infer_equity {
-        j = journal_infer_equity_from_costs(iopts, j);
+        j = costs::journal_infer_equity_from_costs(iopts.verbose_tags, j);
     }
     match assertion_error {
         Some(e) => Err(e),
@@ -192,16 +194,15 @@ pub fn journal_infer_commodity_styles(j: &mut Journal) {
             .flat_map(|t| t.postings.iter().rev())
             .flat_map(|p| {
                 let explicit = p.is_explicit_amount();
-                (p.amount.amounts_raw().iter().rev())
-                    .map(move |a| (a, &*a.commodity, &a.style, explicit))
+                (p.amount.amounts_raw().iter().rev()).map(move |a| (a, explicit))
             })
             .collect::<Vec<_>>()
     });
     let (mut all, mut explicit) = (CommodityStyles::new(), CommodityStyles::new());
-    for &(a, commodity, style, is_explicit) in amounts.iter().rev().flatten() {
-        add_amount_style_as(a, commodity, style, &mut all);
+    for &(a, is_explicit) in amounts.iter().rev().flatten() {
+        add_amount_style(a, &mut all);
         if is_explicit {
-            add_amount_style_as(a, commodity, style, &mut explicit);
+            add_amount_style(a, &mut explicit);
         }
     }
     let default_amount = j.default_commodity.as_ref().map(|(c, s)| Amount {
@@ -607,21 +608,6 @@ fn journal_postings_add_account_tags(j: &mut Journal) {
     });
 }
 
-/// Tag equity conversion postings and redundant costs, and with
-/// `infer_costs`, infer costs from equity postings
-/// (journalTagCostsAndEquityAndMaybeInferCosts).
-fn journal_tag_costs_and_equity_and_maybe_infer_costs(
-    iopts: &InputOpts,
-    infer_costs: bool,
-    j: Journal,
-) -> Result<Journal, String> {
-    super::costs::journal_tag_costs_and_equity_and_maybe_infer_costs(
-        iopts.verbose_tags,
-        infer_costs,
-        j,
-    )
-}
-
 /// Balance the transactions without checking assertions, then add auto
 /// postings (journalAddAutoPostings).
 fn journal_add_auto_postings(iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
@@ -635,15 +621,6 @@ fn journal_add_auto_postings(iopts: &InputOpts, j: Journal) -> Result<Journal, S
     };
     let (j, _) = super::balancing::journal_balance_transactions(&bopts, j, false)?;
     super::modifiers::journal_modify_transactions(iopts.verbose_tags, iopts.today, j)
-}
-
-/// With `hledger check ordereddates`, check that transactions are in date
-/// order, before balancing (journalCheckOrdereddates).
-fn journal_check_ordereddates(iopts: &InputOpts, j: Journal) -> Result<Journal, String> {
-    if iopts.checking("ordereddates") {
-        super::checks::journal_check_ordereddates(&j)?;
-    }
-    Ok(j)
 }
 
 /// Balance the transactions, inferring missing amounts and balance
@@ -703,23 +680,12 @@ fn journal_postings_add_commodity_tags(j: &mut Journal) {
     });
 }
 
-/// Infer market prices from the costs in transactions
-/// (journalInferMarketPricesFromTransactions).
-fn journal_infer_market_prices_from_transactions(j: Journal) -> Journal {
-    super::costs::journal_infer_market_prices_from_transactions(j)
-}
-
 /// Number the account declarations in order across all files
 /// (journalRenumberAccountDeclarations).
 pub fn journal_renumber_account_declarations(j: &mut Journal) {
     for (i, (_, info)) in j.declared_accounts.iter_mut().enumerate() {
         info.order = i + 1;
     }
-}
-
-/// Infer equity postings from costs (journalInferEquityFromCosts).
-fn journal_infer_equity_from_costs(iopts: &InputOpts, j: Journal) -> Journal {
-    super::costs::journal_infer_equity_from_costs(iopts.verbose_tags, j)
 }
 
 /// Number the transactions from 1 and record in each posting its

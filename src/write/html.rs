@@ -5,7 +5,7 @@
 use crate::write::spreadsheet::{Cell, CellType, Emphasis, Lines, Span, Style};
 
 /// CSS rules, one per line, after a newline (stylesheet).
-pub fn stylesheet(rules: &[(&str, &str)]) -> String {
+pub fn stylesheet(rules: &[(String, String)]) -> String {
     let mut out = String::from("\n");
     for (el, styles) in rules {
         out.push_str(&format!("{el} {{{styles}}}\n"));
@@ -64,11 +64,7 @@ pub fn titled_table_html(title: &str, rows: &[Vec<Cell<String>>]) -> String {
 /// A table with these style rules, which the optional user stylesheet
 /// linked after them can override, after this title unless it is empty.
 pub fn table_html(rules: &[(String, String)], title: &str, rows: &[Vec<Cell<String>>]) -> String {
-    let rules: Vec<(&str, &str)> = rules
-        .iter()
-        .map(|(a, b)| (a.as_str(), b.as_str()))
-        .collect();
-    let mut out = format!("<style>{}</style>\n", stylesheet(&rules));
+    let mut out = format!("<style>{}</style>\n", stylesheet(rules));
     out.push_str("<link rel=\"stylesheet\" href=\"hledger.css\">\n");
     if !title.is_empty() {
         out.push_str(&format_title(title));

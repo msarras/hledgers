@@ -528,18 +528,6 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// Move past this text if it is next, ignoring the case of ASCII letters
-    /// (megaparsec's string').
-    pub fn eat_str_ci(&mut self, s: &str) -> bool {
-        let rest = self.rest().as_bytes();
-        if rest.len() >= s.len() && rest[..s.len()].eq_ignore_ascii_case(s.as_bytes()) {
-            self.pos += s.len();
-            true
-        } else {
-            false
-        }
-    }
-
     /// Move past an ASCII digit if one is next.
     pub fn eat_digit(&mut self) -> bool {
         let digit = self
@@ -1186,7 +1174,7 @@ mod tests {
     #[test]
     fn cursor() {
         let mut c = Cursor::new("Every  2 weeks");
-        assert!(c.eat_str_ci("every"));
+        assert!(c.eat_str("Every"));
         assert!(c.skip_spaces());
         assert!(!c.skip_spaces());
         assert_eq!(c.take_while(|c| c.is_ascii_digit()), "2");

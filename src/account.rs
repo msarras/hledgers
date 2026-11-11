@@ -105,11 +105,6 @@ impl AccountType {
             )
     }
 
-    /// Whether this is a balance sheet type (isBalanceSheetAccountType).
-    pub fn is_balance_sheet(self) -> bool {
-        !self.is_income_statement()
-    }
-
     /// Whether this is an income statement type
     /// (isIncomeStatementAccountType).
     pub fn is_income_statement(self) -> bool {
@@ -359,11 +354,6 @@ impl<'a> Iterator for ParentNames<'a> {
         self.0 = p;
         (!p.is_empty()).then_some(p)
     }
-}
-
-/// The top-level component (topAccountName).
-pub fn top_account_name(a: &str) -> &str {
-    a.split(ACCT_SEP).next().unwrap_or(a)
 }
 
 /// The name and all its parents' names, shortest first: `a:b:c` gives `a`,
@@ -975,7 +965,6 @@ pub(crate) mod tests {
             parent_account_names("a:b:c").collect::<Vec<_>>(),
             ["a:b", "a"]
         );
-        assert_eq!(top_account_name("a:b"), "a");
         assert_eq!(clip_account_name_to(2, "a:b:c"), "a:b");
         assert_eq!(clip_account_name_to(5, "a:b:c"), "a:b:c");
         assert_eq!(escape_name("a.b(c)"), "a\\.b\\(c\\)");
@@ -1038,7 +1027,6 @@ pub(crate) mod tests {
         assert!(AccountType::Cash.is_subtype_of(AccountType::Asset));
         assert!(!AccountType::Asset.is_subtype_of(AccountType::Cash));
         assert!(AccountType::Gain.is_income_statement());
-        assert!(AccountType::Imbalance.is_balance_sheet());
         assert_eq!(AccountType::UnrealisedGain.to_string(), "U");
         assert_eq!(AccountType::choices(false), "A, L, E, R, X, C, V, G, U, M");
     }

@@ -4,8 +4,7 @@
 //! problem's columns. The columns are those of the rendered text, which is
 //! regenerated, not the original.
 
-use crate::amount::render::{AmountFormat, quote_commodity_symbol_if_needed, show_amount_b};
-use crate::model::render::{PostingLayout, show_transaction};
+use crate::model::render::{PostingLayout, show_price_directive, show_transaction};
 use crate::model::{AccountDeclarationInfo, Commodity, Posting, PriceDirective, Transaction};
 use crate::text::chomp;
 
@@ -230,16 +229,6 @@ pub fn price_directive_error_excerpt(pd: &PriceDirective) -> Excerpt {
     let line = pd.pos.line;
     let ex = decorate_excerpt(line, None, &format!("{}\n", show_price_directive(pd)));
     (pd.pos.file.to_string(), line, ex)
-}
-
-/// A P directive as journal text (showPriceDirective).
-pub fn show_price_directive(pd: &PriceDirective) -> String {
-    format!(
-        "P {} {} {}",
-        pd.date,
-        quote_commodity_symbol_if_needed(&pd.commodity),
-        show_amount_b(&AmountFormat::FULL_ZERO, &pd.amount).s
-    )
 }
 
 /// The start of an error message about a CSV record: its file and lines

@@ -104,8 +104,7 @@ pub fn parse_string_format(s: &str) -> Result<StringFormat, String> {
         let offset = s.len() - rest.len();
         let error = |at: usize, what: &str| {
             format!(
-                "{}:1:{}: unexpected {what}",
-                "(unknown)",
+                "(unknown):1:{}: unexpected {what}",
                 s[..offset + at].chars().count() + 1
             )
         };

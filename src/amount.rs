@@ -604,23 +604,12 @@ fn canonical_style(a: &AmountStyle, b: &AmountStyle) -> AmountStyle {
 /// Amounts are added in reverse order of appearance, so the first one's
 /// general style wins.
 pub fn add_amount_style(a: &Amount, styles: &mut CommodityStyles) {
-    add_amount_style_as(a, &a.commodity, &a.style, styles);
-}
-
-/// [`add_amount_style`] given the amount's commodity symbol and style,
-/// read already; the amount itself is read only to keep its symbol.
-pub fn add_amount_style_as(
-    a: &Amount,
-    commodity: &str,
-    style: &AmountStyle,
-    styles: &mut CommodityStyles,
-) {
-    match styles.get(commodity) {
+    match styles.get(&a.commodity) {
         None => {
-            styles.insert(a.commodity, *style);
+            styles.insert(a.commodity, a.style);
         }
         Some(old) => {
-            let new = canonical_style(style, old);
+            let new = canonical_style(&a.style, old);
             if new != *old {
                 styles.insert(a.commodity, new);
             }

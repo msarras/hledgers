@@ -32,7 +32,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use ::regex::{Captures, Regex, RegexBuilder};
@@ -229,13 +228,6 @@ impl PartialEq for Regexp {
 }
 
 impl Eq for Regexp {}
-
-impl Hash for Regexp {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ci.hash(state);
-        self.src.hash(state);
-    }
-}
 
 /// Case-sensitive expressions first, then by their text.
 impl Ord for Regexp {
