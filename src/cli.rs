@@ -114,7 +114,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
             Err(e) => {
                 return Err(format!(
                     "{}\n(hledger {} could not read this config file. To run without it, add -n.)",
-                    e.trim_end(),
+                    e.trim_end_matches(crate::text::is_space),
                     version::PACKAGE_VERSION
                 ));
             }

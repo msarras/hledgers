@@ -325,3 +325,16 @@ $ hledger -f - print
     b
 
 >=0
+
+# ** 33. A config file line keeps them.
+<
+2024-01-01 x
+    a   1
+    b
+
+$ D=$(mktemp -d) && printf -- '--alias a=b \n' >$D/c.conf && hledger --conf $D/c.conf -f - print; rm -rf $D
+2024-01-01 x
+    b                                              1
+    b
+
+>=0

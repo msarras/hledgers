@@ -282,7 +282,7 @@ fn prices_summary(j: &Journal, q: &Query, pds: &[&PriceDirective]) -> String {
                 }
             })
             .collect();
-        out.push_str(cells.join("  ").trim_end());
+        out.push_str(cells.join("  ").trim_end_matches(crate::text::is_space));
         out.push('\n');
     }
     out

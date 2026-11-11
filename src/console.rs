@@ -22,7 +22,7 @@ pub fn print_error(progname: &str, color_option: Option<&str>, msg: &str) {
     let msg = if msg.ends_with(DECODING_ADVICE) {
         msg
     } else {
-        msg.trim_end()
+        msg.trim_end_matches(crate::text::is_space)
     };
     let prefix = if msg.starts_with("Error:") {
         ""

@@ -715,7 +715,9 @@ impl<'a> Session<'a> {
                     let _ = editor.add_history_entry(input.as_str());
                     match step(&input) {
                         Ok(()) | Err(Halt::Exit(_)) => {}
-                        Err(Halt::Error(e)) => println!("{}", e.trim_end()),
+                        Err(Halt::Error(e)) => {
+                            println!("{}", e.trim_end_matches(crate::text::is_space));
+                        }
                     }
                 }
                 Err(rustyline::error::ReadlineError::Interrupted) => {}

@@ -151,7 +151,9 @@ pub fn less_var_value(hledger_less: Option<&str>, less: Option<&str>, color: boo
     match (hledger_less, less) {
         (Some(h), _) => h.to_string(),
         (None, Some(l)) => {
-            let existing: Vec<&str> = l.split_whitespace().collect();
+            let existing: Vec<&str> = (l.split(crate::text::is_space))
+                .filter(|w| !w.is_empty())
+                .collect();
             let new: Vec<&str> = extra
                 .into_iter()
                 .filter(|o| !existing.contains(o))

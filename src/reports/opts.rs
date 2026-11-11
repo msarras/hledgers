@@ -133,8 +133,7 @@ impl RawOpts {
         let Some(v) = self.string(name) else {
             return Ok(None);
         };
-        let n: i128 = v
-            .trim()
+        let n: i128 = crate::text::strip(v)
             .parse()
             .map_err(|_| usage_error(&format!("could not parse {name} number: {v}")))?;
         if !(0..=i128::from(i64::MAX)).contains(&n) {

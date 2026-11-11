@@ -268,7 +268,7 @@ pub fn layout_from_raw_opts(opts: &CliOpts) -> Result<PostingLayout, String> {
     match opts.raw.string("layout") {
         None => Ok(PostingLayout::default()),
         Some("hledger1") => Ok(PostingLayout::Hledger1),
-        Some(s) => s.trim().parse::<usize>().map(PostingLayout::Decimal).map_err(|_| {
+        Some(s) => crate::text::strip(s).parse::<usize>().map(PostingLayout::Decimal).map_err(|_| {
             format!("--layout's value should be 'hledger1' or a positive integer column number; got: {s}")
         }),
     }

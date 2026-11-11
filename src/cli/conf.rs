@@ -3,6 +3,7 @@
 
 use crate::parse::{Item, ParseError, megaparsec_column};
 use crate::platform::{config_dir, home_dir};
+use crate::text::strip;
 
 /// Config file sections: each name with its argument lines and their line
 /// numbers.
@@ -43,8 +44,8 @@ impl Conf {
         for (_, args) in self.sections.iter().filter(|(n, _)| n == "alias") {
             for (lnum, l) in args {
                 match l.split_once('=') {
-                    Some((name, cmdline)) if !name.trim().is_empty() => {
-                        out.push((name.trim().to_string(), cmdline.trim().to_string()));
+                    Some((name, cmdline)) if !strip(name).is_empty() => {
+                        out.push((strip(name).to_string(), strip(cmdline).to_string()));
                     }
                     _ => {
                         return Err(self.error_at(
@@ -112,9 +113,9 @@ pub fn expand_command_alias(
         else {
             return ResolvedCommand::Hledger(name.to_string(), Vec::new());
         };
-        let cmdline = cmdline.trim();
+        let cmdline = strip(cmdline);
         if let Some(shell) = cmdline.strip_prefix('!') {
-            return ResolvedCommand::Shell(shell.trim().to_string());
+            return ResolvedCommand::Shell(strip(shell).to_string());
         }
         let words = crate::text::words_quoted(cmdline).unwrap_or_default();
         let Some((real, defargs)) = words.split_first() else {
@@ -334,7 +335,7 @@ fn parse_conf(text: &str) -> Result<Sections, ParseError> {
             i += 1;
             continue;
         }
-        let arg = arg_text(rest).trim().to_string();
+        let arg = strip(arg_text(rest)).to_string();
         if name != "alias" {
             sections.last_mut().unwrap().1.push((l.num, arg));
             i += 1;
@@ -356,7 +357,7 @@ fn parse_conf(text: &str) -> Result<Sections, ParseError> {
             if megaparsec_column(&lines[j].text[..ind]) <= col || r.starts_with('[') {
                 break;
             }
-            parts.push(arg_text(r).trim().to_string());
+            parts.push(strip(arg_text(r)).to_string());
             j += 1;
             end = j;
         }
@@ -364,7 +365,7 @@ fn parse_conf(text: &str) -> Result<Sections, ParseError> {
             .last_mut()
             .unwrap()
             .1
-            .push((l.num, parts.join(" ").trim().to_string()));
+            .push((l.num, strip(&parts.join(" ")).to_string()));
         i = end;
     }
     Ok(sections)
@@ -394,7 +395,7 @@ fn section_start(
             &[Item::tokens("]")],
         ));
     }
-    let name = after[..name_len].trim().to_string();
+    let name = strip(&after[..name_len]).to_string();
     let rest = after[name_len + 1..].trim_start_matches(is_blank);
     let arg = arg_text(rest);
     let after_arg = &rest[arg.len()..];
@@ -410,7 +411,7 @@ fn section_start(
             ],
         ));
     }
-    let arg = arg.trim();
+    let arg = strip(arg);
     Ok((name, (!arg.is_empty()).then(|| (l.num, arg.to_string()))))
 }
 
