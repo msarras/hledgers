@@ -3,7 +3,6 @@
 
 use crate::reports::opts::RawOpts;
 use crate::text::{hs_lines, quote_if_needed_or_redirect};
-use std::collections::HashSet;
 
 /// Whether a flag takes a value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -454,12 +453,12 @@ pub fn process(mode: &'static Mode, args: &[String]) -> Result<RawOpts, String> 
 /// error is shown with the arguments and a description of this parse
 /// (cmdargsParseWith).
 pub fn cmdargs_parse_with(
-    req_val_flag_args: &[String],
+    is_req_val: &dyn Fn(&str) -> bool,
     desc: &str,
     addons: &[String],
     args: &[String],
 ) -> Result<RawOpts, String> {
-    check_req_val_flag_args_have_values(req_val_flag_args, args)?;
+    check_req_val_flag_args_have_values(is_req_val, args)?;
     process_main(addons, &ensure_debug_flag_has_value(args)).map_err(|e| {
         let shown: Vec<String> = args
             .iter()
@@ -479,7 +478,7 @@ pub fn cmdargs_parse_mode(
     mode: &'static Mode,
     args: &[String],
 ) -> Result<RawOpts, String> {
-    check_req_val_flag_args_have_values(&flag_args().req_val, args)?;
+    check_req_val_flag_args_have_values(&|a| is_flag_arg_with(Arity::Req, a), args)?;
     process(mode, &ensure_debug_flag_has_value(args)).map_err(|e| {
         let shown: Vec<String> = args
             .iter()
@@ -509,28 +508,23 @@ pub fn ensure_debug_flag_has_value(args: &[String]) -> Vec<String> {
     }
 }
 
-/// Check that each of the given required-value flags, written in full, is
-/// followed by a value rather than by another known flag, up to a `--`
-/// (checkReqValFlagArgsHaveValues). --debug and the flags that take a value
-/// in some commands and none in others are not checked.
+/// Check that each argument that `is_req_val` says is a required-value
+/// flag, written in full, is followed by a value rather than by another
+/// known flag, up to a `--` (checkReqValFlagArgsHaveValues). --debug and
+/// the flags that take a value in some commands and none in others are not
+/// checked.
 pub fn check_req_val_flag_args_have_values(
-    req_val_flag_args: &[String],
+    is_req_val: &dyn Fn(&str) -> bool,
     args: &[String],
 ) -> Result<(), String> {
-    let fa = flag_args();
-    let checkable = |a: &str| {
-        a != "--debug"
-            && req_val_flag_args.iter().any(|x| x == a)
-            && !fa.ambiguous.iter().any(|x| x == a)
-    };
-    let mut long_prefixes: Vec<String> = (fa.req_val.iter().chain(&fa.opt_val))
-        .filter(|x| x.starts_with("--"))
-        .map(|x| format!("{x}="))
-        .collect();
-    long_prefixes.push("--debug=".to_string());
+    let checkable = |a: &str| a != "--debug" && is_req_val(a) && !is_ambiguous_flag_arg(a);
+    let takes_value = |a: &str| is_flag_arg_with(Arity::Req, a) || is_flag_arg_with(Arity::Opt, a);
+    // a known flag, or a long one taking a value, with its value after =
     let known = |b: &str| {
-        (fa.no_val.iter().chain(&fa.req_val).chain(&fa.opt_val)).any(|x| x == b)
-            || long_prefixes.iter().any(|p| b.starts_with(p.as_str()))
+        is_flag_arg_with(Arity::None, b)
+            || takes_value(b)
+            || (b.starts_with("--")
+                && (b.split_once('=')).is_some_and(|(f, _)| f == "--debug" || takes_value(f)))
     };
     let usage = crate::console::usage_error;
     for (i, a) in args.iter().enumerate() {
@@ -553,104 +547,6 @@ pub fn check_req_val_flag_args_have_values(
     Ok(())
 }
 
-/// The flag arguments hledger knows, written in full (`--NAME`, `-C`), by
-/// whether they take a value: the general flags' and the builtin commands'
-/// (other than names of general flags); those taking a value in some
-/// commands and none in others; and the general required-value ones.
-pub struct FlagArgs {
-    pub no_val: Vec<String>,
-    pub req_val: Vec<String>,
-    pub opt_val: Vec<String>,
-    pub ambiguous: Vec<String>,
-    pub general_req_val: Vec<String>,
-}
-
-/// The flag arguments (noValFlagArgs, reqValFlagArgs, optValFlagArgs,
-/// ambiguousFlagArgs, generalReqValFlagArgs).
-pub fn flag_args() -> &'static FlagArgs {
-    static FA: std::sync::OnceLock<FlagArgs> = std::sync::OnceLock::new();
-    FA.get_or_init(|| {
-        // each name once, in order, compared before it is written out
-        let keys = |fs: &mut dyn Iterator<Item = &'static Flag>, arity: Arity| {
-            let mut seen = HashSet::new();
-            let mut out: Vec<FlagName> = Vec::new();
-            for k in fs.filter(|f| f.arity == arity).flat_map(flag_keys) {
-                if seen.insert(k) {
-                    out.push(k);
-                }
-            }
-            out
-        };
-        let names = |fs: &mut dyn Iterator<Item = &'static Flag>, arity: Arity| -> Vec<String> {
-            keys(fs, arity).into_iter().map(FlagName::written).collect()
-        };
-        let general = || general_flags();
-        let command = || {
-            super::commands::BUILTIN_COMMANDS
-                .iter()
-                .flat_map(|m| m.flags.iter().filter(|f| !f.hidden))
-        };
-        let general_names: HashSet<FlagName> = general().flat_map(flag_keys).collect();
-        let merged = |arity: Arity| {
-            let mut out = keys(&mut general(), arity);
-            let mut seen: HashSet<FlagName> = out.iter().copied().collect();
-            for k in keys(&mut command(), arity) {
-                if !general_names.contains(&k) && seen.insert(k) {
-                    out.push(k);
-                }
-            }
-            out.into_iter().map(FlagName::written).collect()
-        };
-        let req_any =
-            (keys(&mut general(), Arity::Req).into_iter()).chain(keys(&mut command(), Arity::Req));
-        let no_any: HashSet<FlagName> = (keys(&mut general(), Arity::None).into_iter())
-            .chain(keys(&mut command(), Arity::None))
-            .collect();
-        FlagArgs {
-            no_val: merged(Arity::None),
-            req_val: merged(Arity::Req),
-            opt_val: merged(Arity::Opt),
-            ambiguous: req_any
-                .filter(|k| no_any.contains(k))
-                .map(FlagName::written)
-                .collect(),
-            general_req_val: names(&mut general(), Arity::Req),
-        }
-    })
-}
-
-/// A flag's name, long or short, before it is written out.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum FlagName {
-    Long(&'static str),
-    Short(char),
-}
-
-impl FlagName {
-    /// The name written in full: `--NAME` or `-C` (toFlagArg).
-    fn written(self) -> String {
-        match self {
-            FlagName::Long(l) => {
-                let mut s = String::with_capacity(l.len() + 2);
-                s.push_str("--");
-                s.push_str(l);
-                s
-            }
-            FlagName::Short(c) => {
-                let mut s = String::with_capacity(1 + c.len_utf8());
-                s.push('-');
-                s.push(c);
-                s
-            }
-        }
-    }
-}
-
-/// A flag's names: the long ones, then the short ones.
-fn flag_keys(f: &'static Flag) -> impl Iterator<Item = FlagName> {
-    (f.longs.iter().map(|l| FlagName::Long(l))).chain(f.shorts.iter().map(|c| FlagName::Short(*c)))
-}
-
 /// Whether an argument is one of a flag's names written in full.
 fn is_flag_name(f: &Flag, a: &str) -> bool {
     match a.strip_prefix("--") {
@@ -664,19 +560,57 @@ fn is_flag_name(f: &Flag, a: &str) -> bool {
     }
 }
 
-/// The required-value flag arguments a mode accepts, itself or through its
-/// commands (modeReqValFlagArgs): for the main mode, every command's.
-pub fn mode_req_val_flag_args(mode: &'static Mode) -> Vec<String> {
+/// An arity as a bit of a set of arities.
+fn bit(arity: Arity) -> u8 {
+    1 << arity as u8
+}
+
+/// The arities of these flags having this name written in full.
+fn arities<'f>(flags: impl Iterator<Item = &'f Flag>, a: &str) -> u8 {
+    (flags.filter(|f| is_flag_name(f, a))).fold(0, |bits, f| bits | bit(f.arity))
+}
+
+/// The arities of the general flags, and of the builtin commands' shown
+/// flags, having this name written in full.
+fn general_and_command_arities(a: &str) -> (u8, u8) {
+    let commands = super::commands::BUILTIN_COMMANDS.iter();
+    let command_flags = commands.flat_map(|m| m.flags.iter().filter(|f| !f.hidden));
+    (arities(general_flags(), a), arities(command_flags, a))
+}
+
+/// Whether an argument is the name, written in full (`--NAME`, `-C`), of a
+/// flag with this arity: a general flag, or a builtin command's shown flag
+/// that no general flag is named as (noValFlagArgs, reqValFlagArgs,
+/// optValFlagArgs).
+pub fn is_flag_arg_with(arity: Arity, a: &str) -> bool {
+    let (general, command) = general_and_command_arities(a);
+    general & bit(arity) != 0 || (general == 0 && command & bit(arity) != 0)
+}
+
+/// Whether an argument names a flag that takes a value in some commands
+/// and none in others (ambiguousFlagArgs).
+fn is_ambiguous_flag_arg(a: &str) -> bool {
+    let (general, command) = general_and_command_arities(a);
+    let all = general | command;
+    all & bit(Arity::Req) != 0 && all & bit(Arity::None) != 0
+}
+
+/// Whether an argument names a general flag that requires a value
+/// (generalReqValFlagArgs).
+pub fn is_general_req_val_flag_arg(a: &str) -> bool {
+    arities(general_flags(), a) & bit(Arity::Req) != 0
+}
+
+/// Whether an argument names a required-value flag that a mode accepts,
+/// itself or through its commands (modeReqValFlagArgs): for the main mode,
+/// any command's.
+pub fn is_mode_req_val_flag_arg(mode: &'static Mode, a: &str) -> bool {
     let main = std::ptr::eq(mode, &super::commands::MAIN_MODE);
     let commands = super::commands::BUILTIN_COMMANDS.iter().filter(|_| main);
-    let mode_flags: Vec<&Flag> = mode
-        .all_flags()
-        .chain(commands.flat_map(|m| m.all_flags()))
-        .collect();
-    (flag_args().req_val.iter())
-        .filter(|a| mode_flags.iter().any(|f| is_flag_name(f, a)))
-        .cloned()
-        .collect()
+    is_flag_arg_with(Arity::Req, a)
+        && (mode.all_flags())
+            .chain(commands.flat_map(|m| m.all_flags()))
+            .any(|f| is_flag_name(f, a))
 }
 
 /// Whether an argument looks like a flag: `-C...` or `--NAME...`
@@ -742,10 +676,9 @@ pub fn move_flags_after_command(args: &[String]) -> (String, Vec<String>, Vec<St
 /// next argument, unless it is a --debug not followed by a --debug value;
 /// any other flag-like argument is moved alone.
 fn is_movable_flag_arg(a: &str, next: Option<&str>) -> u8 {
-    let fa = flag_args();
-    let has = |v: &[String]| v.iter().any(|x| x == a);
     let debug_without_value = a == "--debug" && next.is_some_and(|n| !is_debug_value(n));
-    if has(&fa.req_val) && !has(&fa.no_val) && !debug_without_value {
+    if is_flag_arg_with(Arity::Req, a) && !is_flag_arg_with(Arity::None, a) && !debug_without_value
+    {
         2
     } else if is_flag_arg(a) {
         1
@@ -789,9 +722,8 @@ pub fn drop_conf_flags(args: &[String]) -> Vec<String> {
 /// The arguments without the flags (and their values) that a mode does not
 /// accept, written in full (dropUnsupportedOpts).
 pub fn drop_unsupported_opts(mode: &'static Mode, args: &[String]) -> Vec<String> {
-    let fa = flag_args();
     let supports = |f: &str| mode.all_flags().any(|fl| is_flag_name(fl, f));
-    let req = |f: &str| fa.req_val.iter().any(|x| x == f);
+    let req = |f: &str| is_flag_arg_with(Arity::Req, f);
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -1215,8 +1147,9 @@ pub(crate) mod tests {
             process(mode, &strings(&["-f=x"])).unwrap().string("file"),
             Some("x")
         );
+        let req_val = |a: &str| is_flag_arg_with(Arity::Req, a);
         let check = |args: &[&str]| {
-            check_req_val_flag_args_have_values(&flag_args().req_val, &strings(args)).unwrap_err()
+            check_req_val_flag_args_have_values(&req_val, &strings(args)).unwrap_err()
         };
         assert_eq!(
             check(&["-f"]),
@@ -1230,9 +1163,7 @@ pub(crate) mod tests {
             check(&["--file", "--begin=2020"]),
             "--file needs a value, but the next argument is another flag: --begin=2020 (use -h to see usage)"
         );
-        let ok = |args: &[&str]| {
-            check_req_val_flag_args_have_values(&flag_args().req_val, &strings(args))
-        };
+        let ok = |args: &[&str]| check_req_val_flag_args_have_values(&req_val, &strings(args));
         assert!(ok(&["-f", "-"]).is_ok());
         assert!(ok(&["--sort", "-date"]).is_ok());
         assert!(ok(&["-m"]).is_ok()); // a value in some commands, none in others

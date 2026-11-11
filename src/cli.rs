@@ -92,7 +92,7 @@ fn show_list(xs: &[String]) -> String {
 /// command arguments with the alias's and the command line's, parse that
 /// final command line, and act on it. Returns the exit status.
 fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
-    use args::{cmdargs_parse_with, drop_unsupported_opts, flag_args};
+    use args::{Arity, cmdargs_parse_with, drop_unsupported_opts};
     let debug = crate::console::debug_level(prog_args) >= 1;
     let dbg = |label: &str, value: &str| {
         if debug {
@@ -165,7 +165,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
         .into_iter()
         .collect();
     let cmdname = cmdargs_parse_with(
-        &flag_args().req_val,
+        &|a| args::is_flag_arg_with(Arity::Req, a),
         "for command name",
         &addons,
         &possiblecmdarg,
@@ -177,10 +177,12 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     let isaddoncmd = !cmdname.is_empty() && addons.contains(&cmdname);
     let builtin = commands::find(&cmdname);
     let effectivemode = builtin.unwrap_or(&commands::MAIN_MODE);
-    let finalreqvalflagargs = if isaddoncmd {
-        flag_args().general_req_val.clone()
-    } else {
-        args::mode_req_val_flag_args(effectivemode)
+    let is_final_req_val = |a: &str| {
+        if isaddoncmd {
+            args::is_general_req_val_flag_arg(a)
+        } else {
+            args::is_mode_req_val_flag_arg(effectivemode, a)
+        }
     };
     // a shell command alias runs now, if allowed, with the arguments
     // written after its name
@@ -274,12 +276,7 @@ fn dispatch(progname: &str, prog_args: &[String]) -> Result<i32, String> {
     if cmdname == "run" {
         finalargs = commands::run::args_mark_run_commands(&finalargs);
     }
-    let raw = cmdargs_parse_with(
-        &finalreqvalflagargs,
-        "final command line",
-        &addons,
-        &finalargs,
-    )?;
+    let raw = cmdargs_parse_with(&is_final_req_val, "final command line", &addons, &finalargs)?;
 
     // 6. select an action and run it
     if raw.string("command") == Some("check") {
