@@ -326,27 +326,23 @@ fn print_entries(opts: &CliOpts, j: Journal) -> Result<String, String> {
         ))),
         "csv" | "tsv" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
-            let rows = raw_table_content(entries_report_as_spreadsheet(
-                &AmountFormat::MACHINE,
-                None,
-                &[],
-                &txns,
-            ));
+            let rows = entries_report_as_spreadsheet(&AmountFormat::MACHINE, None, &[], &txns);
             Ok(if fmt == "csv" {
-                print_csv(&rows)
+                print_csv(rows)
             } else {
-                print_tsv(&rows)
+                print_tsv(rows)
             })
         }
         "html" | "fods" => {
             let txns = style_all(entries_report(&opts.spec, j)?, &styles);
             let ropts = &opts.spec.opts;
-            let rows = entries_report_as_spreadsheet(
+            let rows: Vec<_> = entries_report_as_spreadsheet(
                 &AmountFormat::ONE_LINE_NO_COST,
                 ropts.balance_base_url.as_deref(),
                 &ropts.query_string,
                 &txns,
-            );
+            )
+            .collect();
             Ok(if fmt == "html" {
                 titled_table_html("", &rows) + "\n"
             } else {
@@ -425,12 +421,12 @@ fn fill_balance_assignments(opts: &CliOpts, t: Transaction) -> Transaction {
 /// (entriesReportAsSpreadsheet). The transaction index groups the rows
 /// back into transactions. With a base url, account names link to their
 /// registers, restricted to the query.
-pub fn entries_report_as_spreadsheet(
-    fmt: &AmountFormat,
-    base_url: Option<&str>,
-    query: &[String],
-    txns: &[Transaction],
-) -> Vec<Vec<Cell<String>>> {
+pub fn entries_report_as_spreadsheet<'a>(
+    fmt: &'a AmountFormat,
+    base_url: Option<&'a str>,
+    query: &'a [String],
+    txns: &'a [Transaction],
+) -> impl Iterator<Item = Vec<Cell<String>>> + 'a {
     const HEADINGS: [&str; 14] = [
         "txnidx",
         "date",
@@ -447,13 +443,11 @@ pub fn entries_report_as_spreadsheet(
         "posting-status",
         "posting-comment",
     ];
-    let mut rows = vec![add_header_borders(
-        HEADINGS.iter().map(|h| Cell::header(h)).collect(),
-    )];
-    for t in txns {
-        rows.extend(transaction_to_spreadsheet(fmt, base_url, query, t));
-    }
-    rows
+    let heading = add_header_borders(HEADINGS.iter().map(|h| Cell::header(h)).collect());
+    std::iter::once(heading).chain(
+        txns.iter()
+            .flat_map(move |t| transaction_to_spreadsheet(fmt, base_url, query, t)),
+    )
 }
 
 /// A transaction's rows: its postings', each after the transaction's

@@ -5,7 +5,7 @@
 
 use crate::amount::render::{
     AmountFormat, show_mixed_amount_b, show_mixed_amount_lines_parts_b,
-    show_mixed_amount_one_line_parts_b,
+    show_mixed_amount_one_line_and_parts_b,
 };
 use crate::amount::{Amount, MixedAmount, Sym};
 use crate::text::Wide;
@@ -156,6 +156,14 @@ impl<T> Cell<T> {
     }
 }
 
+/// A text cell's text is its content, so the csv and tsv writers take
+/// rows of cells as they take records.
+impl AsRef<str> for Cell<String> {
+    fn as_ref(&self) -> &str {
+        &self.content
+    }
+}
+
 impl<T: Default> Cell<T> {
     /// An empty cell (emptyCell).
     pub fn empty() -> Cell<T> {
@@ -280,20 +288,19 @@ fn mark_negative(negative: bool, class: &str) -> String {
 /// (cellFromMixedAmount): an amount cell if it adds up to one amount;
 /// its amounts as parts when they are shown on one line, unelided.
 pub fn cell_from_mixed_amount(fmt: &AmountFormat, class: &str, m: &MixedAmount) -> Cell<Wide> {
+    let (content, parts) = if fmt.one_line && fmt.max_width.is_none() {
+        show_mixed_amount_one_line_and_parts_b(fmt, m)
+    } else {
+        (show_mixed_amount_b(fmt, m), Vec::new())
+    };
     Cell {
         class: mark_negative(m.is_negative() == Some(true) && !m.looks_zero(), class),
         typ: match m.unify() {
             Some(a) => amount_type(fmt, a),
             None => CellType::MixedAmount,
         },
-        parts: if fmt.one_line && fmt.max_width.is_none() {
-            (show_mixed_amount_one_line_parts_b(fmt, m).into_iter())
-                .map(|(w, _)| w)
-                .collect()
-        } else {
-            Vec::new()
-        },
-        ..Cell::new(show_mixed_amount_b(fmt, m))
+        parts,
+        ..Cell::new(content)
     }
 }
 

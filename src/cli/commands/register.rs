@@ -29,7 +29,7 @@ use crate::write::html::titled_table_html;
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
     self as spr, CellType, add_header_borders, cell_from_mixed_amount, horizontal_span,
-    integer_cell, raw_table_content,
+    integer_cell,
 };
 use crate::write::table::{Align, Cell};
 
@@ -128,15 +128,15 @@ pub fn register(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     Ok(match fmt.as_str() {
         "txt" => with_title(opts, postings_report_as_text(opts, &report)?),
         "json" => to_json_text(&report),
-        "csv" => print_csv(&postings_report_as_csv(opts, &report)),
-        "tsv" => print_tsv(&postings_report_as_csv(opts, &report)),
+        "csv" => print_csv(postings_report_as_csv(opts, &report)),
+        "tsv" => print_tsv(postings_report_as_csv(opts, &report)),
         "html" => {
             let rows = postings_report_as_html_rows(opts, &report);
             titled_table_html(ropts.effective_title(""), &rows) + "\n"
         }
         _ => {
             let fmt = AmountFormat::ONE_LINE_NO_COST;
-            let rows = postings_report_as_spreadsheet(opts, &fmt, true, &report);
+            let rows = postings_report_as_spreadsheet(opts, &fmt, true, &report).collect();
             print_fods(
                 locale_encoding_name(),
                 &BTreeMap::from([(
@@ -151,20 +151,21 @@ pub fn register(opts: &CliOpts, j: &Journal) -> Result<String, String> {
 /// The report as html table rows, with links to hledger-web if --base-url
 /// is given.
 fn postings_report_as_html_rows(opts: &CliOpts, report: &[PostingsReportItem]) -> spr::Rows {
-    postings_report_as_spreadsheet(opts, &AmountFormat::ONE_LINE_NO_COST, true, report)
+    postings_report_as_spreadsheet(opts, &AmountFormat::ONE_LINE_NO_COST, true, report).collect()
 }
 
 /// The report as csv or tsv records: a heading row, after the title if
 /// any (postingsReportAsCsv).
-fn postings_report_as_csv(opts: &CliOpts, report: &[PostingsReportItem]) -> Vec<Vec<String>> {
-    let rows = postings_report_as_spreadsheet(opts, &AmountFormat::MACHINE, false, report);
+fn postings_report_as_csv<'a>(
+    opts: &'a CliOpts,
+    report: &'a [PostingsReportItem],
+) -> impl Iterator<Item = Vec<spr::Cell<String>>> + 'a {
+    let mut rows =
+        postings_report_as_spreadsheet(opts, &AmountFormat::MACHINE, false, report).peekable();
     let title = opts.spec.opts.effective_title("");
-    let mut out = Vec::new();
-    if !title.is_empty() {
-        out.push(horizontal_span(rows[0].len(), spr::Cell::header(title)));
-    }
-    out.extend(rows);
-    raw_table_content(out)
+    let title_row = (!title.is_empty())
+        .then(|| horizontal_span(rows.peek().map_or(0, Vec::len), spr::Cell::header(title)));
+    title_row.into_iter().chain(rows)
 }
 
 /// The report as spreadsheet rows: a heading row, then a row per item
@@ -172,13 +173,14 @@ fn postings_report_as_csv(opts: &CliOpts, report: &[PostingsReportItem]) -> Vec<
 /// account, amount and running total, the account and date linking to
 /// hledger-web if `links` and --base-url say so (postingsReportAsSpreadsheet,
 /// postingsReportItemAsRecord). The date is the primary one, or with
-/// --period-titles=dates a summary posting's period.
-fn postings_report_as_spreadsheet(
-    opts: &CliOpts,
-    fmt: &AmountFormat,
+/// --period-titles=dates a summary posting's period. Each row is made as
+/// it is taken, so that a writer need not hold them all.
+fn postings_report_as_spreadsheet<'a>(
+    opts: &'a CliOpts,
+    fmt: &'a AmountFormat,
     links: bool,
-    report: &[PostingsReportItem],
-) -> spr::Rows {
+    report: &'a [PostingsReportItem],
+) -> impl Iterator<Item = Vec<spr::Cell<String>>> + 'a {
     let ropts = &opts.spec.opts;
     let base = if links {
         ropts.balance_base_url.as_deref()
@@ -195,10 +197,8 @@ fn postings_report_as_spreadsheet(
         "amount",
         "total",
     ];
-    let mut rows = vec![add_header_borders(
-        headings.into_iter().map(spr::Cell::header).collect(),
-    )];
-    for item in report {
+    let heading = add_header_borders(headings.into_iter().map(spr::Cell::header).collect());
+    std::iter::once(heading).chain(report.iter().map(move |item| {
         let p = &item.posting;
         let t = item.txn;
         let date = match (item.period, ropts.period_titles) {
@@ -210,7 +210,7 @@ fn postings_report_as_spreadsheet(
         };
         let acct = bracketed(p.realness, &account_name_drop(ropts.drop, &p.account));
         let amount = |m: &MixedAmount| cell_from_mixed_amount(fmt, "amount", m).into_text();
-        rows.push(vec![
+        vec![
             integer_cell(t.map_or(0, |t| t.index)),
             date,
             spr::Cell::new(t.map_or(String::new(), |t| t.code.clone())),
@@ -218,9 +218,8 @@ fn postings_report_as_spreadsheet(
             set_account_anchor(base, query, &p.account, spr::Cell::new(acct)),
             amount(&p.amount),
             amount(&item.total),
-        ]);
-    }
-    rows
+        ]
+    }))
 }
 
 /// An account name in the brackets of its kind of posting, if virtual.

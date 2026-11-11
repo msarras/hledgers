@@ -2,15 +2,22 @@
 
 /// Records as CSV: every field in double quotes, a double quote in a field
 /// doubled, a record per line (printCSV).
-pub fn print_csv<S: AsRef<str>>(records: &[Vec<S>]) -> String {
+pub fn print_csv<S: AsRef<str>>(
+    records: impl IntoIterator<Item = impl IntoIterator<Item = S>>,
+) -> String {
     let mut out = String::new();
     for r in records {
-        for (i, f) in r.iter().enumerate() {
+        for (i, f) in r.into_iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
             out.push('"');
-            out.push_str(&f.as_ref().replace('"', "\"\""));
+            for (j, part) in f.as_ref().split('"').enumerate() {
+                if j > 0 {
+                    out.push_str("\"\"");
+                }
+                out.push_str(part);
+            }
             out.push('"');
         }
         out.push('\n');
@@ -20,10 +27,12 @@ pub fn print_csv<S: AsRef<str>>(records: &[Vec<S>]) -> String {
 
 /// Records as TSV: fields separated by tabs, a tab, newline or carriage
 /// return in a field replaced by a space, a record per line (printTSV).
-pub fn print_tsv<S: AsRef<str>>(records: &[Vec<S>]) -> String {
+pub fn print_tsv<S: AsRef<str>>(
+    records: impl IntoIterator<Item = impl IntoIterator<Item = S>>,
+) -> String {
     let mut out = String::new();
     for r in records {
-        for (i, f) in r.iter().enumerate() {
+        for (i, f) in r.into_iter().enumerate() {
             if i > 0 {
                 out.push('\t');
             }

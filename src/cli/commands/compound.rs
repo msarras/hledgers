@@ -41,9 +41,7 @@ use crate::write::csv::{print_csv, print_tsv};
 use crate::write::fods::{locale_encoding_name, print_fods};
 use crate::write::html::{table_html, table_style};
 use crate::write::json::to_json_text;
-use crate::write::spreadsheet::{
-    self as spr, Border, Emphasis, Style, horizontal_span, raw_table_content,
-};
+use crate::write::spreadsheet::{self as spr, Border, Emphasis, Style, horizontal_span};
 use crate::write::table::{Header, Line, Table, concat_tables};
 
 /// A compound balance command: its mode, its report's name (which the
@@ -262,13 +260,13 @@ pub fn compound_balance_command(
     }
     let layout = layout?;
     Ok(match fmt.as_str() {
-        "csv" => print_csv(&compound_balance_report_as_csv(
+        "csv" => print_csv(compound_balance_report_as_csv(
             &ropts1,
             layout,
             cbc.sections,
             &cbr,
         )),
-        "tsv" => print_tsv(&compound_balance_report_as_csv(
+        "tsv" => print_tsv(compound_balance_report_as_csv(
             &ropts1,
             layout,
             cbc.sections,
@@ -467,7 +465,7 @@ fn compound_balance_report_as_csv(
     layout: Layout,
     sections: &[SubreportSpec],
     cbr: &CompoundPeriodicReport<DisplayName, MixedAmount>,
-) -> Vec<Vec<String>> {
+) -> spr::Rows {
     let (title, (_, rows)) = compound_balance_report_as_spreadsheet(
         &AmountFormat::MACHINE,
         "Account",
@@ -482,7 +480,7 @@ fn compound_balance_report_as_csv(
         records.push(horizontal_span(rows[0].len(), spr::Cell::header(&title)));
     }
     records.extend(rows);
-    raw_table_content(records)
+    records
 }
 
 /// A compound balance report as html: the table styles with the account

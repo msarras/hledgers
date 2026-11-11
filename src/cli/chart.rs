@@ -197,8 +197,8 @@ pub fn render_chart(
     Ok(match opts.output_format().as_str() {
         "txt" => chart_as_text_for_opts(opts, &chart),
         "svg" => chart_as_svg(true, &chart),
-        "csv" => print_csv(&chart_as_csv(&chart)),
-        "tsv" => print_tsv(&chart_as_csv(&chart)),
+        "csv" => print_csv(chart_as_csv(&chart)),
+        "tsv" => print_tsv(chart_as_csv(&chart)),
         "json" => to_json_text(&chart) + "\n",
         // without the dark variant, since the html is always light
         _ => {

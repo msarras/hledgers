@@ -463,21 +463,23 @@ fn lines_parts_with(
         .collect()
 }
 
-/// The amounts of a mixed amount shown on one line, each with its amount,
-/// without padding or elision (showMixedAmountOneLinePartsB).
-pub fn show_mixed_amount_one_line_parts_b(
+/// The separator of the amounts of a mixed amount shown on one line.
+const SEP: &str = ", ";
+
+/// A mixed amount shown on one line with no maximum width, as
+/// [`show_mixed_amount_b`] shows it, and its amounts' texts without padding
+/// (showMixedAmountOneLinePartsB), each amount shown once for both.
+pub fn show_mixed_amount_one_line_and_parts_b(
     fmt: &AmountFormat,
     m: &MixedAmount,
-) -> Vec<(Wide, Amount)> {
-    ordered_amounts(fmt, m)
-        .into_iter()
-        .map(|a| (show_amount_b(fmt, &a), a))
-        .collect()
+) -> (Wide, Vec<Wide>) {
+    let shown = displays(SEP.len(), fmt, &ordered_amounts(fmt, m));
+    let text = one_line(fmt, &shown);
+    (text, shown.into_iter().map(|d| d.text).collect())
 }
 
 /// showMixedAmountOneLineB.
 fn show_one_line(fmt: &AmountFormat, m: &MixedAmount) -> Wide {
-    const SEP: &str = ", ";
     let amounts = ordered_amounts(fmt, m);
     let shown = displays(SEP.len(), fmt, &amounts);
     let n = shown.len();
@@ -511,6 +513,12 @@ fn show_one_line(fmt: &AmountFormat, m: &MixedAmount) -> Wide {
                 .collect()
         }
     };
+    one_line(fmt, &shown)
+}
+
+/// These displays on a line, separated by commas, padded on the left to
+/// the minimum width.
+fn one_line(fmt: &AmountFormat, shown: &[Display]) -> Wide {
     let width = shown.last().map_or(0, |d| d.total);
     let min = fmt.min_width.unwrap_or(0);
     let pad = (min - width).max(0) as usize;
@@ -1175,12 +1183,18 @@ pub(crate) mod tests {
             show_mixed_amount_b(&AmountFormat::ONE_LINE, &all_zero).s,
             "0"
         );
-        let parts = show_mixed_amount_one_line_parts_b(&fmt, &three());
+        let (text, parts) = show_mixed_amount_one_line_and_parts_b(&fmt, &three());
+        assert_eq!(text.s, "€2.00, $1.00, 0");
         assert_eq!(
-            parts.iter().map(|(w, _)| w.s.as_str()).collect::<Vec<_>>(),
+            parts.iter().map(|w| w.s.as_str()).collect::<Vec<_>>(),
             ["€2.00", "$1.00", "0"]
         );
-        assert_eq!(&*parts[2].1.commodity, "¥");
+        let lines = AmountFormat {
+            one_line: false,
+            ..fmt.clone()
+        };
+        let lines = show_mixed_amount_lines_parts_b(&lines, &three());
+        assert_eq!(&*lines[2].1.commodity, "¥");
     }
 
     #[test]

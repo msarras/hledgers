@@ -33,7 +33,7 @@ use crate::write::html::{escape, format_row, format_title, stylesheet, table_sty
 use crate::write::json::to_json_text;
 use crate::write::spreadsheet::{
     self as spr, CellType, add_header_borders, cell_from_mixed_amount, horizontal_span,
-    integer_cell, raw_table_content,
+    integer_cell,
 };
 
 const NONE: Arity = Arity::None;
@@ -154,10 +154,12 @@ pub fn aregister(opts: &CliOpts, j: &Journal) -> Result<String, String> {
     match fmt.as_str() {
         "txt" => ar.as_text(&items),
         "html" => ar.as_html(&items),
-        "csv" => Ok(print_csv(&ar.as_csv(&items)?)),
-        "tsv" => Ok(print_tsv(&ar.as_csv(&items)?)),
+        "csv" => Ok(print_csv(ar.as_csv(&items)?)),
+        "tsv" => Ok(print_tsv(ar.as_csv(&items)?)),
         "fods" => {
-            let rows = ar.as_spreadsheet(&AmountFormat::ONE_LINE_NO_COST, ar.heading()?, &items);
+            let rows = ar
+                .as_spreadsheet(&AmountFormat::ONE_LINE_NO_COST, ar.heading()?, &items)
+                .collect();
             Ok(print_fods(
                 locale_encoding_name(),
                 &BTreeMap::from([("Aregister".to_string(), ((1, 0), rows))]),
@@ -328,27 +330,31 @@ impl Aregister<'_> {
     /// The report as csv or tsv records: the heading row unless
     /// --heading=no, after --title's title if any
     /// (accountTransactionsReportAsCsv).
-    fn as_csv(&self, items: &[AccountTransactionsReportItem]) -> Result<Vec<Vec<String>>, String> {
-        let rows = self.as_spreadsheet(&AmountFormat::MACHINE, self.heading()?, items);
+    fn as_csv<'a>(
+        &'a self,
+        items: &'a [AccountTransactionsReportItem],
+    ) -> Result<impl Iterator<Item = Vec<spr::Cell<String>>> + 'a, String> {
+        let mut rows = self
+            .as_spreadsheet(&AmountFormat::MACHINE, self.heading()?, items)
+            .peekable();
         let title = self.opts.spec.opts.effective_title("");
-        let mut out = Vec::new();
-        if let (false, Some(first)) = (title.is_empty(), rows.first()) {
-            out.push(horizontal_span(first.len(), spr::Cell::header(title)));
-        }
-        out.extend(rows);
-        Ok(raw_table_content(out))
+        let title_row = match (title.is_empty(), rows.peek()) {
+            (false, Some(first)) => Some(horizontal_span(first.len(), spr::Cell::header(title))),
+            _ => None,
+        };
+        Ok(title_row.into_iter().chain(rows))
     }
 
     /// The report as spreadsheet rows: a heading row if `heading`, then a
-    /// row per item (accountTransactionsReportAsSpreadsheet).
-    fn as_spreadsheet(
-        &self,
-        fmt: &AmountFormat,
+    /// row per item (accountTransactionsReportAsSpreadsheet), each made as
+    /// it is taken.
+    fn as_spreadsheet<'a>(
+        &'a self,
+        fmt: &'a AmountFormat,
         heading: bool,
-        items: &[AccountTransactionsReportItem],
-    ) -> spr::Rows {
-        let mut rows = Vec::new();
-        if heading {
+        items: &'a [AccountTransactionsReportItem],
+    ) -> impl Iterator<Item = Vec<spr::Cell<String>>> + 'a {
+        let headings = heading.then(|| {
             let headings = [
                 "txnidx",
                 "date",
@@ -358,12 +364,9 @@ impl Aregister<'_> {
                 "amount",
                 "balance",
             ];
-            rows.push(add_header_borders(
-                headings.into_iter().map(spr::Cell::header).collect(),
-            ));
-        }
-        rows.extend(items.iter().map(|i| self.item_as_record(fmt, true, i)));
-        rows
+            add_header_borders(headings.into_iter().map(spr::Cell::header).collect())
+        });
+        (headings.into_iter()).chain(items.iter().map(move |i| self.item_as_record(fmt, true, i)))
     }
 
     /// An item as a row: with `internals`, the transaction's number and
