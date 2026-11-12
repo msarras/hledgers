@@ -1,8 +1,8 @@
 //! What `get` fetches when the journal has no `prices/getprices` helper, as
 //! a pure function of the journal, its price files and today: the
 //! commodities held and those they are priced in, the days whose prices are
-//! missing, the tickers to try, and the checks a fetched series must pass to
-//! be used.
+//! missing and the requests for them, the tickers to try, and the checks a
+//! fetched series must pass to be used.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -318,6 +318,20 @@ pub fn holes(start: Day, end: Day, have: &BTreeSet<Day>) -> Vec<(Day, Day)> {
         }
     }
     runs
+}
+
+/// Runs of days as requests of at most `most` days each, in order: a longer
+/// run in consecutive ones of `most` days and a last of the rest.
+pub fn pieces(runs: &[(Day, Day)], most: i64) -> Vec<(Day, Day)> {
+    let mut out = Vec::new();
+    for &(mut from, to) in runs {
+        while to.diff_days(from) + 1 > most {
+            out.push((from, from.add_days(most - 1)));
+            from = from.add_days(most);
+        }
+        out.push((from, to));
+    }
+    out
 }
 
 /// The prices of a target's commodity in its quote that fetched ones are
@@ -683,13 +697,17 @@ commodity usd ; price: ecb usd-cad $
         assert!(err("yahoo X.TO $ now").contains("malformed"));
         assert_eq!(
             err("bloomberg X.TO $"),
-            "commodity X has a price: tag with an unknown source, \"bloomberg X.TO $\": the sources are: yahoo, ecb"
+            "commodity X has a price: tag with an unknown source, \"bloomberg X.TO $\": the sources are: yahoo, ecb, coinbase"
         );
         assert_eq!(
             err("ecb USDCAD $"),
             "commodity X has a price: tag with a malformed ecb ticker, \"ecb USDCAD $\": it should be two different currency codes joined by -, such as USD-CAD"
         );
         assert!(err("ecb EUR-EUR $").contains("malformed ecb ticker"));
+        assert_eq!(
+            err("coinbase BTC/USD usd"),
+            "commodity X has a price: tag with a malformed coinbase ticker, \"coinbase BTC/USD usd\": it should be a product id, two words of letters and digits joined by -, such as BTC-USD"
+        );
         assert_eq!(
             err("CAD, price: USD"),
             "commodity X has two one-word price: tags, CAD and USD: it can have one market code"
@@ -722,6 +740,25 @@ commodity usd ; price: ecb usd-cad $
         );
         assert_eq!(holes(day(1, 9), day(1, 9), &have), []);
         assert_eq!(holes(day(2, 1), day(1, 31), &have), []);
+    }
+
+    #[test]
+    fn long_runs_in_pieces() {
+        let d = |n: i64| day(1, 1).add_days(n);
+        // 700 days in three requests of at most 300, and 300 in one
+        assert_eq!(
+            pieces(&[(d(-1000), d(-301)), (d(0), d(299))], 300),
+            [
+                (d(-1000), d(-701)),
+                (d(-700), d(-401)),
+                (d(-400), d(-301)),
+                (d(0), d(299))
+            ]
+        );
+        assert_eq!(
+            pieces(&[(d(0), d(300))], 300),
+            [(d(0), d(299)), (d(300), d(300))]
+        );
     }
 
     #[test]

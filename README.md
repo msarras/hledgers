@@ -156,13 +156,13 @@ command line or a similar past entry, completion on a terminal, and
 checks against the whole journal, and appends them. `get` runs the
 journal's `data/getdata` and `prices/getprices` helpers, merging the
 prices into per-commodity files, and without the second fetches the
-prices of the commodities held itself, from Yahoo, or from ECB for the
-currency pairs a tag names (see Prices fetched by `get`). `setup` checks
-the installation, the terminal and the default journal, contacting
+prices of the commodities held itself, from Yahoo, or from ECB or
+Coinbase for the pairs a tag names (see Prices fetched by `get`). `setup`
+checks the installation, the terminal and the default journal, contacting
 hledger.org over HTTPS (pure Rust TLS: rustls with a
 RustCrypto provider, TLS 1.3 only). Of hledger's
 2420 functional test cases 2414 pass byte-identically, all of them gated,
-with this repo's 93. The other six are listed as by design and not run:
+with this repo's 94. The other six are listed as by design and not run:
 four (`journal/fastpath.test` 6, 9, 11 and 13) check the statistics line of
 hledger's fast-path journal parser, which hledgers does not have, and two
 (`balance/balance.test` 7 and 8) expect a dotted commodity symbol in
@@ -563,7 +563,7 @@ copies as written. `tests/rules/dotted-symbols.test` has more examples.
 
 Without a `prices/getprices` helper script, `get` (and `import --get`)
 fetches the market prices of the commodities held itself, from Yahoo
-Finance, or from the European Central Bank for the currency pairs a tag
+Finance, or from the European Central Bank or Coinbase for the pairs a tag
 names, and merges them into the files `prices/COMMODITY.prices` as it
 merges a helper's output. With the script, it runs the script, as hledger
 does. Nothing needs declaring for the usual case:
@@ -629,10 +629,11 @@ dollar. Three words, `SOURCE TICKER QUOTE`, name a ticker and the commodity
 its prices are in, used without the checks: `commodity VEQT ; price: yahoo
 VEQT.TO $`. Several three-word tags, separated by commas, are several
 prices to fetch, each in a different commodity: `commodity btc ; price:
-yahoo BTC-USD usd, price: yahoo BTC-CAD $`. The sources are `yahoo` and
-`ecb`. A malformed tag (two words, more than three, an unknown source, an
-`ecb` ticker that is not a pair, a second one-word tag, two in the same
-quote) is an error before anything is fetched.
+yahoo BTC-USD usd, price: yahoo BTC-CAD $`. The sources are `yahoo`,
+`ecb` and `coinbase`. A malformed tag (two words, more than three, an
+unknown source, an `ecb` ticker that is not a pair, a `coinbase` one that
+is not a product id, a second one-word tag, two in the same quote) is an
+error before anything is fetched.
 
 `ecb` fetches the euro reference rates of the European Central Bank, and
 only for a three-word tag: nothing is inferred to it. Its ticker is a pair
@@ -645,6 +646,21 @@ it is published, around 16:00 CET, so the days wanted from ECB reach today
 rather than yesterday; a run before publication asks for today, gets
 nothing, and asks again on the next run. Each run of days is one request,
 for the currencies of the pair other than the euro.
+
+`coinbase` fetches the daily candles of Coinbase Exchange, also only for a
+three-word tag. Its ticker is a product id, `A-B`, the price of 1 A in B:
+`commodity btc ; price: coinbase BTC-USD usd`. The price of a day is the
+close of its candle, the UTC day's, written as Coinbase gives it
+(`P 2026-11-11 btc 73927.63 usd`). The days wanted end yesterday, as
+Yahoo's, and a candle not over, today's in UTC, is left out: ahead of
+UTC, yesterday's is not over until midnight UTC, and a run before then
+gets no price for it and asks again on the next run. Coinbase refuses a
+request spanning more than 300 days, so a longer run of days is asked for
+in requests of 300 days and one of the rest, each shown as it is made:
+
+    running: coinbase BTC-USD 2025-05-27..2026-03-22 >DIR/prices/btc.prices
+    running: coinbase BTC-USD 2026-03-23..2026-11-11 >DIR/prices/btc.prices
+    wrote DIR/prices/btc.prices (existing 0, added 534)
 
 A commodity that fails is a warning, and the others go on; the exit status
 stays 0, as with a helper script. Each file is written as soon as its
@@ -660,27 +676,29 @@ the commodity directive, such as `commodity $1,000.00 ; price: CAD`, keeps
 reports as they were.
 
 Fetching sends Yahoo (query1.finance.yahoo.com) the tickers of the
-commodities held and the dates wanted, and ECB (data-api.ecb.europa.eu)
-the currency codes of the pairs tagged and the dates wanted, with the
-User-Agent `hledgers/VERSION`, and nothing else from the journal; requests
-are made one after another, with no retries, and give up after 120
-seconds. Yahoo's certificate chain is signed with RSA, which HTTPS
-verifies through the pure-Rust rsa crate.
+commodities held and the dates wanted, ECB (data-api.ecb.europa.eu) the
+currency codes of the pairs tagged and the dates wanted, and Coinbase
+(api.exchange.coinbase.com) the product ids tagged and the dates wanted,
+with the User-Agent `hledgers/VERSION`, and nothing else from the
+journal; requests are made one after another, with no retries, and give
+up after 120 seconds. Yahoo's certificate chain is signed with RSA,
+which HTTPS verifies through the pure-Rust rsa crate.
 
 Limits: a run of days that Yahoo has nothing for (before a listing, a long
 trading halt, a weekend or holiday just before today) is asked for again on
 each run, a request for each ticker tried, and so is a run that ECB has
 nothing for (before 1999, when its rates begin, or a weekend or holiday up
-to today, ECB publishing no rates on those days); ECB has rates for about
-thirty currencies only, and a pair with another is a warning; Yahoo's
-prices are adjusted for later splits, so prices fetched after a split do
-not match the quantities held before it, while prices written earlier are
-kept; Yahoo quotes London shares in pence (`GBp`), which the currency check
-refuses, though a three-word tag fetches them, in pence; only the
-currencies of hledger's table of symbols and codes are recognised as
-currencies, so no FX pair is tried for others (such as AED); and `get`
-takes no `--today`, as in hledger (`import --get` does).
-`tests/rules/get-prices.test` has more examples.
+to today, ECB publishing no rates on those days), and one that Coinbase
+has nothing for (before the product was listed), a request for each 300
+days of it; ECB has rates for about thirty currencies only, and a pair
+with another is a warning; Yahoo's prices are adjusted for later splits,
+so prices fetched after a split do not match the quantities held before
+it, while prices written earlier are kept; Yahoo quotes London shares in
+pence (`GBp`), which the currency check refuses, though a three-word tag
+fetches them, in pence; only the currencies of hledger's table of symbols
+and codes are recognised as currencies, so no FX pair is tried for others
+(such as AED); and `get` takes no `--today`, as in hledger (`import --get`
+does). `tests/rules/get-prices.test` has more examples.
 
 ## Licence
 

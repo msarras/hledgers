@@ -12,15 +12,17 @@ use crate::decimal::Decimal;
 pub enum Source {
     Yahoo,
     Ecb,
+    Coinbase,
 }
 
 impl Source {
-    pub const ALL: [Source; 2] = [Source::Yahoo, Source::Ecb];
+    pub const ALL: [Source; 3] = [Source::Yahoo, Source::Ecb, Source::Coinbase];
 
     pub fn name(self) -> &'static str {
         match self {
             Source::Yahoo => "yahoo",
             Source::Ecb => "ecb",
+            Source::Coinbase => "coinbase",
         }
     }
 
@@ -29,18 +31,28 @@ impl Source {
         Source::ALL.into_iter().find(|s| s.name() == name)
     }
 
-    /// The last day whose price is final: for Yahoo yesterday, a day's close
-    /// being final only when the day is over; for ECB today, a reference
-    /// rate being final when it is published.
+    /// The last day whose price is final: for Yahoo and Coinbase yesterday,
+    /// a day's close being final only when the day is over; for ECB today, a
+    /// reference rate being final when it is published.
     pub fn last_day(self, today: Day) -> Day {
         match self {
-            Source::Yahoo => today.add_days(-1),
+            Source::Yahoo | Source::Coinbase => today.add_days(-1),
             Source::Ecb => today,
         }
     }
 
+    /// The most days one request may ask for, if the source limits them:
+    /// 300 for Coinbase, which refuses a request spanning more than 300 days.
+    pub fn max_days(self) -> Option<i64> {
+        match self {
+            Source::Coinbase => Some(300),
+            Source::Yahoo | Source::Ecb => None,
+        }
+    }
+
     /// Whether the source can have this ticker, or else what one looks
-    /// like: any for Yahoo, a pair of currency codes for ECB.
+    /// like: any for Yahoo, a pair of currency codes for ECB, a product id
+    /// for Coinbase.
     pub fn check_ticker(self, ticker: &str) -> Result<(), &'static str> {
         match self {
             Source::Yahoo => Ok(()),
@@ -48,12 +60,19 @@ impl Source {
                 Some(_) => Ok(()),
                 None => Err("two different currency codes joined by -, such as USD-CAD"),
             },
+            Source::Coinbase => match coinbase_product(ticker) {
+                Some(_) => Ok(()),
+                None => Err(
+                    "a product id, two words of letters and digits joined by -, such as BTC-USD",
+                ),
+            },
         }
     }
 
     /// A ticker's prices on the days from `start` to `end` that are final, in
-    /// one request; None if the source does not know the ticker. `now` is
-    /// the time in seconds since 1970.
+    /// one request, of no more than [`Source::max_days`] days; None if the
+    /// source does not know the ticker. `now` is the time in seconds since
+    /// 1970.
     pub fn fetch(
         self,
         agent: &ureq::Agent,
@@ -65,6 +84,7 @@ impl Source {
         match self {
             Source::Yahoo => yahoo(agent, YAHOO, ticker, start, end, now),
             Source::Ecb => ecb(agent, ECB, ticker, start, end),
+            Source::Coinbase => coinbase(agent, COINBASE, ticker, start, end, now),
         }
     }
 }
@@ -82,7 +102,10 @@ const YAHOO: &str = "https://query1.finance.yahoo.com";
 
 const ECB: &str = "https://data-api.ecb.europa.eu";
 
-/// The User-Agent sent: Yahoo refuses some clients' default ones.
+const COINBASE: &str = "https://api.exchange.coinbase.com";
+
+/// The User-Agent sent: Yahoo refuses some clients' default ones, and
+/// Coinbase a request without one.
 const USER_AGENT: &str = concat!("hledgers/", env!("CARGO_PKG_VERSION"));
 
 /// The body of a GET request to a source, sent with the User-Agent; None if
@@ -302,6 +325,70 @@ fn six_digits(x: &Decimal) -> Decimal {
     x.round_to((6 - whole).clamp(0, 255) as u8).normalize()
 }
 
+/// The currencies of a Coinbase product id, `A-B`, whose price is that of 1
+/// A in B: two words of letters and digits, uppercased, as every product
+/// Coinbase lists has (`BTC-USD`, `1INCH-EUR`); Coinbase takes either case.
+fn coinbase_product(ticker: &str) -> Option<(String, String)> {
+    let (a, b) = ticker.split_once('-')?;
+    let word = |w: &str| {
+        (!w.is_empty() && w.bytes().all(|c| c.is_ascii_alphanumeric()))
+            .then(|| w.to_ascii_uppercase())
+    };
+    Some((word(a)?, word(b)?))
+}
+
+/// The request for a product's daily candles from `start` to `end`, both
+/// included, Coinbase giving the candles that start from `start`'s midnight
+/// UTC to `end`'s.
+fn coinbase_url(base: &str, product: &str, start: Day, end: Day) -> String {
+    format!("{base}/products/{product}/candles?granularity=86400&start={start}&end={end}")
+}
+
+/// Coinbase's closes for a product from the server at `base`, on the days
+/// from `start` to `end`; None if it answers 404, as for a product it does
+/// not list.
+fn coinbase(
+    agent: &ureq::Agent,
+    base: &str,
+    ticker: &str,
+    start: Day,
+    end: Day,
+    now: i64,
+) -> Result<Option<Series>, String> {
+    let (a, b) = coinbase_product(ticker).ok_or("not a Coinbase product id")?;
+    let Some(body) = request(agent, &coinbase_url(base, ticker, start, end))? else {
+        return Ok(None);
+    };
+    parse_coinbase(&body, &a, &b, now).map(Some)
+}
+
+/// A Coinbase candles response for the product `A-B` read: the price of 1 A
+/// in B by day, the close of the day's candle, written as Coinbase writes
+/// it. A candle is `[time, low, high, open, close, volume]`, its time the
+/// start of its day, UTC, the newest first. Today's candle, UTC, is left
+/// out, as it is not over. A product asked for before it was listed has no
+/// candles.
+pub fn parse_coinbase(body: &str, a: &str, b: &str, now: i64) -> Result<Series, String> {
+    let candles: Vec<serde_json::Value> = serde_json::from_str(body)
+        .map_err(|e| format!("unreadable response from Coinbase: {e}"))?;
+    let today = now.div_euclid(86400);
+    let mut closes = BTreeMap::new();
+    for c in &candles {
+        let (Some(t), Some(close)) = (c[0].as_i64(), c[4].as_number()) else {
+            continue;
+        };
+        let day = t.div_euclid(86400);
+        if day < today {
+            closes.insert(epoch().add_days(day), close.to_string().parse()?);
+        }
+    }
+    Ok(Series {
+        currency: b.to_string(),
+        name: format!("{a}-{b}"),
+        closes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,5 +583,69 @@ mod tests {
         assert_eq!(s.closes.len(), 0);
         let unknown = serve_once("404 Not Found", NO_SERIES);
         assert_eq!(ecb(&agent, &unknown, "USD-XYZ", start, end), Ok(None));
+    }
+
+    // BTC-USD from 2026-11-09 to 2026-11-12, fetched on 2026-11-12: the
+    // candles newest first, the first one today's, which is not over.
+    const CANDLES: &str = r#"[[1794441600,71151.01,74123.71,73927.63,71434.02,8819.29888948],[1794355200,73110,74737.15,73697.88,73927.63,8133.45787114],[1794268800,72643.48,75340.23,75257.77,73697.87,10577.16077662],[1794182400,73636,75500,74756.52,75259.28,10186.63613065]]"#;
+
+    // A product Coinbase does not list, with its 404.
+    const NOT_LISTED: &str = r#"{"message":"NotFound"}"#;
+
+    #[test]
+    fn coinbase_candles_are_read_on_their_days() {
+        let s = parse_coinbase(CANDLES, "BTC", "USD", NOW).unwrap();
+        assert_eq!((&*s.currency, &*s.name), ("USD", "BTC-USD"));
+        // by day, each the close of its candle as written, today's left out
+        assert_eq!(
+            closes(&s),
+            "2026-11-09 75259.28, 2026-11-10 73697.87, 2026-11-11 73927.63"
+        );
+        // a day later, the candle of 2026-11-12 is over
+        let s = parse_coinbase(CANDLES, "BTC", "USD", NOW + 86400).unwrap();
+        assert_eq!(
+            closes(&s),
+            "2026-11-09 75259.28, 2026-11-10 73697.87, 2026-11-11 73927.63, 2026-11-12 71434.02"
+        );
+        // days before the product was listed
+        let s = parse_coinbase("[]", "BTC", "USD", NOW).unwrap();
+        assert_eq!(s.closes.len(), 0);
+        assert!(parse_coinbase(NOT_LISTED, "BTC", "USD", NOW).is_err());
+    }
+
+    #[test]
+    fn coinbase_products_and_requests() {
+        assert_eq!(
+            coinbase_product("btc-usd"),
+            Some(("BTC".into(), "USD".into()))
+        );
+        assert!(Source::Coinbase.check_ticker("1INCH-EUR").is_ok());
+        for t in "BTCUSD BTC/USD BTC_USD BTC-USD-X -USD BTC- BTC-US$".split(' ') {
+            assert_eq!(coinbase_product(t), None, "{t}");
+            assert!(Source::Coinbase.check_ticker(t).is_err());
+        }
+        assert_eq!(
+            coinbase_url("B", "BTC-USD", day(11, 9), day(11, 11)),
+            "B/products/BTC-USD/candles?granularity=86400&start=2026-11-09&end=2026-11-11"
+        );
+    }
+
+    #[test]
+    fn coinbase_fetch_from_a_local_server() {
+        let agent = crate::cli::http::agent(std::time::Duration::from_secs(10));
+        let (start, end) = (day(11, 9), day(11, 12));
+        let candles = serve_once("200 OK", CANDLES);
+        let s = (coinbase(&agent, &candles, "BTC-USD", start, end, NOW))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            closes(&s),
+            "2026-11-09 75259.28, 2026-11-10 73697.87, 2026-11-11 73927.63"
+        );
+        let unknown = serve_once("404 Not Found", NOT_LISTED);
+        assert_eq!(
+            coinbase(&agent, &unknown, "NOSUCH-USD", start, end, NOW),
+            Ok(None)
+        );
     }
 }

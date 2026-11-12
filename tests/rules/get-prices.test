@@ -152,3 +152,33 @@ would run: yahoo XIU.TO or XIU.TO-CAD 2026-09-24..2026-11-11 >./prices/XIU.TO.pr
 would run: ecb USD-CAD 2026-09-25..2026-11-12 >./prices/usd.prices
 no new transactions found in new.j
 >=0
+
+# ** 8. A price: tag naming the coinbase source fetches the daily candles of
+# a Coinbase product, the price of a day being the close of its UTC day:
+# BTC-USD's, the price of 1 BTC in USD. Its days are wanted up to yesterday,
+# as Yahoo's, and as Coinbase refuses a request spanning more than 300 days,
+# a longer run is asked for in pieces of 300 days, each a request of its
+# own. usd, the quote, is left to Yahoo.
+<
+commodity $ ; price: CAD
+commodity btc ; price: coinbase BTC-USD usd
+
+2025-06-01 opening
+    assets:cash      $5000
+    equity:opening  $-5000
+
+2025-06-02 usd
+    assets:usd       1000 usd @ $1.40
+    assets:cash     $-1400
+
+2025-06-03 btc
+    assets:crypto    0.01 btc @ 100000 usd
+    assets:usd      -1000 usd
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: coinbase BTC-USD 2025-05-27..2026-03-22 >./prices/btc.prices
+would run: coinbase BTC-USD 2026-03-23..2026-11-11 >./prices/btc.prices
+would run: yahoo USDCAD=X or USD or USD-CAD 2025-05-26..2026-11-11 >./prices/usd.prices
+no new transactions found in new.j
+>=0

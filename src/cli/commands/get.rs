@@ -197,10 +197,12 @@ fn fetch_prices(opts: &CliOpts, j: &Journal) -> Result<(), String> {
 
 /// Fetch market prices without a helper script: for each commodity held and
 /// each commodity they are priced in (see [`plan::targets`]), the runs of
-/// days missing from the journal and from its `prices/CODE.prices` file,
-/// from the ticker its `price:` tag declares or else from the first ticker
-/// inferred that passes the checks, each file merged as soon as its prices
-/// are in. A commodity that fails is a warning, and the others go on.
+/// days missing from the journal and from its `prices/CODE.prices` file, a
+/// request each, or several where a run is longer than its source answers
+/// at once, from the ticker its `price:` tag declares or else from the
+/// first ticker inferred that passes the checks, each file merged as soon
+/// as its prices are in. A commodity that fails is a warning, and the
+/// others go on.
 fn fetch_prices_builtin(opts: &CliOpts, j: &Journal, prices_dir: &str) -> Result<(), String> {
     let dry_run = opts.raw.bool("dry-run");
     let targets = plan::targets(j, opts.spec.today)?;
@@ -215,7 +217,10 @@ fn fetch_prices_builtin(opts: &CliOpts, j: &Journal, prices_dir: &str) -> Result
         let file = (std::fs::read_to_string(&outfile).ok())
             .and_then(|text| parse_prices(&text).ok())
             .unwrap_or_default();
-        let runs = plan::holes(t.start, t.end, &plan::have(j, &file, t));
+        let mut runs = plan::holes(t.start, t.end, &plan::have(j, &file, t));
+        if let Some(most) = t.lookup.source().max_days() {
+            runs = plan::pieces(&runs, most);
+        }
         if dry_run {
             for (from, to) in &runs {
                 log_command(true, &format!("{} {from}..{to} >{outfile}", t.lookup));
