@@ -3,14 +3,12 @@
 //! Hledger.Data.Posting): what the readers' error excerpts, the print
 //! command and the journal writer show.
 
-use std::borrow::Cow;
-
 use dashu_int::IBig;
 
 use crate::account::Realness;
 use crate::amount::render::{
     AmountFormat, quote_commodity_symbol_if_needed, show_amount_b, show_amount_quantity,
-    show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
+    show_commodity_symbol, show_mixed_amount_lines_b, show_mixed_amount_lines_parts_b,
 };
 use crate::amount::{Amount, Precision, Side};
 use crate::decimal::Decimal;
@@ -495,11 +493,7 @@ fn amount_integer_width(fmt: &AmountFormat, a: &Amount) -> usize {
     };
     let quantity_width = show_amount_quantity(false, &int_amount).width + usize::from(sign_lost);
     let prefix_width = if a.style.side == Side::L {
-        let comm = if fmt.quotes {
-            quote_commodity_symbol_if_needed(&a.commodity)
-        } else {
-            Cow::Borrowed(&*a.commodity)
-        };
+        let comm = show_commodity_symbol(fmt, &a.commodity);
         display_width(&comm) + usize::from(!comm.is_empty() && a.style.spaced)
     } else {
         0

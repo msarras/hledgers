@@ -1,0 +1,144 @@
+# * Dotted commodity symbols: this repo's extension, not upstream's
+
+# ** 1. In an unquoted commodity symbol, a . between a symbol character and a
+# letter is part of the symbol, written after the number or before it, and in a
+# cost. print writes the symbols as they are read, without quotes.
+<
+2026-01-05 buy
+    assets:broker            10 VEQT.TO @ 45.00 CAD
+    assets:cash         -450.00 CAD
+
+2026-01-06 buy
+    assets:broker      BRK.B 2 @ $500
+    assets:cash        $-1000
+
+$ hledger -f - print
+2026-01-05 buy
+    assets:broker                                 10 VEQT.TO @ 45.00 CAD
+    assets:cash                                 -450.00 CAD
+
+2026-01-06 buy
+    assets:broker                            BRK.B 2 @ $500
+    assets:cash                               $-1000
+
+>=0
+
+# ** 2. print's output reads back as the same transactions.
+<
+2026-01-05 buy
+    assets:broker            10 VEQT.TO @ 45.00 CAD
+    assets:cash         -450.00 CAD
+
+2026-01-06 buy
+    assets:broker      BRK.B 2 @ $500
+    assets:cash        $-1000
+
+$ hledger -f - print | hledger -f - print
+2026-01-05 buy
+    assets:broker                                 10 VEQT.TO @ 45.00 CAD
+    assets:cash                                 -450.00 CAD
+
+2026-01-06 buy
+    assets:broker                            BRK.B 2 @ $500
+    assets:cash                               $-1000
+
+>=0
+
+# ** 3. Commodity and P directives take dotted symbols: BRK.B is shown in its
+# declared style, and VEQT.TO is valued at its market price.
+<
+commodity VEQT.TO
+commodity BRK.B 1,000.00
+
+P 2026-01-02 VEQT.TO 45.10 CAD
+
+2026-01-05 buy
+    assets:broker            10 VEQT.TO @ 45.00 CAD
+    assets:cash         -450.00 CAD
+
+2026-01-06 buy
+    assets:broker      BRK.B 2 @ $500
+    assets:cash        $-1000
+
+$ hledger -f - balance -N -X CAD assets:broker
+          BRK.B 2.00
+          451.00 CAD  assets:broker
+>=0
+
+# ** 4. A market price can be in a dotted symbol too. hledger would read the
+# second directive alone as a price of 10 A, ignoring the rest of the line.
+<
+P 2026-01-02 VEQT.TO 45.10 CAD
+P 2026-01-02 X 10 A.B
+
+$ hledger -f - prices
+P 2026-01-02 VEQT.TO 45.10 CAD
+P 2026-01-02 X 10 A.B
+>=0
+
+# ** 5. A . before a digit still starts the number, as in hledger: $.50 and
+# EUR.50 are 0.50 dollars and euros.
+<
+2026-01-07 snacks
+    expenses:candy        $.50
+    expenses:gum        EUR.50
+    assets:cash          $-.50
+    assets:cash        EUR-.50
+
+$ hledger -f - print
+2026-01-07 snacks
+    expenses:candy                                $0.50
+    expenses:gum                                EUR0.50
+    assets:cash                                  $-0.50
+    assets:cash                                EUR-0.50
+
+>=0
+
+# ** 6. Quoted symbols are read as before. One that reads back without its
+# quotes is printed without them; one that would not, ending in a dot or with a
+# digit after its dot, keeps them.
+<
+2026-01-08
+    assets:broker      1 "VEQT.TO"
+    assets:other
+
+2026-01-09
+    a     1 "A."
+    b    -1 "A."
+    c     2 "A.5"
+    d    -2 "A.5"
+
+$ hledger -f - print
+2026-01-08
+    assets:broker                                  1 VEQT.TO
+    assets:other
+
+2026-01-09
+    a                                              1 "A."
+    b                                             -1 "A."
+    c                                              2 "A.5"
+    d                                             -2 "A.5"
+
+>=0
+
+# ** 7. print -O ledger writes Ledger's syntax, where a symbol with a dot is
+# quoted, as hledger quotes it.
+<
+2026-01-05 buy
+    assets:broker            10 VEQT.TO @ 45.00 CAD
+    assets:cash         -450.00 CAD
+
+2026-01-06 buy
+    assets:broker      BRK.B 2 @ $500
+    assets:cash        $-1000
+
+$ hledger -f - print -O ledger
+2026-01-05 buy
+    assets:broker                                 10 "VEQT.TO" @ 45.00 CAD
+    assets:cash                                 -450.00 CAD
+
+2026-01-06 buy
+    assets:broker                          "BRK.B" 2 @ $500
+    assets:cash                               $-1000
+
+>=0

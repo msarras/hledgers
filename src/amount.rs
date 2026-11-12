@@ -627,13 +627,26 @@ pub fn commodity_styles_from_amounts(amounts: &[Amount]) -> CommodityStyles {
     styles
 }
 
-/// Whether a character needs a commodity symbol to be quoted
-/// (isNonsimpleCommodityChar).
+/// Whether a character needs a commodity symbol to be quoted, but for the
+/// `.`s that [`simple_commodity_symbol`] keeps (isNonsimpleCommodityChar).
 pub fn is_nonsimple_commodity_char(c: char) -> bool {
     matches!(
         c,
         '-' | '+' | '.' | '@' | '*' | ';' | '\t' | '\n' | ' ' | '"' | '{' | '}' | '='
     ) || c.is_ascii_digit()
+}
+
+/// The commodity symbol written without quotes at the start of a text,
+/// perhaps empty: the characters before the first that needs quotes, or in
+/// parentheses before a `)` (simplecommoditysymbolp). Unlike in hledger, a
+/// `.` after a symbol character and before a letter is part of the symbol,
+/// so `VEQT.TO` is one symbol, while `$.50` is still `$` and a number.
+pub fn simple_commodity_symbol(s: &str, in_parens: bool) -> &str {
+    let end = s.char_indices().find(|&(i, c)| {
+        let dotted = c == '.' && i > 0 && s[i + 1..].starts_with(char::is_alphabetic);
+        (is_nonsimple_commodity_char(c) && !dotted) || (in_parens && c == ')')
+    });
+    &s[..end.map_or(s.len(), |(i, _)| i)]
 }
 
 /// The result of `+`, `-` or `*` on two amounts, which should be in the same
@@ -1738,6 +1751,30 @@ pub(crate) mod tests {
         assert_eq!(&*gbp(d("1")).commodity, "£");
         assert!(is_nonsimple_commodity_char('1') && is_nonsimple_commodity_char('{'));
         assert!(!is_nonsimple_commodity_char('$') && !is_nonsimple_commodity_char('('));
+    }
+
+    #[test]
+    fn simple_commodity_symbols() {
+        let sym = |s| simple_commodity_symbol(s, false);
+        // a . between a symbol character and a letter
+        assert_eq!(sym("VEQT.TO 10"), "VEQT.TO");
+        assert_eq!(sym("BRK.B"), "BRK.B");
+        assert_eq!(sym("A.B.C"), "A.B.C");
+        assert_eq!(sym("€.é"), "€.é");
+        assert_eq!(sym("VEQT.TO10"), "VEQT.TO");
+        // a . before anything else ends the symbol, which can not start with one
+        assert_eq!(sym("$.50"), "$");
+        assert_eq!(sym("EUR.50"), "EUR");
+        assert_eq!(sym("A."), "A");
+        assert_eq!(sym("A.5"), "A");
+        assert_eq!(sym("A..B"), "A");
+        assert_eq!(sym(".TO"), "");
+        assert_eq!(sym("1.5"), "");
+        assert_eq!(sym("A-B.C"), "A");
+        // in parentheses, a ) ends it too
+        assert_eq!(sym("A).B"), "A).B");
+        assert_eq!(simple_commodity_symbol("A).B", true), "A");
+        assert_eq!(simple_commodity_symbol("A.B)", true), "A.B");
     }
 
     // tests_Amount "comparing mixed amounts compares based on quantities".

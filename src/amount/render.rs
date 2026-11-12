@@ -38,7 +38,8 @@ pub struct AmountFormat {
     pub colour: bool,
     /// Quote commodity symbols that need it.
     pub quotes: bool,
-    /// Show cost bases in Ledger's lot syntax, `{COST} [DATE] (LABEL)`.
+    /// Show cost bases in Ledger's lot syntax, `{COST} [DATE] (LABEL)`, and
+    /// quote commodity symbols with a `.` for Ledger, as hledger does.
     pub ledger_lot_syntax: bool,
 }
 
@@ -90,14 +91,29 @@ impl Default for AmountFormat {
     }
 }
 
-/// A commodity symbol in double quotes if it contains a character that
-/// would end an unquoted symbol, or begins with `(` or `/`, which would read
-/// as an amount expression (quoteCommoditySymbolIfNeeded).
+/// A commodity symbol in double quotes if it would not read back whole
+/// without them (see [`simple_commodity_symbol`](super::simple_commodity_symbol)),
+/// or begins with `(` or `/`, which would read as an amount expression
+/// (quoteCommoditySymbolIfNeeded). So `VEQT.TO` is not quoted, though
+/// hledger quotes it, while `A.` and `A.5` are.
 pub fn quote_commodity_symbol_if_needed(s: &str) -> Cow<'_, str> {
-    if s.chars().any(super::is_nonsimple_commodity_char) || s.starts_with(['(', '/']) {
+    if super::simple_commodity_symbol(s, false).len() < s.len() || s.starts_with(['(', '/']) {
         Cow::Owned(format!("\"{s}\""))
     } else {
         Cow::Borrowed(s)
+    }
+}
+
+/// A commodity symbol as this format shows it: quoted if it needs to be, or
+/// as it is. In Ledger's syntax a symbol with a `.` is quoted too, which
+/// gives hledger's rule, since hledgers' differs from it only in its dots.
+pub fn show_commodity_symbol<'a>(fmt: &AmountFormat, s: &'a str) -> Cow<'a, str> {
+    if !fmt.quotes {
+        Cow::Borrowed(s)
+    } else if fmt.ledger_lot_syntax && s.contains('.') {
+        Cow::Owned(format!("\"{s}\""))
+    } else {
+        quote_commodity_symbol_if_needed(s)
     }
 }
 
@@ -116,10 +132,8 @@ pub fn show_amount_b(fmt: &AmountFormat, a: &Amount) -> Wide {
     let zero = a.looks_zero() && !fmt.zero_commodity;
     let commodity = if zero {
         Cow::Borrowed("")
-    } else if fmt.quotes {
-        quote_commodity_symbol_if_needed(&a.commodity)
     } else {
-        Cow::Borrowed(&*a.commodity)
+        show_commodity_symbol(fmt, &a.commodity)
     };
     let space = !commodity.is_empty() && a.style.spaced;
     let quantity = |out: &mut Wide| {
@@ -943,6 +957,34 @@ pub(crate) mod tests {
         );
         assert_eq!(quote_commodity_symbol_if_needed("€"), "€");
         assert_eq!(quote_commodity_symbol_if_needed("a\"b"), "\"a\"b\"");
+    }
+
+    #[test]
+    fn dotted_symbols_are_quoted_when_they_would_not_read_back() {
+        for s in ["VEQT.TO", "BRK.B", "A.B.C", "€.é"] {
+            assert_eq!(quote_commodity_symbol_if_needed(s), s);
+        }
+        for s in ["A.", "A.5", ".TO", "A..B", "$.50", "VEQT.TO10"] {
+            assert_eq!(quote_commodity_symbol_if_needed(s), format!("\"{s}\""));
+        }
+    }
+
+    #[test]
+    fn ledger_syntax_quotes_dotted_symbols() {
+        let ledger = AmountFormat {
+            ledger_lot_syntax: true,
+            ..AmountFormat::DEFAULT
+        };
+        assert_eq!(show_commodity_symbol(&ledger, "VEQT.TO"), "\"VEQT.TO\"");
+        assert_eq!(show_commodity_symbol(&ledger, "A B"), "\"A B\"");
+        assert_eq!(show_commodity_symbol(&ledger, "$"), "$");
+        let journal = &AmountFormat::DEFAULT;
+        assert_eq!(show_commodity_symbol(journal, "VEQT.TO"), "VEQT.TO");
+        let unquoted = AmountFormat {
+            quotes: false,
+            ..ledger
+        };
+        assert_eq!(show_commodity_symbol(&unquoted, "VEQT.TO"), "VEQT.TO");
     }
 
     #[test]

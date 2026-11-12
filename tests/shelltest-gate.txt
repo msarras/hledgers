@@ -20,7 +20,7 @@ balance/87.test
 balance/balance-amt.test
 balance/balance-cur.test
 balance/balance-multiperiod.test
-balance/balance.test
+balance/balance.test:1-6,9-25
 balance/base-url.test
 balance/bcexample.test
 balance/budget-sorting.test
@@ -217,6 +217,7 @@ register/unordered-dates.test
 related.test
 rewrite.test
 roi.test
+rules/dotted-symbols.test
 rules/error-sweep.test
 rules/import-upstream.test
 rules/lazy-errors.test

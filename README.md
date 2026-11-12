@@ -60,7 +60,8 @@ timeclock and timedot readers, the import command, and the command-line
 interface (help, config files, command aliases, add-ons, translations,
 `run` and `repl`, `add`, `get`, `setup`) are complete. `hledgers` reads journal files with every directive,
 include globs, amount expressions, costs, balance assertions and
-assignments, auto postings and periodic transactions; it balances and
+assignments, auto postings and periodic transactions, and this repo's
+unquoted dotted commodity symbols (below); it balances and
 checks entries as hledger 1.99 does and prints the same error messages; it
 converts amounts to cost and values them with declared, inferred and
 commodity alias prices (`-B`, `-V`, `-X`, `--value`,
@@ -145,8 +146,8 @@ eleven built-in catalogs or the user's own, and `--write-lang` starts a
 translation. Today's date and CSV time zones use the local time zone;
 register and text charts use the terminal's width; long help and reports
 go through a pager on a terminal; `--view` opens the output in a viewer;
-`--test` runs the 131 unit tests and doctests ported from hledger's
-(whose own `--test` runs 326). `run` runs commands one after
+`--test` runs 142 unit tests and doctests, the 131 ported from hledger's
+(whose own `--test` runs 326) and 11 of its own on lots. `run` runs commands one after
 another, from its command line, files or standard input, reading each
 journal once, and can collect their outputs into one html page; `repl`
 does so at a prompt (with line editing on a terminal), reloading changed
@@ -157,10 +158,12 @@ journal's `data/getdata` and `prices/getprices` helpers, merging the
 prices into per-commodity files. `setup` checks the installation, the
 terminal and the default journal, contacting hledger.org over HTTPS (pure
 Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
-2420 functional test cases 2416 pass byte-identically, all of them gated,
-with this repo's 27. The other four (`journal/fastpath.test` 6, 9, 11 and
-13) check the statistics line of hledger's fast-path journal parser, which
-hledgers does not have by design; they are listed as such and not run.
+2420 functional test cases 2414 pass byte-identically, all of them gated,
+with this repo's 86. The other six are listed as by design and not run:
+four (`journal/fastpath.test` 6, 9, 11 and 13) check the statistics line of
+hledger's fast-path journal parser, which hledgers does not have, and two
+(`balance/balance.test` 7 and 8) expect a dotted commodity symbol in
+quotes, which hledgers prints without them (see Dotted commodity symbols).
 hledgers is several times faster than hledger on journals of every size
 (see Benchmark).
 
@@ -216,7 +219,7 @@ a separate process.
 - `tests/shelltest-unsupported.txt` lists the cases the harness does not run,
   with the reason: a command line outside its sh subset, or (reason
   `by-design: ...`) a case that can not pass by design, counted apart. At
-  present it holds only the four by-design cases.
+  present it holds only the six by-design cases.
 - `HLEDGERS_TEST_FILTER=GLOB` runs only matching test files, eg `'cli/*.test'`.
 - `HLEDGERS_TEST_VERBOSE=1` lists every passing case and shows the details of
   every failing case, not just gated ones.
@@ -522,6 +525,36 @@ has no Source in the file, so it came from an account outside the export:
 text, so a field in it must be written the same way in both records; and a
 match group (`\1`) in the key is empty on the partner's side, whose record
 the block did not match.
+
+## Dotted commodity symbols
+
+In a commodity symbol written without quotes, hledgers reads a `.` as part
+of the symbol when a symbol character comes before it and a letter after it,
+so tickers such as `VEQT.TO` and `BRK.B` need no quotes, in amounts, costs
+and directives:
+
+    commodity BRK.B 1,000.00
+
+    P 2026-01-02 VEQT.TO 45.10 CAD
+
+    2026-01-05 buy
+        assets:broker            10 VEQT.TO @ 45.00 CAD
+        assets:cash         -450.00 CAD
+
+A `.` before a digit still begins the number, as in hledger: `$.50` and
+`EUR.50` are 0.50 dollars and euros. A symbol can not begin with a `.`, and
+one with a `.` before anything but a letter, such as `A.` or `A.5`, still
+needs quotes. Quoted symbols are read as before. Symbols are written as
+they are read, without quotes when they read back without them, so
+`"VEQT.TO"` is printed as `VEQT.TO` where hledger keeps the quotes.
+
+hledger does not read these symbols without quotes: it refuses a journal
+that uses them, except in the amount of a `P` or `D` directive, where it
+reads `10 VEQT.TO` as `10 VEQT` and ignores the rest of the line. A journal
+kept for both should quote its dotted symbols; hledgers' own output
+(`print`, `close`) leaves them unquoted. `print -O ledger` quotes them as
+hledger does, for Ledger, though not in the directives that `--export`
+copies as written. `tests/rules/dotted-symbols.test` has more examples.
 
 ## Licence
 

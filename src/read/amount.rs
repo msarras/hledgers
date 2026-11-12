@@ -13,7 +13,7 @@ use dashu_int::IBig;
 use super::common::datep;
 use crate::amount::{
     Amount, AmountCost, AmountStyle, CostBasis, DigitGroups, Precision, Side, Sym,
-    is_nonsimple_commodity_char,
+    is_nonsimple_commodity_char, simple_commodity_symbol,
 };
 use crate::decimal::Decimal;
 use crate::model::{BalanceAssertion, Commodity, SourcePos};
@@ -392,16 +392,17 @@ pub fn numberp(
     Ok((if negative { -q } else { q }, p, d, g))
 }
 
-/// A commodity symbol: in double quotes, or a run of characters that need no
-/// quotes (commoditysymbolp).
+/// A commodity symbol: in double quotes, or written without them, as
+/// [`simple_commodity_symbol`] reads it (commoditysymbolp).
 pub fn commodity_symbolp<'a>(c: &mut Cursor<'a>) -> PResult<&'a str> {
     if c.peek() == Some('"') {
         quoted_commodity_symbolp(c)
     } else {
-        let s = c.take_while(|ch| !is_nonsimple_commodity_char(ch));
+        let s = simple_commodity_symbol(c.rest(), false);
         if s.is_empty() {
             return Err(c.unexpected(&[Item::label("commodity symbol")]));
         }
+        c.pos += s.len();
         Ok(s)
     }
 }
@@ -562,7 +563,8 @@ fn right_or_no_symbol_amountp(
         let before = *c;
         let spaced = c.skip_spaces();
         let symbol = if in_parens && c.peek() != Some('"') {
-            let s = c.take_while(|ch| !is_nonsimple_commodity_char(ch) && ch != ')');
+            let s = simple_commodity_symbol(c.rest(), true);
+            c.pos += s.len();
             (!s.is_empty()).then_some(s).ok_or(())
         } else {
             commodity_symbolp(c).map_err(|_| ())
@@ -1370,5 +1372,27 @@ pub(crate) mod tests {
         );
         assert!(err("1,000.000,1").ends_with("invalid number (invalid use of separator)\n"));
         assert!(err("1.5 2").contains("1:5:"));
+    }
+
+    // hledgers' dotted symbols, on either side of the number and in an amount
+    // expression's parentheses, while a . before a digit still starts the number.
+    #[test]
+    fn dotted_symbols() {
+        let side = |s: &str| expr(s).unwrap().style.side;
+        eq("10 VEQT.TO", "VEQT.TO", "10", 0);
+        eq("VEQT.TO10", "VEQT.TO", "10", 0);
+        assert_eq!((side("10 VEQT.TO"), side("VEQT.TO 10")), (Side::R, Side::L));
+        eq("(10 VEQT.TO + 2 VEQT.TO) * 2", "VEQT.TO", "24", 0);
+        eq("10 A.B.C @ $1", "A.B.C", "10", 0);
+        eq("$.50", "$", "0.50", 2);
+        eq("EUR.50", "EUR", "0.50", 2);
+        assert!(expr("10 A.5").is_err());
+        // a symbol as shown reads back whole
+        for s in ["VEQT.TO", "A.", "A.5", ".TO", "(X"] {
+            let shown = crate::amount::render::quote_commodity_symbol_if_needed(s);
+            let mut c = Cursor::new(&shown);
+            assert_eq!(commodity_symbolp(&mut c), Ok(s), "{shown}");
+            assert!(c.at_end(), "{shown}");
+        }
     }
 }
