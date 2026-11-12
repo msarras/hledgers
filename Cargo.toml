@@ -20,6 +20,8 @@ dashu-int = { version = "0.6.2", default-features = false, features = ["std"] }
 encoding_rs = "0.8.35"
 rayon = { version = "1.12", optional = true }
 regex = "1.13"
+rsa = { version = "0.10.0", default-features = false, features = ["pkcs1v15"] }
+rustls-pki-types = { version = "1.15.1", default-features = false }
 rustls-pure = "0.15.4"
 rustyline = { version = "19.0.0", default-features = false }
 serde_json = { version = "1.0.151", features = ["arbitrary_precision"] }
