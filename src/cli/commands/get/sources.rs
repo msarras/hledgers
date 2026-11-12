@@ -85,6 +85,16 @@ const ECB: &str = "https://data-api.ecb.europa.eu";
 /// The User-Agent sent: Yahoo refuses some clients' default ones.
 const USER_AGENT: &str = concat!("hledgers/", env!("CARGO_PKG_VERSION"));
 
+/// The body of a GET request to a source, sent with the User-Agent; None if
+/// the source answers 404, as it does for what it does not have.
+fn request(agent: &ureq::Agent, url: &str) -> Result<Option<String>, String> {
+    match agent.get(url).header("User-Agent", USER_AGENT).call() {
+        Ok(mut r) => (r.body_mut().read_to_string().map(Some)).map_err(|e| e.to_string()),
+        Err(ureq::Error::StatusCode(404)) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn epoch() -> Day {
     Day::from_ymd(1970, 1, 1).expect("a valid date")
 }
@@ -125,13 +135,8 @@ fn yahoo(
     end: Day,
     now: i64,
 ) -> Result<Option<Series>, String> {
-    let request = agent
-        .get(yahoo_url(base, ticker, start, end))
-        .header("User-Agent", USER_AGENT);
-    let body = match request.call() {
-        Ok(mut r) => r.body_mut().read_to_string().map_err(|e| e.to_string())?,
-        Err(ureq::Error::StatusCode(404)) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
+    let Some(body) = request(agent, &yahoo_url(base, ticker, start, end))? else {
+        return Ok(None);
     };
     let mut series = parse_yahoo(&body, now)?;
     if let Some(s) = &mut series {
@@ -211,13 +216,8 @@ fn ecb(
     end: Day,
 ) -> Result<Option<Series>, String> {
     let (a, b) = ecb_pair(ticker).ok_or("not two currency codes joined by -")?;
-    let request = agent
-        .get(ecb_url(base, &a, &b, start, end))
-        .header("User-Agent", USER_AGENT);
-    let body = match request.call() {
-        Ok(mut r) => r.body_mut().read_to_string().map_err(|e| e.to_string())?,
-        Err(ureq::Error::StatusCode(404)) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
+    let Some(body) = request(agent, &ecb_url(base, &a, &b, start, end))? else {
+        return Ok(None);
     };
     parse_ecb(&body, &a, &b)
 }
