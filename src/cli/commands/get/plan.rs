@@ -141,9 +141,11 @@ pub struct Inferred {
     pub pair: bool,
     /// The quote's market code, the currency Yahoo must quote a ticker in.
     pub quote_code: String,
+    /// Whether that code is the quote's one-word `price:` tag.
+    pub quote_tagged: bool,
 }
 
-fn inferred(code: &str, quote_code: &str) -> Inferred {
+fn inferred(code: &str, quote_code: &str, quote_tagged: bool) -> Inferred {
     let pair = is_currency_code(code) && is_currency_code(quote_code);
     let mut tickers = Vec::new();
     if pair {
@@ -157,6 +159,7 @@ fn inferred(code: &str, quote_code: &str) -> Inferred {
         tickers,
         pair,
         quote_code: quote_code.to_string(),
+        quote_tagged,
     }
 }
 
@@ -231,7 +234,8 @@ pub fn targets(j: &Journal, today: Day) -> Result<Vec<Target>, String> {
         let declared = tags.get(&c).map_or(&[][..], |t| &t.pairs[..]);
         let quotes: Vec<(Sym, Lookup)> = if declared.is_empty() {
             let q = latest_quote(j, c).or(base);
-            let pair = |q: Sym| (q, Lookup::Inferred(inferred(&code(c), &code(q))));
+            let tagged = |q: Sym| tags.get(&q).is_some_and(|t| t.code.is_some());
+            let pair = |q: Sym| (q, Lookup::Inferred(inferred(&code(c), &code(q), tagged(q))));
             q.map(pair).into_iter().collect()
         } else {
             (declared.iter())
@@ -416,8 +420,10 @@ pub fn verdict(c: Sym, q: Sym, inf: &Inferred, outcomes: &[Outcome]) -> Verdict 
 }
 
 /// Why no ticker is used for a commodity: what Yahoo has for each tried,
-/// then the tag that settles it, its quote's market code if Yahoo quotes a
-/// ticker in another currency, otherwise a ticker.
+/// then the tags that settle it. If Yahoo quotes a ticker in another
+/// currency, they are the quote's market code, unless its own tag gives it,
+/// and that ticker priced in a commodity for the other currency; otherwise
+/// a ticker.
 fn skip_message(c: Sym, q: Sym, inf: &Inferred, outcomes: &[Outcome]) -> String {
     let code = &inf.quote_code;
     let (mut said, mut unchecked, mut missing) = (Vec::new(), Vec::new(), Vec::new());
@@ -426,10 +432,13 @@ fn skip_message(c: Sym, q: Sym, inf: &Inferred, outcomes: &[Outcome]) -> String 
         match o {
             Outcome::NotFound => missing.push(t.as_str()),
             Outcome::Currency(cur) => {
-                currency.get_or_insert(cur);
-                said.push(format!(
-                    "Yahoo quotes {t} in {cur} but {q} is taken as {code}"
-                ));
+                currency.get_or_insert((t, cur));
+                let is = if inf.quote_tagged {
+                    format!("is {code} by its price: tag")
+                } else {
+                    format!("is taken as {code}")
+                };
+                said.push(format!("Yahoo quotes {t} in {cur} but {q} {is}"));
             }
             Outcome::Price {
                 close: (cd, cp),
@@ -453,7 +462,16 @@ fn skip_message(c: Sym, q: Sym, inf: &Inferred, outcomes: &[Outcome]) -> String 
         said.push(format!("Yahoo has no {}", missing.join(" or ")));
     }
     let settle = match currency {
-        Some(cur) => format!("if {q} is {cur}, declare: commodity {q} ; price: {cur}"),
+        Some((t, cur)) => {
+            let fetch = format!(
+                "to fetch it in {cur}, declare: commodity {c} ; price: yahoo {t} QUOTE, QUOTE being your commodity for {cur}"
+            );
+            if inf.quote_tagged {
+                fetch
+            } else {
+                format!("if {q} is {cur}, declare: commodity {q} ; price: {cur}; or {fetch}")
+            }
+        }
         None => format!("to choose a ticker, declare: commodity {c} ; price: yahoo TICKER {q}"),
     };
     format!("{c}: {}; {settle}", said.join("; "))
@@ -560,6 +578,11 @@ mod tests {
                 "usd in $: yahoo USDCAD=X or USD or USD-CAD 2026-01-25..2026-11-11",
             ]
         );
+        // $'s market code is its tag, usd's its symbol
+        let tagged: Vec<bool> = (targets(&j, day(11, 12)).unwrap().iter())
+            .map(|t| matches!(&t.lookup, Lookup::Inferred(inf) if inf.quote_tagged))
+            .collect();
+        assert_eq!(tagged, [true, true, false, true]);
     }
 
     #[test]
@@ -755,7 +778,7 @@ P 2026-01-05 VEQT.TO $45.10
 
     #[test]
     fn verdicts() {
-        let btc = inferred("BTC", "USD");
+        let btc = inferred("BTC", "USD", false);
         assert_eq!(btc.tickers, ["BTC", "BTC-USD"]);
         let price = || Outcome::Price {
             close: (day(11, 3), num("32.1")),
@@ -785,7 +808,7 @@ P 2026-01-05 VEQT.TO $45.10
             )
         );
         // two currencies with no journal price nearby: their FX pair
-        let usd = inferred("USD", "CAD");
+        let usd = inferred("USD", "CAD", false);
         assert_eq!(usd.tickers, ["USDCAD=X", "USD", "USD-CAD"]);
         assert_eq!(v(&usd, &[unchecked("USD/CAD")]), Verdict::Use(0));
         // but never another ticker unchecked
@@ -797,13 +820,27 @@ P 2026-01-05 VEQT.TO $45.10
             ),
             Verdict::Skip(_)
         ));
-        // the currency check, with the tag that settles it
-        let veqt = inferred("VEQT.TO", "USD");
+        // the currency check, with the tags that settle it: the quote's
+        // market code, or the ticker in a commodity for the other currency
+        let veqt = inferred("VEQT.TO", "USD", false);
         let v = |os: &[Outcome]| verdict("VEQT.TO".into(), "$".into(), &veqt, os);
         assert_eq!(
             v(&[Outcome::Currency("CAD".into()), Outcome::NotFound]),
             Verdict::Skip(
-                "VEQT.TO: Yahoo quotes VEQT.TO in CAD but $ is taken as USD; Yahoo has no VEQT.TO-USD; if $ is CAD, declare: commodity $ ; price: CAD".into()
+                "VEQT.TO: Yahoo quotes VEQT.TO in CAD but $ is taken as USD; Yahoo has no VEQT.TO-USD; if $ is CAD, declare: commodity $ ; price: CAD; or to fetch it in CAD, declare: commodity VEQT.TO ; price: yahoo VEQT.TO QUOTE, QUOTE being your commodity for CAD".into()
+            )
+        );
+        // the quote's market code given by its tag is not questioned
+        let aapl = inferred("AAPL", "CAD", true);
+        assert_eq!(
+            verdict(
+                "AAPL".into(),
+                "$".into(),
+                &aapl,
+                &[Outcome::Currency("USD".into()), Outcome::NotFound]
+            ),
+            Verdict::Skip(
+                "AAPL: Yahoo quotes AAPL in USD but $ is CAD by its price: tag; Yahoo has no AAPL-CAD; to fetch it in USD, declare: commodity AAPL ; price: yahoo AAPL QUOTE, QUOTE being your commodity for USD".into()
             )
         );
     }
@@ -813,7 +850,7 @@ P 2026-01-05 VEQT.TO $45.10
         let t = |q: &str| Target {
             commodity: "VEQT.TO".into(),
             quote: q.into(),
-            lookup: Lookup::Inferred(inferred("VEQT.TO", "CAD")),
+            lookup: Lookup::Inferred(inferred("VEQT.TO", "CAD", false)),
             start: day(7, 1),
             end: day(7, 6),
         };

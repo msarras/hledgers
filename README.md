@@ -617,9 +617,9 @@ exchange-traded fund near 33 USD, fails the second, and `BTC-USD` is used.
 With no journal price within 7 days, two currencies' FX pair is used, and
 otherwise the only ticker that Yahoo quotes in the quote's currency.
 Otherwise the commodity is skipped with a warning saying what Yahoo has and
-the tag that settles it:
+the tags that settle it:
 
-    Warning: XIU.TO: Yahoo quotes XIU.TO in CAD but $ is taken as USD; Yahoo has no XIU.TO-USD; if $ is CAD, declare: commodity $ ; price: CAD
+    Warning: XIU.TO: Yahoo quotes XIU.TO in CAD but $ is taken as USD; Yahoo has no XIU.TO-USD; if $ is CAD, declare: commodity $ ; price: CAD; or to fetch it in CAD, declare: commodity XIU.TO ; price: yahoo XIU.TO QUOTE, QUOTE being your commodity for CAD
 
 A `price:` tag on a commodity directive overrides. One word names the
 commodity's market code: `commodity $ ; price: CAD` makes `$` the Canadian
