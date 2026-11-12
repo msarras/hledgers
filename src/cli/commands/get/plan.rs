@@ -30,12 +30,17 @@ enum PriceTag {
 }
 
 /// A `price:` tag's value read; an error if it is neither one word nor
-/// three, or names an unknown source.
+/// three, or names an unknown source or a ticker its source can not have.
 fn parse_price_tag(commodity: &str, value: &str) -> Result<PriceTag, String> {
     match value.split_whitespace().collect::<Vec<_>>()[..] {
         [code] => Ok(PriceTag::Code(code.to_string())),
         [source, ticker, quote] => match Source::parse(source) {
-            Some(s) => Ok(PriceTag::Declared(s, ticker.to_string(), Sym::from(quote))),
+            Some(s) => match s.check_ticker(ticker) {
+                Ok(()) => Ok(PriceTag::Declared(s, ticker.to_string(), Sym::from(quote))),
+                Err(form) => Err(format!(
+                    "commodity {commodity} has a price: tag with a malformed {source} ticker, \"{value}\": it should be {form}"
+                )),
+            },
             None => {
                 let names: Vec<&str> = Source::ALL.iter().map(|s| s.name()).collect();
                 Err(format!(
@@ -652,6 +657,18 @@ commodity $ ; Price: CAD
                 "usd in $: yahoo USDCAD=X or USD or USD-CAD 2026-01-04..2026-11-11",
             ]
         );
+        // an ECB pair, its codes in either case, is wanted to today, a
+        // reference rate being final when it is published
+        let j = journal(
+            "commodity $ ; price: CAD
+commodity usd ; price: ecb usd-cad $
+
+2026-01-10 usd
+    assets:usd         100 usd @ $1.40
+    assets:cash       $-140
+",
+        );
+        assert_eq!(shown(&j), ["usd in $: ecb usd-cad 2026-01-03..2026-11-12"]);
         let err = |tag: &str| {
             targets(
                 &journal(&format!("commodity X ; price: {tag}\n")),
@@ -666,8 +683,13 @@ commodity $ ; Price: CAD
         assert!(err("yahoo X.TO $ now").contains("malformed"));
         assert_eq!(
             err("bloomberg X.TO $"),
-            "commodity X has a price: tag with an unknown source, \"bloomberg X.TO $\": the sources are: yahoo"
+            "commodity X has a price: tag with an unknown source, \"bloomberg X.TO $\": the sources are: yahoo, ecb"
         );
+        assert_eq!(
+            err("ecb USDCAD $"),
+            "commodity X has a price: tag with a malformed ecb ticker, \"ecb USDCAD $\": it should be two different currency codes joined by -, such as USD-CAD"
+        );
+        assert!(err("ecb EUR-EUR $").contains("malformed ecb ticker"));
         assert_eq!(
             err("CAD, price: USD"),
             "commodity X has two one-word price: tags, CAD and USD: it can have one market code"

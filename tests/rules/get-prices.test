@@ -129,3 +129,26 @@ commodity VEQT.TO ; price: yahoo VEQT.TO
 $ D=$(mktemp -d) && cd $D && hledger -f - get --prices --dry-run 2>&1; s=$?; cd /; rm -rf $D; exit $s
 hledger: Error: commodity VEQT.TO has a malformed price: tag, "yahoo VEQT.TO": it should be a market code (one word) or SOURCE TICKER QUOTE (three words)
 >=1
+
+# ** 7. A price: tag naming the ecb source fetches the euro reference rates
+# of the European Central Bank: USD-CAD is the price of 1 USD in CAD. A
+# reference rate is final when it is published, so its days are wanted up
+# to today, where Yahoo's end yesterday.
+<
+commodity $ ; price: CAD
+commodity usd ; price: ecb USD-CAD $
+
+2026-10-01 buy
+    assets:broker      10 XIU.TO @ $50
+    assets:cash      $-500
+
+2026-10-02 usd
+    assets:usd        100 usd @ $1.40
+    assets:cash      $-140
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo XIU.TO or XIU.TO-CAD 2026-09-24..2026-11-11 >./prices/XIU.TO.prices
+would run: ecb USD-CAD 2026-09-25..2026-11-12 >./prices/usd.prices
+no new transactions found in new.j
+>=0
