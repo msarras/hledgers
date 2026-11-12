@@ -155,11 +155,13 @@ files and aliases. `add` asks for transactions, with defaults from the
 command line or a similar past entry, completion on a terminal, and
 checks against the whole journal, and appends them. `get` runs the
 journal's `data/getdata` and `prices/getprices` helpers, merging the
-prices into per-commodity files. `setup` checks the installation, the
-terminal and the default journal, contacting hledger.org over HTTPS (pure
-Rust TLS: rustls with a RustCrypto provider, TLS 1.3 only). Of hledger's
+prices into per-commodity files, and without the second fetches the
+prices of the commodities held itself, from Yahoo (see Prices fetched by
+`get`). `setup` checks the installation, the terminal and the default
+journal, contacting hledger.org over HTTPS (pure Rust TLS: rustls with a
+RustCrypto provider, TLS 1.3 only). Of hledger's
 2420 functional test cases 2414 pass byte-identically, all of them gated,
-with this repo's 86. The other six are listed as by design and not run:
+with this repo's 92. The other six are listed as by design and not run:
 four (`journal/fastpath.test` 6, 9, 11 and 13) check the statistics line of
 hledger's fast-path journal parser, which hledgers does not have, and two
 (`balance/balance.test` 7 and 8) expect a dotted commodity symbol in
@@ -555,6 +557,111 @@ kept for both should quote its dotted symbols; hledgers' own output
 (`print`, `close`) leaves them unquoted. `print -O ledger` quotes them as
 hledger does, for Ledger, though not in the directives that `--export`
 copies as written. `tests/rules/dotted-symbols.test` has more examples.
+
+## Prices fetched by `get`
+
+Without a `prices/getprices` helper script, `get` (and `import --get`)
+fetches the market prices of the commodities held itself, from Yahoo
+Finance, and merges them into the files `prices/COMMODITY.prices` as it
+merges a helper's output. With the script, it runs the script, as hledger
+does. Nothing needs declaring for the usual case:
+
+    commodity $ ; price: CAD
+
+    2026-10-01 buy
+        assets:broker      10 XIU.TO @ $50
+        assets:cash      $-500
+
+    2026-10-02 usd
+        assets:usd        100 usd @ $1.40
+        assets:cash      $-140
+
+    2026-10-05 btc
+        assets:crypto     0.001 btc @ 72000 usd
+        assets:usd        -72 usd
+
+    $ hledgers -f DIR/main.journal get --prices
+    running: yahoo XIU.TO 2026-09-24..2026-11-11 >DIR/prices/XIU.TO.prices
+    wrote DIR/prices/XIU.TO.prices (existing 0, added 34)
+    running: yahoo BTC 2026-09-28..2026-11-11 >DIR/prices/btc.prices
+    running: yahoo BTC-USD 2026-09-28..2026-11-11 >DIR/prices/btc.prices
+    wrote DIR/prices/btc.prices (existing 0, added 45)
+    running: yahoo USDCAD=X 2026-09-25..2026-11-11 >DIR/prices/usd.prices
+    wrote DIR/prices/usd.prices (existing 0, added 34)
+
+The commodities fetched are those with a non-zero balance in some asset or
+liability account, other than the base currency (hledger's guess: the
+commodity most used as a price in P directives, or else in postings), and
+then the commodities they are priced in, and so on: btc, priced in usd,
+brings usd, priced in `$`. A commodity is priced in the commodity of its
+latest price in the journal, declared or implied by a cost, or else in the
+base currency; it is the base currency if its market code is the base
+currency's. Its prices are wanted from 7 days before its first posting, or
+before that of a commodity priced in it, to yesterday, for completed days
+only. Only the days missing are asked for, those with no P directive for
+the commodity in its quote in the journal or the price file, and of them
+only runs longer than 7 days or reaching yesterday: a weekend or holiday is
+not asked for again.
+
+A commodity's market code is its one-word `price:` tag, or else its ISO
+4217 code or symbol, uppercased (`$` is USD, btc BTC). The Yahoo tickers
+tried, in turn, are the FX pair of two currencies (`USDCAD=X`), the market
+code (`XIU.TO`), and, when the quote is a currency, the pair a
+cryptocurrency is quoted as (`BTC-USD`). A ticker must pass two checks:
+Yahoo must quote it in the currency of the quote's market code, and of the
+journal's prices of the commodity in its quote (P directives, costs, and
+the price file's) and the closes fetched, the price and close nearest in
+time, if within 7 days of each other, must be within half and double of
+each other. The first ticker that passes both is used: above, `BTC`, an
+exchange-traded fund near 33 USD, fails the second, and `BTC-USD` is used.
+With no journal price within 7 days, two currencies' FX pair is used, and
+otherwise the only ticker that Yahoo quotes in the quote's currency.
+Otherwise the commodity is skipped with a warning saying what Yahoo has and
+the tag that settles it:
+
+    Warning: XIU.TO: Yahoo quotes XIU.TO in CAD but $ is taken as USD; Yahoo has no XIU.TO-USD; if $ is CAD, declare: commodity $ ; price: CAD
+
+A `price:` tag on a commodity directive overrides. One word names the
+commodity's market code: `commodity $ ; price: CAD` makes `$` the Canadian
+dollar. Three words, `SOURCE TICKER QUOTE`, name a ticker and the commodity
+its prices are in, used without the checks: `commodity VEQT ; price: yahoo
+VEQT.TO $`. Several three-word tags, separated by commas, are several
+prices to fetch, each in a different commodity: `commodity btc ; price:
+yahoo BTC-USD usd, price: yahoo BTC-CAD $`. `yahoo` is the only source. A
+malformed tag (two words, more than three, an unknown source, a second
+one-word tag, two in the same quote) is an error before anything is
+fetched.
+
+A commodity that fails is a warning, and the others go on; the exit status
+stays 0, as with a helper script. Each file is written as soon as its
+prices are in, so a run that stops is resumed by the next. A rerun asks
+only for what is missing, and never changes a price already written: the
+file's prices win, as in merging. The journal sees the prices once it has
+`include prices/*.prices`, a line to add once a price file exists, since an
+include glob that matches nothing is an error, as in hledger. Prices keep
+the decimals fetched (single-precision numbers, written in their shortest
+form, such as `$54.82` or `$1.41548`), and hledger counts the decimals of
+P directives in a commodity's display style, so a format on the commodity
+directive, such as `commodity $1,000.00 ; price: CAD`, keeps reports as
+they were.
+
+Fetching sends Yahoo (query1.finance.yahoo.com) the tickers of the
+commodities held and the dates wanted, with the User-Agent
+`hledgers/VERSION`, and nothing else from the journal; requests are made
+one after another, with no retries, and give up after 120 seconds. Yahoo's
+certificate chain is signed with RSA, which HTTPS verifies through the
+pure-Rust rsa crate.
+
+Limits: a run of days that Yahoo has nothing for (before a listing, a long
+trading halt, a weekend or holiday just before today) is asked for again on
+each run, a request for each ticker tried; Yahoo's prices are adjusted for
+later splits, so prices fetched after a split do not match the quantities
+held before it, while prices written earlier are kept; Yahoo quotes London
+shares in pence (`GBp`), which the currency check refuses, though a
+three-word tag fetches them, in pence; only the currencies of hledger's
+table of symbols and codes are recognised as currencies, so no FX pair is
+tried for others (such as AED); and `get` takes no `--today`, as in hledger
+(`import --get` does). `tests/rules/get-prices.test` has more examples.
 
 ## Licence
 

@@ -219,6 +219,7 @@ rewrite.test
 roi.test
 rules/dotted-symbols.test
 rules/error-sweep.test
+rules/get-prices.test
 rules/import-upstream.test
 rules/lazy-errors.test
 rules/let-split.test

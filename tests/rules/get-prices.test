@@ -1,0 +1,131 @@
+# * Built-in price fetching in get: this repo's extension, not upstream's
+
+# get takes no --today, as in hledger, so most of these cases run it through
+# import --get, which passes import's --today and --dry-run on to it (new.j,
+# empty, gives import nothing to import). With --dry-run nothing is fetched.
+
+# ** 1. Without a prices/getprices script, get fetches prices itself: for each
+# commodity held in an asset or liability account, other than the base
+# currency ($, declared CAD by its tag), and for usd, which btc is priced in.
+# Each is asked for from 7 days before its first posting, or before that of a
+# commodity priced in it, to yesterday, by Yahoo tickers tried in turn: two
+# currencies' FX pair, the market code, a cryptocurrency's pair.
+<
+commodity $ ; price: CAD
+
+2026-10-01 buy
+    assets:broker      10 VEQT.TO @ $45
+    assets:cash      $-450
+
+2026-10-02 usd
+    assets:usd        100 usd @ $1.40
+    assets:cash      $-140
+
+2026-10-05 btc
+    assets:crypto     0.001 btc @ 72000 usd
+    assets:usd        -72 usd
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo VEQT.TO or VEQT.TO-CAD 2026-09-24..2026-11-11 >./prices/VEQT.TO.prices
+would run: yahoo BTC or BTC-USD 2026-09-28..2026-11-11 >./prices/btc.prices
+would run: yahoo USDCAD=X or USD or USD-CAD 2026-09-25..2026-11-11 >./prices/usd.prices
+no new transactions found in new.j
+>=0
+
+# ** 2. Only missing days are asked for, those without a P directive in the
+# journal or the price file, and of those only runs longer than 7 days or
+# reaching yesterday: here not the 7 days before the first posting or the two
+# weekends, but the 12 days from 2026-10-14 and the days since the last price.
+<
+P 2026-10-13 VEQT.TO $45.30
+
+2026-10-05 buy
+    assets:broker      10 VEQT.TO @ $45
+    assets:cash      $-450
+
+$ D=$(mktemp -d) && cd $D && touch new.j && mkdir prices && printf 'P 2026-10-05 VEQT.TO $45\nP 2026-10-06 VEQT.TO $45\nP 2026-10-07 VEQT.TO $45\nP 2026-10-08 VEQT.TO $45\nP 2026-10-09 VEQT.TO $45\nP 2026-10-12 VEQT.TO $45\nP 2026-10-26 VEQT.TO $46\nP 2026-10-27 VEQT.TO $46\nP 2026-10-28 VEQT.TO $46\nP 2026-10-29 VEQT.TO $46\nP 2026-10-30 VEQT.TO $46\nP 2026-11-02 VEQT.TO $46\nP 2026-11-03 VEQT.TO $46\nP 2026-11-04 VEQT.TO $46\nP 2026-11-05 VEQT.TO $46\nP 2026-11-06 VEQT.TO $46\n' >prices/VEQT.TO.prices && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo VEQT.TO or VEQT.TO-USD 2026-10-14..2026-10-25 >./prices/VEQT.TO.prices
+would run: yahoo VEQT.TO or VEQT.TO-USD 2026-11-07..2026-11-11 >./prices/VEQT.TO.prices
+no new transactions found in new.j
+>=0
+
+# ** 3. With every price in up to yesterday, but for a weekend, nothing is
+# asked for.
+<
+2026-11-09 buy
+    assets:broker      10 VEQT.TO @ $45
+    assets:cash      $-450
+
+$ D=$(mktemp -d) && cd $D && touch new.j && mkdir prices && printf 'P 2026-11-02 VEQT.TO $45\nP 2026-11-03 VEQT.TO $45\nP 2026-11-04 VEQT.TO $45\nP 2026-11-05 VEQT.TO $45\nP 2026-11-06 VEQT.TO $45\nP 2026-11-09 VEQT.TO $45\nP 2026-11-10 VEQT.TO $45\nP 2026-11-11 VEQT.TO $45\n' >prices/VEQT.TO.prices && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+no new transactions found in new.j
+>=0
+
+# ** 4. A price: tag on a commodity directive overrides: three words,
+# SOURCE TICKER QUOTE, name the ticker and the commodity its prices are in,
+# used without the checks, and several such tags are several pairs to
+# fetch; one word is the commodity's market code, from which tickers are
+# inferred as for any other.
+<
+commodity VEQT ; price: yahoo VEQT.TO $
+commodity XIU ; price: XIU.TO
+commodity btc ; price: yahoo BTC-USD usd, price: yahoo BTC-CAD $
+commodity $ ; price: CAD
+
+2026-10-05 buy
+    assets:broker      10 VEQT @ $45
+    assets:broker      10 XIU @ $40
+    assets:cash      $-850
+
+2026-10-06 buy
+    assets:crypto     0.001 btc @ $100000
+    assets:cash      $-100
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo VEQT.TO 2026-09-28..2026-11-11 >./prices/VEQT.prices
+would run: yahoo XIU.TO or XIU.TO-CAD 2026-09-28..2026-11-11 >./prices/XIU.prices
+would run: yahoo BTC-USD 2026-09-29..2026-11-11 >./prices/btc.prices
+would run: yahoo BTC-CAD 2026-09-29..2026-11-11 >./prices/btc.prices
+would run: yahoo USDCAD=X or USD or USD-CAD 2026-09-29..2026-11-11 >./prices/usd.prices
+no new transactions found in new.j
+>=0
+
+# ** 5. A commodity no longer held is not fetched, nor is one never held in
+# an asset or liability account.
+<
+2026-10-05 buy
+    assets:broker      10 VEQT.TO @ $45
+    assets:cash      $-450
+
+2026-10-20 sell
+    assets:broker     -10 VEQT.TO @ $47
+    assets:cash        $470
+
+2026-10-21 buy
+    assets:broker       5 XEQT.TO @ $30
+    assets:cash      $-150
+
+2026-10-22 points
+    expenses:shopping     100 PTS
+    revenues:rewards     -100 PTS
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo XEQT.TO or XEQT.TO-USD 2026-10-14..2026-11-11 >./prices/XEQT.TO.prices
+no new transactions found in new.j
+>=0
+
+# ** 6. A malformed price: tag is an error, before any price is fetched.
+<
+commodity VEQT.TO ; price: yahoo VEQT.TO
+
+2026-10-05 buy
+    assets:broker      10 VEQT.TO @ $45
+    assets:cash      $-450
+
+$ D=$(mktemp -d) && cd $D && hledger -f - get --prices --dry-run 2>&1; s=$?; cd /; rm -rf $D; exit $s
+hledger: Error: commodity VEQT.TO has a malformed price: tag, "yahoo VEQT.TO": it should be a market code (one word) or SOURCE TICKER QUOTE (three words)
+>=1

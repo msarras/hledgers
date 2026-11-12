@@ -1,15 +1,23 @@
 //! The get command (Hledger.Cli.Commands.Get): new data fetched by the
 //! journal's helper scripts, `data/getdata` for transactions and
-//! `prices/getprices` for market prices, each skipped with a notice when
-//! missing.
+//! `prices/getprices` for market prices, the first skipped with a notice
+//! when missing; without the second, hledgers fetches prices itself (see
+//! `plan` and `sources`).
+
+mod plan;
+mod sources;
 
 use std::collections::BTreeMap;
+
+use plan::{Lookup, Outcome, Target, Verdict};
+use sources::{Series, Source};
 
 use crate::amount::Sym;
 use crate::amount::currency::to_currency_code;
 use crate::cli::args::{Arity, Flag, General, Mode};
 use crate::cli::opts::CliOpts;
 use crate::dates::Day;
+use crate::decimal::Decimal;
 use crate::model::{Journal, PriceDirective};
 use crate::read::rules::{path_join, take_directory};
 
@@ -121,7 +129,7 @@ fn fetch_data(opts: &CliOpts, j: &Journal) -> Result<(), String> {
 /// Fetch market prices (fetchPrices): for each commodity used, other than
 /// the base currency, run `prices/getprices BASE CODE START TODAY` from the
 /// commodity's first posting date, merging what it prints into
-/// `prices/CODE.prices`.
+/// `prices/CODE.prices`; without that script, fetch them built in.
 fn fetch_prices(opts: &CliOpts, j: &Journal) -> Result<(), String> {
     let dry_run = opts.raw.bool("dry-run");
     let jdir = journal_dir(j);
@@ -129,8 +137,7 @@ fn fetch_prices(opts: &CliOpts, j: &Journal) -> Result<(), String> {
     let script = path_join(&prices_dir, "getprices");
     create_dir(&prices_dir)?;
     if !crate::read::file_exists(&script) {
-        eprintln!("no {script} script, skipping prices fetch");
-        return Ok(());
+        return fetch_prices_builtin(opts, j, &prices_dir);
     }
     let today = crate::dates::current_day();
     let base = j.base_currency_code().to_string();
@@ -186,6 +193,109 @@ fn fetch_prices(opts: &CliOpts, j: &Journal) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Fetch market prices without a helper script: for each commodity held and
+/// each commodity they are priced in (see [`plan::targets`]), the runs of
+/// days missing from the journal and from its `prices/CODE.prices` file,
+/// from the ticker its `price:` tag declares or else from the first ticker
+/// inferred that passes the checks, each file merged as soon as its prices
+/// are in. A commodity that fails is a warning, and the others go on.
+fn fetch_prices_builtin(opts: &CliOpts, j: &Journal, prices_dir: &str) -> Result<(), String> {
+    let dry_run = opts.raw.bool("dry-run");
+    let targets = plan::targets(j, opts.spec.today)?;
+    let styles = j.commodity_styles();
+    let agent = crate::cli::http::agent(std::time::Duration::from_secs(120));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    for t in &targets {
+        let code = to_currency_code(&t.commodity);
+        let outfile = path_join(prices_dir, &format!("{code}.prices"));
+        let file = (std::fs::read_to_string(&outfile).ok())
+            .and_then(|text| parse_prices(&text).ok())
+            .unwrap_or_default();
+        let runs = plan::holes(t.start, t.end, &plan::have(j, &file, t));
+        if dry_run {
+            for (from, to) in &runs {
+                log_command(true, &format!("{} {from}..{to} >{outfile}", t.lookup));
+            }
+            continue;
+        }
+        if runs.is_empty() {
+            continue;
+        }
+        match fetch_target(&agent, t, &runs, &outfile, &plan::known(j, &file, t), now) {
+            Err(m) => crate::console::warn(&opts.input.prog_args, &m),
+            Ok(closes) => {
+                let style = styles.get(&t.quote);
+                let text: String = (closes.iter())
+                    .map(|(d, p)| plan::price_line(*d, t, p, style) + "\n")
+                    .collect();
+                eprintln!("{}", merge_and_write_prices(&outfile, &text)?);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A target's closes on the days of these runs, by the ticker its tag
+/// declares or by the first inferred one that passes the checks, each
+/// request shown as it is made; or a warning saying why there are none.
+fn fetch_target(
+    agent: &ureq::Agent,
+    t: &Target,
+    runs: &[(Day, Day)],
+    outfile: &str,
+    known: &BTreeMap<Day, Decimal>,
+    now: i64,
+) -> Result<BTreeMap<Day, Decimal>, String> {
+    // a ticker's closes on all the runs' days, None if the source does not
+    // know it
+    let fetch = |source: Source, ticker: &str| -> Result<Option<Series>, String> {
+        let mut all: Option<Series> = None;
+        for &(from, to) in runs {
+            let name = source.name();
+            log_command(false, &format!("{name} {ticker} {from}..{to} >{outfile}"));
+            let fetched = (source.fetch(agent, ticker, from, to, now))
+                .map_err(|e| format!("{}: could not fetch {name} {ticker}: {e}", t.commodity))?;
+            let Some(s) = fetched else {
+                return Ok(None);
+            };
+            match &mut all {
+                Some(all) => all.closes.extend(s.closes),
+                None => all = Some(s),
+            }
+        }
+        Ok(all)
+    };
+    match &t.lookup {
+        Lookup::Declared(source, ticker) => match fetch(*source, ticker)? {
+            Some(s) => Ok(s.closes),
+            None => Err(format!(
+                "{}: {} has no {ticker}, which its price: tag names",
+                t.commodity,
+                source.name()
+            )),
+        },
+        Lookup::Inferred(inf) => {
+            let (mut tried, mut outcomes) = (Vec::new(), Vec::new());
+            loop {
+                let s = fetch(Source::Yahoo, &inf.tickers[tried.len()])?;
+                outcomes.push(s.as_ref().map_or(Outcome::NotFound, |s| {
+                    plan::check(s, &inf.quote_code, known)
+                }));
+                tried.push(s);
+                match plan::verdict(t.commodity, t.quote, inf, &outcomes) {
+                    Verdict::Use(i) => {
+                        return Ok(tried.swap_remove(i).map(|s| s.closes).unwrap_or_default());
+                    }
+                    Verdict::More => {}
+                    Verdict::Skip(m) => return Err(m),
+                }
+            }
+        }
+    }
 }
 
 /// The P directives in journal text (parsePrices).

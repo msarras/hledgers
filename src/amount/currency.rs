@@ -18,6 +18,12 @@ pub fn to_currency_code(symbol: &str) -> &str {
     currency_symbol_to_code(symbol).unwrap_or(symbol)
 }
 
+/// Whether this is the ISO 4217 code of a currency in the table below, such
+/// as CAD (uppercase only).
+pub fn is_currency_code(code: &str) -> bool {
+    CURRENCIES.iter().any(|&(_, c, _)| c == code)
+}
+
 /// Country and currency name, ISO 4217 code, symbol.
 const CURRENCIES: &[(&str, &str, &str)] = &[
     ("Albania Lek", "ALL", "Lek"),
@@ -147,5 +153,15 @@ pub(crate) mod tests {
         assert_eq!(currency_symbol_to_code("kr"), Some("SEK"));
         assert_eq!(currency_symbol_to_code("Kč"), Some("CZK"));
         assert_eq!(CURRENCIES.len(), 109);
+    }
+
+    #[test]
+    fn currency_codes() {
+        assert!(is_currency_code("CAD"));
+        assert!(is_currency_code("USD"));
+        assert!(!is_currency_code("usd"));
+        assert!(!is_currency_code("$"));
+        assert!(!is_currency_code("BTC"));
+        assert!(!is_currency_code("VEQT.TO"));
     }
 }
