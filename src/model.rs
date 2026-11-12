@@ -710,6 +710,22 @@ fn pivot_component(name: &str, t: &Transaction, p: &Posting) -> String {
     }
 }
 
+/// Of these commodity symbols, the first with the most frequent ISO 4217
+/// code (the first seen winning ties), and that code.
+fn most_used_currency<'a>(syms: Vec<&'a str>) -> Option<(&'a str, &'a str)> {
+    // each symbol's code, looked up once
+    let mut codes: std::collections::HashMap<&str, &str> = Default::default();
+    let mut code_of =
+        |s: &'a str| -> &'a str { codes.entry(s).or_insert_with(|| to_currency_code(s)) };
+    let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
+    for (i, s) in syms.iter().enumerate() {
+        stats.entry(code_of(s)).or_insert((0, i)).0 -= 1;
+    }
+    let code = stats.into_iter().min_by_key(|(_, s)| *s)?.0;
+    let sym = syms.into_iter().find(|s| code_of(s) == code)?;
+    Some((sym, code))
+}
+
 /// Each commodity alias, with its commodity, the number of alias units in
 /// one unit of the commodity, and the commodity's style if known
 /// (CommodityAliases).
@@ -940,27 +956,20 @@ impl Journal {
     /// first with the most frequent ISO 4217 code (the first seen winning
     /// ties), and that code (journalBaseCurrency).
     pub fn base_currency(&self) -> Option<(&str, &str)> {
-        fn pick<'a>(syms: Vec<&'a str>) -> Option<(&'a str, &'a str)> {
-            // each symbol's code, looked up once
-            let mut codes: std::collections::HashMap<&str, &str> = Default::default();
-            let mut code_of =
-                |s: &'a str| -> &'a str { codes.entry(s).or_insert_with(|| to_currency_code(s)) };
-            let mut stats: BTreeMap<&str, (isize, usize)> = BTreeMap::new();
-            for (i, s) in syms.iter().enumerate() {
-                stats.entry(code_of(s)).or_insert((0, i)).0 -= 1;
-            }
-            let code = stats.into_iter().min_by_key(|(_, s)| *s)?.0;
-            let sym = syms.into_iter().find(|s| code_of(s) == code)?;
-            Some((sym, code))
-        }
         let price_targets = self.price_directives.iter().map(|pd| &*pd.amount.commodity);
-        pick(price_targets.collect()).or_else(|| {
-            pick(
-                self.posting_and_cost_amounts()
-                    .map(|a| &*a.commodity)
-                    .collect(),
-            )
-        })
+        most_used_currency(price_targets.collect())
+            .or_else(|| self.base_currency_from_transactions())
+    }
+
+    /// The base currency guessed from the posting and cost amounts'
+    /// commodities alone, as `base_currency` guesses it when there is no P
+    /// directive, and its code.
+    pub fn base_currency_from_transactions(&self) -> Option<(&str, &str)> {
+        most_used_currency(
+            self.posting_and_cost_amounts()
+                .map(|a| &*a.commodity)
+                .collect(),
+        )
     }
 
     /// The ISO 4217 code of the guessed base currency, or USD

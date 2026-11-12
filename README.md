@@ -592,12 +592,13 @@ does. Nothing needs declaring for the usual case:
     wrote DIR/prices/usd.prices (existing 0, added 34)
 
 The commodities fetched are those with a non-zero balance in some asset or
-liability account, other than the base currency (hledger's guess: the
-commodity most used as a price in P directives, or else in postings), and
-then the commodities they are priced in, and so on: btc, priced in usd,
-brings usd, priced in `$`. A commodity is priced in the commodity of its
-latest price in the journal, declared or implied by a cost, or else in the
-base currency; it is the base currency if its market code is the base
+liability account, other than the base currency (the commodity most used
+in postings and their costs; unlike hledger's guess, it does not count the
+P directives, so that the prices fetched can not change it), and then the
+commodities they are priced in, and so on: btc, priced in usd, brings usd,
+priced in `$`. A commodity is priced in the commodity of its latest price
+in the journal, declared or implied by a cost, or else in the base
+currency; it is the base currency if its market code is the base
 currency's. Its prices are wanted from 7 days before its first posting, or
 before that of a commodity priced in it, to yesterday, for completed days
 only. Only the days missing are asked for, those with no P directive for

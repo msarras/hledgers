@@ -215,11 +215,15 @@ pub struct Target {
 /// from NEAR days before its first posting, or from the first day wanted of
 /// a commodity priced in it if earlier, to its source's last final day. A
 /// commodity is the base currency if its market code is the base
-/// currency's. An error for a malformed `price:` tag, or a repeated one.
+/// currency's, which is guessed from the postings and costs alone, not from
+/// the P directives, so that the prices fetched can not change it. An error
+/// for a malformed `price:` tag, or a repeated one.
 pub fn targets(j: &Journal, today: Day) -> Result<Vec<Target>, String> {
     let tags = price_tags(j)?;
     let code = |c: Sym| market_code(&tags, c);
-    let base = j.base_currency().map(|(s, _)| Sym::from(s));
+    let base = j
+        .base_currency_from_transactions()
+        .map(|(s, _)| Sym::from(s));
     let base_code = base.map(code);
     let is_base = |c: Sym| Some(code(c)) == base_code;
     let mut first: BTreeMap<Sym, Day> = BTreeMap::new();
@@ -610,6 +614,11 @@ mod tests {
 
 P 2026-01-01 usd $1.40
 
+2026-01-01 opening
+    assets:cash        $500
+    assets:bank        $500
+    equity:opening   $-1000
+
 2026-03-01 btc
     assets:crypto      0.001 btc @ 70000 usd
     equity:conversion  -70 usd
@@ -623,7 +632,7 @@ P 2026-01-01 usd $1.40
     assets:cash       $-42
 ";
         // usd, not held, is wanted from btc's start; eth's latest price is in
-        // $, the base currency
+        // $, the base currency, used in more postings and costs than usd
         assert_eq!(
             shown(&journal(text)),
             [
@@ -641,6 +650,41 @@ P 2026-01-01 usd $1.40
                 "eth in $: yahoo ETH or ETH-USD 2026-03-25..2026-11-11",
             ]
         );
+    }
+
+    #[test]
+    fn the_base_currency_is_guessed_from_postings_and_costs_alone() {
+        let text = "commodity $ ; price: CAD
+
+2026-10-01 opening
+    assets:cash      $5000
+    equity:opening  $-5000
+
+2026-10-02 usd
+    assets:usd       1000 usd @ $1.40
+    assets:cash     $-1400
+
+2026-10-05 btc
+    assets:crypto    0.001 btc @ 72000 usd
+    assets:usd        -72 usd
+";
+        let wanted = [
+            "btc in usd: yahoo BTC or BTC-USD 2026-09-28..2026-11-11",
+            "usd in $: yahoo USDCAD=X or USD or USD-CAD 2026-09-25..2026-11-11",
+        ];
+        assert_eq!(shown(&journal(text)), wanted);
+        // P directives mostly priced in usd, as fetching writes them, make usd
+        // hledger's guess, but the targets do not change with them
+        let j = journal(&format!(
+            "{text}
+P 2026-10-06 usd $1.41
+P 2026-10-06 btc 73000 usd
+P 2026-10-07 btc 73100 usd
+P 2026-10-08 btc 73200 usd
+"
+        ));
+        assert_eq!(j.base_currency(), Some(("usd", "usd")));
+        assert_eq!(shown(&j), wanted);
     }
 
     #[test]
