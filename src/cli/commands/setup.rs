@@ -590,15 +590,7 @@ fn try_hledger_args(argss: &[&[&str]]) -> Result<String, String> {
 /// this page containing "current hledger release", fetched over HTTPS with
 /// a 10 second timeout (getLatestHledgerVersionFromHledgerOrg).
 fn latest_hledger_version(url: &str) -> Result<String, String> {
-    let tls = ureq::tls::TlsConfig::builder()
-        .provider(ureq::tls::TlsProvider::Rustls)
-        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls_pure::provider()))
-        .build();
-    let agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
-        .build()
-        .new_agent();
+    let agent = crate::cli::http::agent(std::time::Duration::from_secs(10));
     let mut response = agent
         .get(url)
         .call()
@@ -632,43 +624,24 @@ fn latest_hledger_version(url: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
-    use std::net::TcpListener;
-
-    /// Serve one HTTP response on a local port, giving the page's URL.
-    fn serve_once(status: &'static str, body: &'static str) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
-                line.clear();
-            }
-            let mut stream = stream;
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-        });
-        format!("http://{addr}/install.html")
-    }
+    use crate::cli::http::serve_once;
 
     #[test]
     fn latest_version_from_a_local_server() {
         let page = "<p>x</p>\n<p>The current stable hledger release is <strong>1.52.4</strong>. <!-- for setup command: \"current hledger release\" --></p>\n";
         assert_eq!(
-            latest_hledger_version(&serve_once("200 OK", page)),
+            latest_hledger_version(&format!("{}/install.html", serve_once("200 OK", page))),
             Ok("1.52.4".to_string())
         );
         assert_eq!(
-            latest_hledger_version(&serve_once("200 OK", "no version here\n")),
+            latest_hledger_version(&format!(
+                "{}/install.html",
+                serve_once("200 OK", "no version here\n")
+            )),
             Err("couldn't parse version".to_string())
         );
         assert_eq!(
-            latest_hledger_version(&serve_once("404 Not Found", "")),
+            latest_hledger_version(&format!("{}/install.html", serve_once("404 Not Found", ""))),
             Err("(HTTP failure)".to_string())
         );
     }

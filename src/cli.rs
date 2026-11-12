@@ -8,6 +8,7 @@ pub mod chart;
 pub mod commands;
 pub mod conf;
 pub mod docs;
+pub mod http;
 pub mod io;
 pub mod opts;
 pub mod selftest;
