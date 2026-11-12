@@ -162,7 +162,7 @@ checks the installation, the terminal and the default journal, contacting
 hledger.org over HTTPS (pure Rust TLS: rustls with a
 RustCrypto provider, TLS 1.3 only). Of hledger's
 2420 functional test cases 2414 pass byte-identically, all of them gated,
-with this repo's 94. The other six are listed as by design and not run:
+with this repo's 95. The other six are listed as by design and not run:
 four (`journal/fastpath.test` 6, 9, 11 and 13) check the statistics line of
 hledger's fast-path journal parser, which hledgers does not have, and two
 (`balance/balance.test` 7 and 8) expect a dotted commodity symbol in
@@ -568,7 +568,7 @@ names, and merges them into the files `prices/COMMODITY.prices` as it
 merges a helper's output. With the script, it runs the script, as hledger
 does. Nothing needs declaring for the usual case:
 
-    commodity $ ; price: CAD
+    commodity $ ; price: CAD base
 
     2026-10-01 buy
         assets:broker      10 XIU.TO @ $50
@@ -592,21 +592,23 @@ does. Nothing needs declaring for the usual case:
     wrote DIR/prices/usd.prices (existing 0, added 34)
 
 The commodities fetched are those with a non-zero balance in some asset or
-liability account, other than the base currency (the commodity most used
-in postings and their costs; unlike hledger's guess, it does not count the
-P directives, so that the prices fetched can not change it), and then the
-commodities they are priced in, and so on: btc, priced in usd, brings usd,
-priced in `$`. A commodity is priced in the commodity of its latest price
-in the journal, declared or implied by a cost, or else in the base
-currency; it is the base currency if its market code is the base
-currency's. Its prices are wanted from 7 days before its first posting, or
-before that of a commodity priced in it, to yesterday, for completed days
-only. Only the days missing are asked for, those with no P directive for
-the commodity in its quote in the journal or the price file, and of them
-only runs longer than 7 days or reaching yesterday: a weekend or holiday is
-not asked for again.
+liability account, other than the base currency, and then the commodities
+they are priced in, and so on: btc, priced in usd, brings usd, priced in
+`$`. The base currency is the commodity tagged `CODE base` (below), or else
+the commodity most used in postings and their costs: unlike hledger's
+guess, this one does not count the P directives, so that the prices
+fetched can not change it. Tagging it is recommended, as the guess follows
+the postings: where usd is used more than `$`, usd is the guess. A
+commodity is priced in the commodity of its latest price in the journal,
+declared or implied by a cost, or else in the base currency; it is the
+base currency if its market code is the base currency's. Its prices are
+wanted from 7 days before its first posting, or before that of a commodity
+priced in it, to yesterday, for completed days only. Only the days missing
+are asked for, those with no P directive for the commodity in its quote in
+the journal or the price file, and of them only runs longer than 7 days or
+reaching yesterday: a weekend or holiday is not asked for again.
 
-A commodity's market code is its one-word `price:` tag, or else its ISO
+A commodity's market code is the code of its `price:` tag, or else its ISO
 4217 code or symbol, uppercased (`$` is USD, btc BTC). The Yahoo tickers
 tried, in turn, are the FX pair of two currencies (`USDCAD=X`), the market
 code (`XIU.TO`), and, when the quote is a currency, the pair a
@@ -626,15 +628,19 @@ the tags that settle it:
 
 A `price:` tag on a commodity directive overrides. One word names the
 commodity's market code: `commodity $ ; price: CAD` makes `$` the Canadian
-dollar. Three words, `SOURCE TICKER QUOTE`, name a ticker and the commodity
-its prices are in, used without the checks: `commodity VEQT ; price: yahoo
-VEQT.TO $`. Several three-word tags, separated by commas, are several
-prices to fetch, each in a different commodity: `commodity btc ; price:
-yahoo BTC-USD usd, price: yahoo BTC-CAD $`. The sources are `yahoo`,
-`ecb` and `coinbase`. A malformed tag (two words, more than three, an
+dollar. Two words, `CODE base`, name it too and make the commodity the base
+currency, whatever the guess: `commodity $ ; price: CAD base`. Three words,
+`SOURCE TICKER QUOTE`, name a ticker and the commodity its prices are in,
+used without the checks: `commodity VEQT ; price: yahoo VEQT.TO $`.
+Several three-word tags, separated by commas, are several prices to fetch,
+each in a different commodity: `commodity btc ; price: yahoo BTC-USD usd,
+price: yahoo BTC-CAD $`. The sources are `yahoo`, `ecb` and `coinbase`. A
+malformed tag (two words other than `CODE base`, more than three, an
 unknown source, an `ecb` ticker that is not a pair, a `coinbase` one that
-is not a product id, a second one-word tag, two in the same quote) is an
-error before anything is fetched.
+is not a product id) or a conflicting one (a second tag with a market
+code, two in the same quote, a three-word one on the commodity tagged
+`base`, a second commodity tagged `base`) is an error before anything is
+fetched.
 
 `ecb` fetches the euro reference rates of the European Central Bank, and
 only for a three-word tag: nothing is inferred to it. Its ticker is a pair

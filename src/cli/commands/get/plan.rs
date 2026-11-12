@@ -21,19 +21,22 @@ use crate::model::{Journal, PriceDirective, SourcePos};
 /// far apart a journal price and a fetched one may be to be compared.
 const NEAR: i64 = 7;
 
-/// A commodity's `price:` tag: one word, its market code, or three, the
-/// source and ticker to fetch its prices from and the commodity they are in.
+/// A commodity's `price:` tag: one word, its market code; two, its market
+/// code and `base`, making it the base currency; or three, the source and
+/// ticker to fetch its prices from and the commodity they are in.
 #[derive(Debug, PartialEq)]
 enum PriceTag {
-    Code(String),
+    Code(String, bool),
     Declared(Source, String, Sym),
 }
 
-/// A `price:` tag's value read; an error if it is neither one word nor
-/// three, or names an unknown source or a ticker its source can not have.
+/// A `price:` tag's value read; an error if it is not one word, a word and
+/// `base`, or three words, or names an unknown source or a ticker its
+/// source can not have.
 fn parse_price_tag(commodity: &str, value: &str) -> Result<PriceTag, String> {
     match value.split_whitespace().collect::<Vec<_>>()[..] {
-        [code] => Ok(PriceTag::Code(code.to_string())),
+        [code] => Ok(PriceTag::Code(code.to_string(), false)),
+        [code, "base"] => Ok(PriceTag::Code(code.to_string(), true)),
         [source, ticker, quote] => match Source::parse(source) {
             Some(s) => match s.check_ticker(ticker) {
                 Ok(()) => Ok(PriceTag::Declared(s, ticker.to_string(), Sym::from(quote))),
@@ -50,34 +53,39 @@ fn parse_price_tag(commodity: &str, value: &str) -> Result<PriceTag, String> {
             }
         },
         _ => Err(format!(
-            "commodity {commodity} has a malformed price: tag, \"{value}\": it should be a market code (one word) or SOURCE TICKER QUOTE (three words)"
+            "commodity {commodity} has a malformed price: tag, \"{value}\": it should be a market code (one word), CODE base for the base currency (two words), or SOURCE TICKER QUOTE (three words)"
         )),
     }
 }
 
-/// A commodity's `price:` tags: at most one of one word, and the pairs of
-/// three-word ones, each in a different quote commodity.
+/// A commodity's `price:` tags: at most one with its market code, of one
+/// word or `CODE base`, whether that makes it the base currency, and the
+/// pairs of three-word ones, each in a different quote commodity.
 #[derive(Debug, Default)]
 struct PriceTags {
     code: Option<String>,
+    base: bool,
     pairs: Vec<(Source, String, Sym)>,
 }
 
 /// Each commodity's `price:` tags; an error for a malformed one, a second
-/// one-word one, or a second three-word one in the same quote.
+/// with a market code, a second three-word one in the same quote, a
+/// three-word one on the commodity tagged as the base currency, or a second
+/// commodity tagged so.
 fn price_tags(j: &Journal) -> Result<BTreeMap<Sym, PriceTags>, String> {
     let mut tags: BTreeMap<Sym, PriceTags> = BTreeMap::new();
     for (c, ts) in &j.declared_commodity_tags {
         for (_, v) in ts.iter().filter(|(n, _)| n.eq_ignore_ascii_case("price")) {
             let t = tags.entry(*c).or_default();
             match parse_price_tag(c, v)? {
-                PriceTag::Code(code) => match &t.code {
+                PriceTag::Code(code, base) => match &t.code {
                     Some(old) => {
+                        let base = if t.base { " base" } else { "" };
                         return Err(format!(
-                            "commodity {c} has two one-word price: tags, {old} and {code}: it can have one market code"
+                            "commodity {c} has two price: tags with a market code, {old}{base} and {v}: it can have one"
                         ));
                     }
-                    None => t.code = Some(code),
+                    None => (t.code, t.base) = (Some(code), base),
                 },
                 PriceTag::Declared(s, ticker, q) => {
                     if t.pairs.iter().any(|p| p.2 == q) {
@@ -90,11 +98,23 @@ fn price_tags(j: &Journal) -> Result<BTreeMap<Sym, PriceTags>, String> {
             }
         }
     }
+    if let Some((c, _)) = tags.iter().find(|(_, t)| t.base && !t.pairs.is_empty()) {
+        return Err(format!(
+            "commodity {c} has a price: tag with base and a three-word one: the base currency is not fetched"
+        ));
+    }
+    let mut bases = tags.iter().filter(|(_, t)| t.base).map(|(c, _)| c);
+    if let (Some(a), Some(b)) = (bases.next(), bases.next()) {
+        return Err(format!(
+            "commodities {a} and {b} both have a price: tag with base: the journal can have one base currency"
+        ));
+    }
     Ok(tags)
 }
 
-/// A commodity's market code: its one-word `price:` tag, else its ISO 4217
-/// code or symbol, uppercased (`$` is USD, `btc` BTC).
+/// A commodity's market code: its `price:` tag's, of one word or `CODE
+/// base`, else its ISO 4217 code or symbol, uppercased (`$` is USD, `btc`
+/// BTC).
 fn market_code(tags: &BTreeMap<Sym, PriceTags>, c: Sym) -> String {
     let code = tags.get(&c).and_then(|t| t.code.clone());
     code.unwrap_or_else(|| to_currency_code(&c).to_uppercase())
@@ -146,7 +166,8 @@ pub struct Inferred {
     pub pair: bool,
     /// The quote's market code, the currency Yahoo must quote a ticker in.
     pub quote_code: String,
-    /// Whether that code is the quote's one-word `price:` tag.
+    /// Whether that code is the quote's `price:` tag's, of one word or
+    /// `CODE base`.
     pub quote_tagged: bool,
 }
 
@@ -215,15 +236,17 @@ pub struct Target {
 /// from NEAR days before its first posting, or from the first day wanted of
 /// a commodity priced in it if earlier, to its source's last final day. A
 /// commodity is the base currency if its market code is the base
-/// currency's, which is guessed from the postings and costs alone, not from
-/// the P directives, so that the prices fetched can not change it. An error
-/// for a malformed `price:` tag, or a repeated one.
+/// currency's: the commodity whose `price:` tag is `CODE base`, or else one
+/// guessed from the postings and costs alone, not from the P directives, so
+/// that the prices fetched can not change it. An error for a `price:` tag
+/// that `price_tags` refuses.
 pub fn targets(j: &Journal, today: Day) -> Result<Vec<Target>, String> {
     let tags = price_tags(j)?;
     let code = |c: Sym| market_code(&tags, c);
-    let base = j
-        .base_currency_from_transactions()
-        .map(|(s, _)| Sym::from(s));
+    let base = (tags.iter().find(|(_, t)| t.base).map(|(c, _)| *c)).or_else(|| {
+        j.base_currency_from_transactions()
+            .map(|(s, _)| Sym::from(s))
+    });
     let base_code = base.map(code);
     let is_base = |c: Sym| Some(code(c)) == base_code;
     let mut first: BTreeMap<Sym, Day> = BTreeMap::new();
@@ -736,8 +759,9 @@ commodity usd ; price: ecb usd-cad $
         };
         assert_eq!(
             err("yahoo X.TO"),
-            "commodity X has a malformed price: tag, \"yahoo X.TO\": it should be a market code (one word) or SOURCE TICKER QUOTE (three words)"
+            "commodity X has a malformed price: tag, \"yahoo X.TO\": it should be a market code (one word), CODE base for the base currency (two words), or SOURCE TICKER QUOTE (three words)"
         );
+        assert!(err("CAD Base").contains("malformed"));
         assert!(err("yahoo X.TO $ now").contains("malformed"));
         assert_eq!(
             err("bloomberg X.TO $"),
@@ -754,15 +778,79 @@ commodity usd ; price: ecb usd-cad $
         );
         assert_eq!(
             err("CAD, price: USD"),
-            "commodity X has two one-word price: tags, CAD and USD: it can have one market code"
+            "commodity X has two price: tags with a market code, CAD and USD: it can have one"
+        );
+        // CODE base is a market code too
+        assert_eq!(
+            err("CAD base, price: USD"),
+            "commodity X has two price: tags with a market code, CAD base and USD: it can have one"
         );
         assert_eq!(
             err("yahoo X.TO $, price: yahoo X.V $"),
             "commodity X has two price: tags with prices in $: it can have one for each commodity"
         );
+        // the base currency is not fetched, and there is one
+        assert_eq!(
+            err("CAD base, price: yahoo X.TO $"),
+            "commodity X has a price: tag with base and a three-word one: the base currency is not fetched"
+        );
+        let two = "commodity X ; price: CAD base\ncommodity Y ; price: USD base\n";
+        assert_eq!(
+            targets(&journal(two), day(11, 12)).unwrap_err(),
+            "commodities X and Y both have a price: tag with base: the journal can have one base currency"
+        );
         assert_eq!(
             parse_price_tag("$", "CAD"),
-            Ok(PriceTag::Code("CAD".to_string()))
+            Ok(PriceTag::Code("CAD".to_string(), false))
+        );
+        assert_eq!(
+            parse_price_tag("$", "CAD base"),
+            Ok(PriceTag::Code("CAD".to_string(), true))
+        );
+    }
+
+    #[test]
+    fn a_price_tag_with_base_pins_the_base_currency() {
+        let text = "commodity $ ; price: CAD base
+
+2026-10-02 usd
+    assets:usd       1000 usd @ $1.40
+    assets:cash     $-1400
+
+2026-10-05 btc
+    assets:crypto    0.001 btc @ 72000 usd
+    assets:usd        -72 usd
+
+2026-10-06 eth
+    assets:crypto    0.01 eth @ 3000 usd
+    assets:usd        -30 usd
+";
+        // usd is used more than $, and so the guess, but $, CAD by its tag,
+        // is the base currency: it is not fetched, and usd is priced in it
+        let j = journal(text);
+        assert_eq!(j.base_currency_from_transactions(), Some(("usd", "usd")));
+        let ts = targets(&j, day(11, 12)).unwrap();
+        assert_eq!(
+            ts.iter().map(show).collect::<Vec<_>>(),
+            [
+                "btc in usd: yahoo BTC or BTC-USD 2026-09-28..2026-11-11",
+                "eth in usd: yahoo ETH or ETH-USD 2026-09-29..2026-11-11",
+                "usd in $: yahoo USDCAD=X or USD or USD-CAD 2026-09-25..2026-11-11",
+            ]
+        );
+        // $'s market code is its tag's, as with one word
+        let tagged: Vec<bool> = (ts.iter())
+            .map(|t| matches!(&t.lookup, Lookup::Inferred(inf) if inf.quote_tagged))
+            .collect();
+        assert_eq!(tagged, [false, false, true]);
+        // with one word, the guess stands: usd is the base, and $ is priced in it
+        assert_eq!(
+            shown(&journal(&text.replace("CAD base", "CAD"))),
+            [
+                "$ in usd: yahoo CADUSD=X or CAD or CAD-USD 2026-09-25..2026-11-11",
+                "btc in usd: yahoo BTC or BTC-USD 2026-09-28..2026-11-11",
+                "eth in usd: yahoo ETH or ETH-USD 2026-09-29..2026-11-11",
+            ]
         );
     }
 

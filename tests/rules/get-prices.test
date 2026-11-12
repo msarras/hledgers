@@ -127,7 +127,7 @@ commodity VEQT.TO ; price: yahoo VEQT.TO
     assets:cash      $-450
 
 $ D=$(mktemp -d) && cd $D && hledger -f - get --prices --dry-run 2>&1; s=$?; cd /; rm -rf $D; exit $s
-hledger: Error: commodity VEQT.TO has a malformed price: tag, "yahoo VEQT.TO": it should be a market code (one word) or SOURCE TICKER QUOTE (three words)
+hledger: Error: commodity VEQT.TO has a malformed price: tag, "yahoo VEQT.TO": it should be a market code (one word), CODE base for the base currency (two words), or SOURCE TICKER QUOTE (three words)
 >=1
 
 # ** 7. A price: tag naming the ecb source fetches the euro reference rates
@@ -180,5 +180,32 @@ no ./data/getdata script, skipping data fetch
 would run: coinbase BTC-USD 2025-05-27..2026-03-22 >./prices/btc.prices
 would run: coinbase BTC-USD 2026-03-23..2026-11-11 >./prices/btc.prices
 would run: yahoo USDCAD=X or USD or USD-CAD 2025-05-26..2026-11-11 >./prices/usd.prices
+no new transactions found in new.j
+>=0
+
+# ** 9. A price: tag of two words, CODE base, gives the commodity's market
+# code and makes it the base currency, whatever the guess: here usd is used
+# more than $, but $, CAD, is the base currency, so it is not fetched, and
+# usd is priced in it.
+<
+commodity $ ; price: CAD base
+
+2026-10-02 usd
+    assets:usd       1000 usd @ $1.40
+    assets:cash     $-1400
+
+2026-10-05 btc
+    assets:crypto    0.001 btc @ 72000 usd
+    assets:usd        -72 usd
+
+2026-10-06 eth
+    assets:crypto    0.01 eth @ 3000 usd
+    assets:usd        -30 usd
+
+$ D=$(mktemp -d) && cd $D && touch new.j && hledger -f - import --get --dry-run --today 2026-11-12 new.j 2>&1; s=$?; cd /; rm -rf $D; exit $s
+no ./data/getdata script, skipping data fetch
+would run: yahoo BTC or BTC-USD 2026-09-28..2026-11-11 >./prices/btc.prices
+would run: yahoo ETH or ETH-USD 2026-09-29..2026-11-11 >./prices/eth.prices
+would run: yahoo USDCAD=X or USD or USD-CAD 2026-09-25..2026-11-11 >./prices/usd.prices
 no new transactions found in new.j
 >=0
