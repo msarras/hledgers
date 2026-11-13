@@ -1689,6 +1689,18 @@ pub type Scope = Option<usize>;
 /// field they name, given the fields whose values are being worked out.
 type Lookup<'a> = dyn FnMut(&str, &mut Vec<String>) -> Result<String, String> + 'a;
 
+/// What stands among the fields whose values are being worked out while
+/// split's first argument is: an amount, though no field's.
+const SPLIT_AMOUNT: &str = "split's amount";
+
+/// Whether a value being worked out goes into an amount: one of the fields
+/// being worked out, from the one asked for to the one that names it, is an
+/// amount or balance field (`amount`, `amount2-in`, `balance1`...), or it is
+/// in split's first argument.
+fn for_an_amount(seen: &[String]) -> bool {
+    (seen.iter()).any(|f| f == SPLIT_AMOUNT || f.starts_with("amount") || f.starts_with("balance"))
+}
+
 impl CsvRules {
     /// A directive's value, the last one if it is written more than once
     /// (getDirective).
@@ -1775,7 +1787,9 @@ impl CsvRules {
     /// assignment's expressions, the field's own name gives its value from
     /// its previous assignment, and another name that let's or hledger
     /// field's final value; both are empty if there is none. A let's value
-    /// that is an amount expression is put in parentheses. An error comes
+    /// that is an amount expression is put in parentheses where it goes into
+    /// an amount (see [`for_an_amount`]), and is as it is anywhere else, so
+    /// that a let can hold text such as `expenses:co-op`. An error comes
     /// from a template function (split) that can not make a value.
     pub fn field_value(&self, record: &[CsvRecord], f: &str) -> Result<Option<String>, String> {
         self.field_value_seen(record, f, &mut Vec::new())
@@ -1872,7 +1886,18 @@ impl CsvRules {
             Expr::Call(name, args) => {
                 let args = args
                     .iter()
-                    .map(|a| self.eval(scope, record, a, lookup, seen))
+                    .enumerate()
+                    .map(|(i, a)| {
+                        let amount = name == "split" && i == 0;
+                        if amount {
+                            seen.push(SPLIT_AMOUNT.to_string());
+                        }
+                        let v = self.eval(scope, record, a, lookup, seen);
+                        if amount {
+                            seen.pop();
+                        }
+                        v
+                    })
                     .collect::<Result<Vec<String>, String>>()?;
                 if name == "split" {
                     return self.split(record, &args, seen);
@@ -1883,7 +1908,7 @@ impl CsvRules {
             Expr::HledgerField(name) => {
                 let key = self.name_key(name);
                 let v = strip(&lookup(&key, seen)?).to_string();
-                if key.starts_with("let:") && is_amount_expression(&v) {
+                if key.starts_with("let:") && is_amount_expression(&v) && for_an_amount(seen) {
                     format!("({v})")
                 } else {
                     v
@@ -2854,10 +2879,40 @@ pub(crate) mod tests {
             split("%{split(%a, 2, 1)}", &["x"]),
             Err("split's first argument \"x\" is not an amount".into())
         );
-        // a let's expression value is substituted in parentheses
+        // a let's expression value is substituted in parentheses where it
+        // goes into an amount: an amount field's value, through any number
+        // of lets
+        let amount = |assignments: Vec<FieldAssignment>, fields: &[&str]| {
+            let r2 = CsvRules::new(Vec::new(), r.field_indexes.clone(), assignments, vec![]);
+            r2.field_value(&rec(fields), "amount1").map(Option::unwrap)
+        };
+        let lets = vec![fa("let:x", "%a + 1"), fa("amount1", "%{x} * 2")];
+        assert_eq!(amount(lets, &["2"]), Ok("(2 + 1) * 2".into()));
+        let lets = vec![fa("let:x", "%a"), fa("amount1", "%{x} * 2")];
+        assert_eq!(amount(lets, &["-2"]), Ok("-2 * 2".into()));
+        let lets = vec![
+            fa("let:x", "%a + 1"),
+            fa("let:y", "%{x} * 2"),
+            fa("amount1", "-%{y}"),
+        ];
+        assert_eq!(amount(lets, &["2"]), Ok("-((2 + 1) * 2)".into()));
+        // or split's first argument, whatever field split is in: half of
+        // (2 + 1) * 2, not of 2 + 1 * 2
+        let lets = vec![
+            fa("let:x", "%a + 1"),
+            fa("let:y", "%{x} * 2"),
+            fa("comment", "%{split(y, 2, 1)}"),
+        ];
+        assert_eq!(value(lets, &["2"]), Ok("3".into()));
+        // anywhere else it is as it is, so that a let can hold text with an
+        // operator's character in it, through any number of lets
         let lets = vec![fa("let:x", "%a + 1"), fa("comment", "%{x} * 2")];
-        assert_eq!(value(lets, &["2"]), Ok("(2 + 1) * 2".into()));
-        let lets = vec![fa("let:x", "%a"), fa("comment", "%{x} * 2")];
-        assert_eq!(value(lets, &["-2"]), Ok("-2 * 2".into()));
+        assert_eq!(value(lets, &["2"]), Ok("2 + 1 * 2".into()));
+        let lets = vec![
+            fa("let:d", "%a"),
+            fa("let:d", "%{replace(d, \"^POS \", \"\")}"),
+            fa("comment", "at %{d}"),
+        ];
+        assert_eq!(value(lets, &["POS CO-OP 24/7"]), Ok("at CO-OP 24/7".into()));
     }
 }

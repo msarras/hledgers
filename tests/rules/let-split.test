@@ -489,3 +489,36 @@ $ ./csvtest.sh
     expenses:joint                                40.00
 
 >=0
+
+# ** 20. A let can hold text with -, + or / in it. The parentheses around a
+# let's amount expression are only for a let that goes into an amount, so a
+# description, an account name or a date held in a let comes out as written,
+# through any number of lets.
+<
+2026-11-12,E-TRANSFER FROM ALICE,500.00
+2026-11-13,POS CO-OP 24/7 #12,-7.25
+RULES
+fields date, description, amount
+let when %date
+let desc %description
+let desc %{replace(desc, " #[0-9]+$", "")}
+let category income:e-transfers
+if %description ^POS
+  let desc %{replace(desc, "^POS ", "")}
+  let category expenses:co-op
+description %{desc}
+comment seen %{when}
+account1 assets:checking
+amount1 %amount
+account2 %{category}
+
+$ ./csvtest.sh
+2026-11-12 E-TRANSFER FROM ALICE  ; seen 2026-11-12
+    assets:checking                              500.00
+    income:e-transfers                          -500.00
+
+2026-11-13 CO-OP 24/7  ; seen 2026-11-13
+    assets:checking                               -7.25
+    expenses:co-op                                 7.25
+
+>=0

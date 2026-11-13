@@ -162,7 +162,7 @@ checks the installation, the terminal and the default journal, contacting
 hledger.org over HTTPS (pure Rust TLS: rustls with a
 RustCrypto provider, TLS 1.3 only). Of hledger's
 2420 functional test cases 2414 pass byte-identically, all of them gated,
-with this repo's 95. The other six are listed as by design and not run:
+with this repo's 96. The other six are listed as by design and not run:
 four (`journal/fastpath.test` 6, 9, 11 and 13) check the statistics line of
 hledger's fast-path journal parser, which hledgers does not have, and two
 (`balance/balance.test` 7 and 8) expect a dotted commodity symbol in
@@ -348,8 +348,12 @@ function's arguments; a let's value can use other lets and hledger fields
 value. A name is a lowercase letter, then lowercase letters, digits and
 underscores, and may not be a hledger field's name (`amount1`, `skip`...) or a
 template function's (`split`...). A let can be used before it is declared. A
-value that is an amount expression is substituted in parentheses, so with
-`let sum %a + %b`, `amount1 %{sum} * 2` doubles the sum.
+value that is an amount expression is substituted in parentheses where it
+goes into an amount (the value of an amount or balance field, through any
+number of lets, or split's first argument), so with `let sum %a + %b`,
+`amount1 %{sum} * 2` doubles the sum. Anywhere else it is substituted as it
+is, so a let can hold text with `-`, `+`, `*` or `/` in it, such as
+`expenses:co-op`, a description or a date.
 
 **`%{split(VALUE, WEIGHTS, I)}`** gives part `I` (from 1) of the amount
 `VALUE` split in proportion to `WEIGHTS`: a number of equal parts (`3`), or
