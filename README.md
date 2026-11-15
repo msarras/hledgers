@@ -19,7 +19,7 @@ cognitive load. It also meant that identifying discrepancies was difficult for
 me because I also had to keep track of automated transaction rules and maintain
 a growing list of exceptions, all of which are specified in a journal file
 separate from a `.rules` file. I guess I could have maintained auxiliary scripts
-for parsing but then I would need to just that: maintain them.  Why not just
+for parsing but then I would need to do just that: maintain them.  Why not just
 build on the already simple and powerful framework of `import` to do everything
 I need? hledger also starts getting slow for journals spanning multiple years
 which meant that I also had to reconcile automated transactions at year-end and
@@ -58,10 +58,10 @@ conversion, lot tracking, the listing commands, the balance reports, the
 register reports and holdings, with all their output formats, the CSV,
 timeclock and timedot readers, the import command, and the command-line
 interface (help, config files, command aliases, add-ons, translations,
-`run` and `repl`, `add`, `get`, `setup`) are complete. `hledgers` reads journal files with every directive,
-include globs, amount expressions, costs, balance assertions and
-assignments, auto postings and periodic transactions, and this repo's
-unquoted dotted commodity symbols (below); it balances and
+`run` and `repl`, `add`, `get`, `setup`). `hledgers` reads journal files
+with every directive, include globs, amount expressions, costs, balance
+assertions and assignments, auto postings and periodic transactions, and
+this repo's unquoted dotted commodity symbols (below); it balances and
 checks entries as hledger 1.99 does and prints the same error messages; it
 converts amounts to cost and values them with declared, inferred and
 commodity alias prices (`-B`, `-V`, `-X`, `--value`,
