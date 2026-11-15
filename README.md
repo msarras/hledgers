@@ -288,12 +288,12 @@ on the empty journal:
 
 | transactions | `balance` | `register` | `is` | `bs` | `roi` |
 |---|---:|---:|---:|---:|---:|
-| 0 | 31.2 ms / 6.3 ms (5.0x) | 30.7 ms / 6.0 ms (5.1x) | 31.7 ms / 6.5 ms (4.9x) | 31.6 ms / 6.5 ms (4.9x) | n/a |
-| 100 | 56.3 ms / 10.1 ms (5.6x) | 79.6 ms / 12.9 ms (6.2x) | 56.3 ms / 10.3 ms (5.5x) | 56.5 ms / 10.3 ms (5.5x) | 55.7 ms / 10.6 ms (5.3x) |
-| 1,000 | 170.0 ms / 31.7 ms (5.4x) | 524.5 ms / 67.9 ms (7.7x) | 168.3 ms / 31.5 ms (5.3x) | 168.1 ms / 32.7 ms (5.1x) | 207.4 ms / 32.3 ms (6.4x) |
-| 100,000 | 8.822 s / 1.527 s (5.8x) | 21.828 s / 3.241 s (6.7x) | 8.686 s / 1.480 s (5.9x) | 8.526 s / 1.382 s (6.2x) | 81.158 s / 1.530 s (53.0x) |
+| 0 | 31.1 ms / 6.3 ms (5.0x) | 30.1 ms / 6.0 ms (5.0x) | 31.6 ms / 6.6 ms (4.8x) | 31.5 ms / 6.5 ms (4.8x) | n/a |
+| 100 | 57.8 ms / 10.6 ms (5.4x) | 78.7 ms / 12.8 ms (6.2x) | 55.7 ms / 10.3 ms (5.4x) | 55.4 ms / 10.3 ms (5.4x) | 55.3 ms / 10.3 ms (5.4x) |
+| 1,000 | 168.1 ms / 31.7 ms (5.3x) | 515.2 ms / 67.5 ms (7.6x) | 167.3 ms / 31.6 ms (5.3x) | 165.9 ms / 32.8 ms (5.1x) | 204.7 ms / 32.5 ms (6.3x) |
+| 100,000 | 7.546 s / 1.468 s (5.1x) | 18.851 s / 3.030 s (6.2x) | 7.653 s / 1.445 s (5.3x) | 8.306 s / 1.544 s (5.4x) | 69.684 s / 1.373 s (50.8x) |
 
-A run on an empty journal takes hledgers about 6 ms and hledger 29 ms; of
+A run on an empty journal takes hledgers about 6 ms and hledger 31 ms; of
 those 6 ms, about 2 ms is what starting any program takes on this machine
 (`/bin/true` takes 2.0 ms), and much of the rest is the kernel loading the
 17 MB binary and mapping its pages in.
@@ -305,13 +305,13 @@ alternating runs:
 
 | command | hledger 1.99 | hledgers | speedup | peak RSS hledger | peak RSS hledgers |
 |---|---:|---:|---:|---:|---:|
-| `stats` | 6.759 s | 1.191 s | 5.7x | 563 MB | 294 MB |
-| `balance` | 7.260 s | 1.141 s | 6.4x | 567 MB | 295 MB |
-| `print` | 12.394 s | 1.486 s | 8.3x | 565 MB | 294 MB |
-| `register` | 43.097 s | 7.481 s | 5.8x | 641 MB | 1274 MB |
-| `bal -M` | 125.908 s | 16.697 s | 7.5x | 3688 MB | 3619 MB |
-| `reg -w 120` | 48.336 s | 8.332 s | 5.8x | 643 MB | 1491 MB |
-| `print -O json` | 40.566 s | 8.008 s | 5.1x | 1424 MB | 501 MB |
+| `stats` | 6.749 s | 1.089 s | 6.2x | 563 MB | 294 MB |
+| `balance` | 7.128 s | 1.157 s | 6.2x | 567 MB | 295 MB |
+| `print` | 9.319 s | 1.354 s | 6.9x | 565 MB | 295 MB |
+| `register` | 36.872 s | 6.067 s | 6.1x | 641 MB | 1267 MB |
+| `bal -M` | 113.831 s | 14.195 s | 8.0x | 3688 MB | 3618 MB |
+| `reg -w 120` | 41.461 s | 7.083 s | 5.9x | 641 MB | 1495 MB |
+| `print -O json` | 36.156 s | 6.735 s | 5.4x | 1424 MB | 502 MB |
 
 The machine is a Xen virtual machine with 16 cores of an Intel Xeon
 E5-2690 v2 (3.0 GHz) and 16 GB of memory, running Debian with Linux 6.12;
